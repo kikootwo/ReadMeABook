@@ -273,7 +273,8 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         completed: true,
         message: outcome === 'next_release' ? 'Download failed, searching for another release'
           : outcome === 'stale' ? 'Download failed (not the request\'s current download, request unchanged)'
-            : 'Download failed',
+            : outcome === 'already_handled' ? 'Download failed (already handled by an earlier run, request unchanged)'
+              : 'Download failed',
         requestId,
         progress: progressPercent,
       };

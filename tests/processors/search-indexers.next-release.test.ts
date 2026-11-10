@@ -41,12 +41,12 @@ const searchAnswers = (results: unknown[], failedQueries = 0) => {
   });
 };
 
-const run = (clientFailures?: number) => processSearchIndexers({
+const run = (clientFailures?: number, attempt?: { attemptsMade: number; attempts: number }) => processSearchIndexers({
   requestId: 'req-1',
   audiobook: { id: 'book-1', title: 'Book', author: 'Author' },
   jobId: 'job-1',
   ...(clientFailures !== undefined && { clientFailures }),
-});
+}, attempt);
 
 const lastWrite = () => prismaMock.request.updateMany.mock.calls.at(-1)?.[0].data;
 
@@ -130,6 +130,46 @@ describe('processSearchIndexers and the next release after a client failure (#33
 
     expect(lastWrite()).toEqual(expect.objectContaining({ status: 'awaiting_search' }));
     expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  describe('the search for the next release throws (it ends the chain failed)', () => {
+    const noIndexers = () => configMock.get.mockResolvedValue(null);
+    const CLOSING = 'Download failed: the search for another release did not finish';
+
+    it('on Bull\'s last attempt: one closing notification', async () => {
+      noIndexers();
+
+      await expect(run(1, { attemptsMade: 2, attempts: 3 })).rejects.toThrow('No indexers configured');
+
+      expect(lastWrite()).toEqual(expect.objectContaining({ status: 'failed' }));
+      expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
+      expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith('request_error', 'req-1', 'Book', 'Author', 'user', CLOSING);
+    });
+
+    it('with a retry still to come: no notification yet', async () => {
+      noIndexers();
+
+      await expect(run(1, { attemptsMade: 0, attempts: 3 })).rejects.toThrow('No indexers configured');
+
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 0])('outside a chain (count %s): no notification, as before', async (count) => {
+      noIndexers();
+
+      await expect(run(count, { attemptsMade: 2, attempts: 3 })).rejects.toThrow('No indexers configured');
+
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+    });
+
+    it('a cancel that landed meanwhile: no notification', async () => {
+      noIndexers();
+      prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+
+      await expect(run(1, { attemptsMade: 2, attempts: 3 })).rejects.toThrow('No indexers configured');
+
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+    });
   });
 
   it('a cancel that lands during the search: nothing written over it, no notification', async () => {

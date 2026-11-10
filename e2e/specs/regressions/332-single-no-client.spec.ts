@@ -8,7 +8,7 @@
  * 2. martian: the qBittorrent client is deleted while the download runs. The monitor fails the
  *    request "No qbittorrent client configured" (Bull retries may notify more than once), nothing is
  *    blocked, nothing else is grabbed.
- * 3. artemis: no client at all. The search filters every result out by protocol, so the request
+ * 3. artemis: no client at all (the test deletes both itself). The search filters every result out by protocol, so the request
  *    waits in awaiting_search; nothing is grabbed or blocked.
  * Both clients are put back in afterAll (new ids; this spec runs on its own stack).
  */
@@ -84,9 +84,12 @@ test('#332: deleting the download client mid-download fails the request with the
 
 test('#332: with no download client at all nothing is grabbed or blocked', async () => {
   const rmab = await Rmab.loginAdmin();
-  const del = await rmab.raw('DELETE', '/api/admin/settings/download-clients/e2e-sab');
-  expect(del.status).toBe(200);
-  deleted.push('e2e-sab');
+  // Both clients, so the test stands on its own (an earlier test may already have deleted one)
+  for (const clientId of ['e2e-qbit', 'e2e-sab']) {
+    const del = await rmab.raw('DELETE', `/api/admin/settings/download-clients/${clientId}`);
+    expect([200, 404], `delete ${clientId}`).toContain(del.status);
+    if (del.status === 200 && !deleted.includes(clientId)) deleted.push(clientId);
+  }
   await loadScenario({
     name: '332-no-client',
     indexers: [{ id: 1, name: 'E2E Torrents', protocol: 'torrent' }, { id: 2, name: 'E2E Usenet', protocol: 'usenet' }],

@@ -15,7 +15,7 @@ vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => j
 
 import type { ClientFailureInput } from '@/lib/processors/client-failure';
 
-const { MAX_CLIENT_FAILURES, handleClientReportedFailure, isReleaseFault, nextReleaseSearchJobId } =
+const { MAX_CLIENT_FAILURES, handleClientReportedFailure, isReleaseFault, nextReleaseSearchJobId, requesterFailureReason } =
   await import('@/lib/processors/client-failure');
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as ClientFailureInput['logger'];
@@ -74,8 +74,42 @@ describe('isReleaseFault', () => {
     ['nzbget', 'DELETED/MANUAL | Delete: MANUAL', false],
     ['nzbget', 'FAILURE/MOVE', false],
     ['nzbget', 'FAILURE/UNPACK | Unpack: SPACE', false],
+    // Permissions on SMB/NFS mounts (EPERM), quotas (EDQUOT), a dropped Windows share, file handles
+    ['transmission', 'Operation not permitted (/downloads/Book)', false],
+    ['deluge', '[Errno 1] EPERM: operation not permitted', false],
+    ['transmission', 'Disk quota exceeded', false],
+    ['deluge', 'OSError: [Errno 122] EDQUOT', false],
+    ['deluge', 'The network path was not found.', false],
+    ['deluge', 'The specified network name is no longer available.', false],
+    ['transmission', 'Too many open files', false],
+    // Codes match as whole words only
+    ['sabnzbd', 'Sleepermagic release incomplete', true],
   ])('%s "%s" -> release fault %s', (clientType, text, expected) => {
     expect(isReleaseFault(clientType, text)).toBe(expected);
+  });
+});
+
+describe('requesterFailureReason', () => {
+  it.each([
+    ['transmission', 'No space left on device', 'disk full'],
+    ['transmission', 'Disk quota exceeded', 'disk full'],
+    ['deluge', 'Error: Permission denied', 'no permission'],
+    ['transmission', 'Operation not permitted (/downloads/Book)', 'no permission'],
+    ['transmission', 'No such file or directory (/mnt/media/Book)', 'files missing'],
+    ['qbittorrent', 'qBittorrent reports the files are missing (missingFiles)', 'files missing'],
+    ['deluge', 'The network path was not found.', 'storage unavailable'],
+    ['transmission', 'Too many open files', 'too many open files'],
+    ['sabnzbd', 'Failed moving /incomplete/Parade to /complete/Parade', 'files not moved'],
+    ['nzbget', 'DELETED/MANUAL | Delete: MANUAL', 'deleted in the client'],
+    ['nzbget', 'FAILURE/MOVE', 'files not moved'],
+    ['sabnzbd', 'Repair failed, not enough repair blocks (12 short)', 'par2'],
+    ['nzbget', 'DELETED/HEALTH | Delete: HEALTH | 812 failed articles (61%)', 'missing articles'],
+    ['sabnzbd', 'Unpacking failed, archive requires a password', 'unpack'],
+    ['qbittorrent', 'qBittorrent reported an error', 'torrent error'],
+    ['sabnzbd', 'Out of retention', null],
+    ['qbittorrent', null, null],
+  ])('%s "%s" -> %s', (clientType, text, expected) => {
+    expect(requesterFailureReason(clientType, text)).toBe(expected);
   });
 });
 
@@ -100,7 +134,7 @@ describe('handleClientReportedFailure', () => {
     expect(requestWrites()).toEqual([expect.objectContaining({ status: 'searching', progress: 0, errorMessage: null })]);
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({
       where: { id: 'dh-1' },
-      data: { downloadStatus: 'failed', downloadError: 'Download failed in SABnzbd (Out of retention)' },
+      data: { downloadStatus: 'failed', downloadError: 'Download failed in SABnzbd' },
     });
     expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({ source: 'download_fail', releaseHash: 'nzb-1', reasonDetail: 'Out of retention' }),
@@ -110,7 +144,7 @@ describe('handleClientReportedFailure', () => {
       { id: 'book-1', title: 'Book', author: 'Author', asin: 'B00TEST' },
       { clientFailures: 1, jobId: 'next-release-dh-1' }
     );
-    expect(notifications()).toEqual(['Download failed in SABnzbd (Out of retention). Trying another release (attempt 2 of 3).']);
+    expect(notifications()).toEqual(['Download failed in SABnzbd. Trying another release (attempt 2 of 3).']);
     // The block exists before the search runs, and the history row is failed before it
     const blockOrder = prismaMock.blockedRelease.upsert.mock.invocationCallOrder[0];
     const historyOrder = prismaMock.downloadHistory.update.mock.invocationCallOrder[0];
@@ -129,7 +163,7 @@ describe('handleClientReportedFailure', () => {
   it(`automatic grab, failure ${MAX_CLIENT_FAILURES} in a row: blocks and fails the request, no search`, async () => {
     await expect(handleClientReportedFailure(input({ clientFailures: 2 }))).resolves.toBe('failed');
 
-    const message = '3 releases in a row failed in the download client; last: Download failed in SABnzbd (Out of retention)';
+    const message = '3 releases in a row failed in the download client; last: Download failed in SABnzbd';
     expect(requestWrites()).toEqual([expect.objectContaining({ status: 'failed', errorMessage: message })]);
     expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledTimes(1);
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
@@ -139,10 +173,10 @@ describe('handleClientReportedFailure', () => {
   it('hand-picked grab (no count): blocks and fails as before, never moves on', async () => {
     await expect(handleClientReportedFailure(input({ clientFailures: undefined }))).resolves.toBe('failed');
 
-    expect(requestWrites()).toEqual([expect.objectContaining({ status: 'failed', errorMessage: 'Download failed in SABnzbd (Out of retention)' })]);
+    expect(requestWrites()).toEqual([expect.objectContaining({ status: 'failed', errorMessage: 'Download failed in SABnzbd' })]);
     expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledTimes(1);
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
-    expect(notifications()).toEqual(['Download failed in SABnzbd (Out of retention)']);
+    expect(notifications()).toEqual(['Download failed in SABnzbd']);
   });
 
   it.each([
@@ -155,7 +189,7 @@ describe('handleClientReportedFailure', () => {
 
     expect(result).toBe('failed');
     expect(requestWrites()).toEqual([expect.objectContaining({ status: 'failed' })]);
-    expect(requestWrites()[0].errorMessage).toMatch(/^Download failed in Transmission \(No space left on device\): .*not the release.*not blocked/);
+    expect(requestWrites()[0].errorMessage).toMatch(/^Download failed in Transmission \(disk full\): .*not the release.*not blocked/);
     expect(prismaMock.blockedRelease.upsert).not.toHaveBeenCalled();
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     expect(notifications()).toEqual([requestWrites()[0].errorMessage]);
@@ -163,6 +197,7 @@ describe('handleClientReportedFailure', () => {
 
   it('a cancel or delete at the guarded write wins: no history write, no block, no search, no notification', async () => {
     prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.request.findUnique.mockResolvedValue({ status: 'cancelled', deletedAt: null });
 
     await expect(handleClientReportedFailure(input())).resolves.toBe('stopped');
 
@@ -179,10 +214,10 @@ describe('handleClientReportedFailure', () => {
 
     expect(requestWrites()).toEqual([
       expect.objectContaining({ status: 'searching' }),
-      expect.objectContaining({ status: 'failed', errorMessage: 'Download failed in SABnzbd (Out of retention)' }),
+      expect.objectContaining({ status: 'failed', errorMessage: 'Download failed in SABnzbd' }),
     ]);
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
-    expect(notifications()).toEqual(['Download failed in SABnzbd (Out of retention)']);
+    expect(notifications()).toEqual(['Download failed in SABnzbd']);
   });
 
   it('moves on only when the block was written: a download with no release name fails as before', async () => {
@@ -235,9 +270,9 @@ describe('handleClientReportedFailure', () => {
 
     expect(requestWrites()).toEqual([
       expect.objectContaining({ status: 'searching' }),
-      expect.objectContaining({ status: 'failed', errorMessage: 'Download failed in SABnzbd (Out of retention)' }),
+      expect.objectContaining({ status: 'failed', errorMessage: 'Download failed in SABnzbd' }),
     ]);
-    expect(notifications()).toEqual(['Download failed in SABnzbd (Out of retention)']);
+    expect(notifications()).toEqual(['Download failed in SABnzbd']);
   });
 
   it('a second run of the same failure asks for the same Bull job id (the queue ignores the duplicate)', async () => {
@@ -248,9 +283,28 @@ describe('handleClientReportedFailure', () => {
     expect(jobIds).toEqual([nextReleaseSearchJobId('dh-1'), nextReleaseSearchJobId('dh-1')]);
   });
 
-  it('caps the client text kept in the message at 200 characters', async () => {
-    await handleClientReportedFailure(input({ clientFailures: undefined, clientError: 'x'.repeat(500) }));
+  it.each([
+    ['automatic, moves on', 0, 'deluge', 'torrent has no valid pieces (/srv/private/incoming/Book)'],
+    ['automatic, storage', 0, 'transmission', 'No such file or directory (/srv/private/incoming/Book)'],
+    ['hand-picked', undefined, 'deluge', 'torrent has no valid pieces (/srv/private/incoming/Book)'],
+  ])('the client\'s raw text (server paths) stays out of the request, its download row and the notification (%s)', async (_kind, clientFailures, clientType, clientError) => {
+    await handleClientReportedFailure(input({ clientFailures, clientType, clientError }));
 
-    expect(requestWrites()[0].errorMessage).toBe(`Download failed in SABnzbd (${'x'.repeat(200)})`);
+    const requesterText = [
+      ...requestWrites().map((data) => data.errorMessage ?? ''),
+      ...prismaMock.downloadHistory.update.mock.calls.map(([arg]) => arg.data.downloadError ?? ''),
+      ...notifications(),
+    ];
+    expect(requesterText.length).toBeGreaterThan(1);
+    for (const text of requesterText) expect(text).not.toContain('/srv/private');
+    expect(prismaMock.downloadHistory.update.mock.calls[0][0].data.downloadError).toMatch(/^Download failed in (Deluge|Transmission)( \([a-z ]+\))?$/);
+  });
+
+  it('the raw text is kept for admins on the blocklist row', async () => {
+    await handleClientReportedFailure(input({ clientType: 'deluge', clientError: 'torrent has no valid pieces (/srv/private/incoming/Book)' }));
+
+    expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ reasonDetail: 'torrent has no valid pieces (/srv/private/incoming/Book)' }),
+    }));
   });
 });

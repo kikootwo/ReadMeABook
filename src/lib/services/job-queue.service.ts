@@ -344,13 +344,13 @@ export class JobQueueService {
     // Search indexers processor
     this.queue.process('search_indexers', 2, async (job: BullJob<SearchIndexersPayload>) => {
       const { processSearchIndexers } = await import('../processors/search-indexers.processor');
-      return await processSearchIndexers(job.data);
+      return await processSearchIndexers(job.data, { attemptsMade: job.attemptsMade, attempts: job.opts?.attempts });
     });
 
     // Download torrent processor
     this.queue.process('download_torrent', 2, async (job: BullJob<DownloadTorrentPayload>) => {
       const { processDownloadTorrent } = await import('../processors/download-torrent.processor');
-      return await processDownloadTorrent(job.data, { attemptsMade: job.attemptsMade });
+      return await processDownloadTorrent(job.data, { attemptsMade: job.attemptsMade, attempts: job.opts?.attempts });
     });
 
     // Monitor download processor

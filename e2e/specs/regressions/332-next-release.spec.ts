@@ -106,5 +106,6 @@ test('#332: a usenet release fails in SABnzbd, the torrent release is grabbed an
   expect(final).toMatch(/^(downloaded|available)\|/);
   expect(evidence.grabs).toEqual({ 'nzb-fails': 1, 'tor-good': 1 });
   expect(evidence.blocked).toEqual([expect.stringContaining('[NZB]')]);
-  expect(evidence.requestErrors).toEqual([expect.stringMatching(/^Download failed in SABnzbd \(Out of retention.*attempt 2 of 3/)]);
+  // The client's own text ("Out of retention") stays in the job log and the blocklist row
+  expect(evidence.requestErrors).toEqual(['Download failed in SABnzbd. Trying another release (attempt 2 of 3).']);
 });

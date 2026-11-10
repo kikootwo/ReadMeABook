@@ -195,7 +195,7 @@ describe('processMonitorDownload with a cancelled or deleted request', () => {
     );
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({
       where: { id: 'dh-1' },
-      data: { downloadStatus: 'failed', downloadError: 'Download failed in Transmission (File name too long)' },
+      data: { downloadStatus: 'failed', downloadError: 'Download failed in Transmission' },
     });
     expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -203,7 +203,7 @@ describe('processMonitorDownload with a cancelled or deleted request', () => {
       })
     );
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
-      'request_error', 'req-1', 'Book', 'Author', 'user', 'Download failed in Transmission (File name too long)'
+      'request_error', 'req-1', 'Book', 'Author', 'user', 'Download failed in Transmission'
     );
   });
 

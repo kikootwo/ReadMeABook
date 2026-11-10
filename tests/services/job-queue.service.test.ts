@@ -651,6 +651,22 @@ describe('JobQueueService', () => {
     expect(processorsMock.processCheckWatchedLists).toHaveBeenCalled();
   });
 
+  it('hands Bull\'s attempt counts to the search and download processors (#332 closing notification)', async () => {
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    new JobQueueService();
+
+    const handlerFor = (type: string) => {
+      const call = queueMock.process.mock.calls.find(([name]) => name === type)!;
+      return call[2] || call[1];
+    };
+    const job = { id: 'bull-attempt', data: { jobId: 'job-attempt' }, attemptsMade: 2, opts: { attempts: 3 } };
+    await handlerFor('search_indexers')(job);
+    await handlerFor('download_torrent')(job);
+
+    expect(processorsMock.processSearchIndexers).toHaveBeenCalledWith(job.data, { attemptsMade: 2, attempts: 3 });
+    expect(processorsMock.processDownloadTorrent).toHaveBeenCalledWith(job.data, { attemptsMade: 2, attempts: 3 });
+  });
+
   it('returns repeatable jobs from the queue', async () => {
     queueMock.getRepeatableJobs.mockResolvedValue([{ key: 'job-1' }]);
 

@@ -14,7 +14,7 @@ import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
 import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
-import { notifyRequestError } from './client-failure';
+import { isLastAttempt, notifyChainEndedFailed, notifyRequestError, type BullAttempt } from './client-failure';
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
@@ -48,7 +48,7 @@ async function failChainIfNothingLeft(
  * Process search indexers job
  * Searches configured indexers for audiobook torrents
  */
-export async function processSearchIndexers(payload: SearchIndexersPayload): Promise<any> {
+export async function processSearchIndexers(payload: SearchIndexersPayload, attempt?: BullAttempt): Promise<any> {
   const { requestId, audiobook, jobId } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'SearchIndexers');
@@ -361,10 +361,14 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
     // Mark failed, unless a cancel or delete landed meanwhile
-    await markRequestFailedUnlessStopped(
+    const marked = await markRequestFailedUnlessStopped(
       requestId,
       error instanceof Error ? error.message : 'Unknown error during search'
     );
+    // The search for the next release (#332) ends its chain here once no retry follows
+    if (marked && isLastAttempt(attempt)) {
+      await notifyChainEndedFailed(payload.clientFailures, requestId, 'Download failed: the search for another release did not finish', logger);
+    }
 
     throw error;
   }

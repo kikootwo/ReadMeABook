@@ -5,7 +5,8 @@
  * A download client reported `failed`. An automatic grab whose release is at fault is blocked
  * and a fresh automatic search picks the next-ranked release, at most MAX_CLIENT_FAILURES grabs
  * in a row. Hand-picked grabs (no `clientFailures` in the payload) fail as before. Failures that
- * point at the client's storage or setup are never blocked, for any grab.
+ * point at the client's storage or setup are never blocked, for any grab. Requesters and
+ * notification channels see the client's name and a short reason, never the client's own text.
  */
 
 import { prisma } from '../db';
@@ -13,30 +14,44 @@ import { RMABLogger } from '../utils/logger';
 import { getJobQueueService } from '../services/job-queue.service';
 import { addAutoBlock } from '../services/blocklist.service';
 import { getClientDisplayName } from '../interfaces/download-client.interface';
-import { getRequestStopReason, markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { getRequestStopReason, markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
 
 type JobLogger = ReturnType<typeof RMABLogger.forJob>;
 
 /** Releases one automatic chain may grab: client failures 1 and 2 move on, the 3rd fails the request */
 export const MAX_CLIENT_FAILURES = 3;
-/** Client text kept in the request message and notification */
-const DETAIL_MAX = 200;
+
+/** Request statuses a failure may move on from: the download's own, or `searching` left by a cut earlier run */
+const MOVE_ON_FROM = ['downloading', 'searching'];
 
 /**
- * Client text (case-insensitive) that points at the client's storage or setup, not the release:
- * full disk, permissions, missing data or an unmounted path, files that could not be moved.
+ * Client text (case-insensitive substring, or a whole-word error code) that points at the client's
+ * storage or setup, not the release, with the short reason a requester sees instead of the text.
  */
-const NOT_RELEASE_FAULT_TEXT = [
-  'no space left', 'disk is full', 'disk full', 'not enough space', 'unpack: space' /* NZBGet */,
-  'permission denied', 'access is denied', 'read-only file system',
-  'missingfiles', 'no data found', 'missing or invalid torrent data', 'no such file or directory',
-  'cannot find the path', 'cannot find the file', 'input/output error',
-  'transport endpoint is not connected', 'stale file handle',
-  'failed moving',
+const NOT_RELEASE_FAULT: ReadonlyArray<readonly [reason: string, patterns: ReadonlyArray<string | RegExp>]> = [
+  ['disk full', ['no space left', 'disk is full', 'disk full', 'not enough space', 'unpack: space' /* NZBGet */, 'disk quota exceeded', /\bedquot\b/]],
+  ['no permission', ['permission denied', 'access is denied', 'read-only file system', 'operation not permitted', /\beperm\b/]],
+  ['files missing', ['missingfiles', 'no data found', 'missing or invalid torrent data', 'no such file or directory', 'cannot find the path', 'cannot find the file']],
+  ['storage unavailable', ['input/output error', 'transport endpoint is not connected', 'stale file handle', 'network path was not found', 'network name is no longer available']],
+  ['too many open files', ['too many open files']],
+  ['files not moved', ['failed moving']],
 ];
 
 /** NZBGet history statuses that are not the release's fault: deleted by the user, files not moved */
-const NZBGET_NOT_RELEASE_STATUSES = new Set(['DELETED/MANUAL', 'FAILURE/MOVE']);
+const NZBGET_NOT_RELEASE_STATUSES = new Map([['DELETED/MANUAL', 'deleted in the client'], ['FAILURE/MOVE', 'files not moved']]);
+
+/** The short reason of a storage or setup failure, or null when the failure is the release's */
+function storageFailureReason(clientType: string, errorMessage: string | null | undefined): string | null {
+  const text = (errorMessage ?? '').trim();
+  if (clientType === 'nzbget') {
+    const status = NZBGET_NOT_RELEASE_STATUSES.get(text.split('|')[0].trim().toUpperCase());
+    if (status) return status;
+  }
+  const lower = text.toLowerCase();
+  const match = NOT_RELEASE_FAULT.find(([, patterns]) =>
+    patterns.some((pattern) => (typeof pattern === 'string' ? lower.includes(pattern) : pattern.test(lower))));
+  return match ? match[0] : null;
+}
 
 /**
  * True when a client-reported failure is the release's fault (block it). False for failures of
@@ -44,12 +59,19 @@ const NZBGET_NOT_RELEASE_STATUSES = new Set(['DELETED/MANUAL', 'FAILURE/MOVE']);
  * its raw history status ("DELETED/MANUAL | ...").
  */
 export function isReleaseFault(clientType: string, errorMessage: string | null | undefined): boolean {
-  const text = (errorMessage ?? '').trim();
-  if (clientType === 'nzbget' && NZBGET_NOT_RELEASE_STATUSES.has(text.split('|')[0].trim().toUpperCase())) {
-    return false;
-  }
-  const lower = text.toLowerCase();
-  return !NOT_RELEASE_FAULT_TEXT.some((pattern) => lower.includes(pattern));
+  return storageFailureReason(clientType, errorMessage) === null;
+}
+
+/** A coarse label for a release-fault failure, or null when nothing more is known */
+function releaseFailureLabel(errorMessage: string | null | undefined): string | null {
+  const text = (errorMessage ?? '').toLowerCase();
+  if (text.includes('par') || text.includes('repair')) return 'par2';
+  if (text.includes('missing articles') || text.includes('failed articles')) return 'missing articles';
+  if (text.includes('unpack')) return 'unpack';
+  if (text.includes('password') || text.includes('encrypted')) return 'password';
+  if (text.includes('missingfiles') || text.includes('missing files')) return 'missing files';
+  if (text.includes('torrent') && text.includes('error')) return 'torrent error';
+  return null;
 }
 
 /**
@@ -59,15 +81,16 @@ export function isReleaseFault(clientType: string, errorMessage: string | null |
  * the raw client string is preserved in `reasonDetail`.
  */
 export function classifyDownloadFailure(errorMessage: string | null | undefined): string {
-  const text = (errorMessage ?? '').toLowerCase();
-  if (!text) return 'Download failed';
-  if (text.includes('par') || text.includes('repair')) return 'Download failed (par2)';
-  if (text.includes('missing articles') || text.includes('failed articles')) return 'Download failed (missing articles)';
-  if (text.includes('unpack')) return 'Download failed (unpack)';
-  if (text.includes('password') || text.includes('encrypted')) return 'Download failed (password)';
-  if (text.includes('missingfiles') || text.includes('missing files')) return 'Download failed (missing files)';
-  if (text.includes('torrent') && text.includes('error')) return 'Download failed (torrent error)';
-  return 'Download failed';
+  const label = releaseFailureLabel(errorMessage);
+  return label ? `Download failed (${label})` : 'Download failed';
+}
+
+/**
+ * The short reason a requester and notification channels see. The client's own text can hold
+ * server paths, so it stays in the job log and the admin-only blocklist `reasonDetail`.
+ */
+export function requesterFailureReason(clientType: string, errorMessage: string | null | undefined): string | null {
+  return storageFailureReason(clientType, errorMessage) ?? releaseFailureLabel(errorMessage);
 }
 
 /** Queue a request_error notification. Never throws: a lookup or queueing failure is logged. */
@@ -107,12 +130,69 @@ export interface ClientFailureInput {
   logger: JobLogger;
 }
 
-/** stopped: cancelled/deleted, nothing written. stale: an older download, request untouched. */
-export type ClientFailureOutcome = 'stopped' | 'stale' | 'next_release' | 'failed';
+/**
+ * stopped: cancelled/deleted, nothing written. stale: an older download, request untouched.
+ * already_handled: an earlier run of this failure got past its request write (or the request
+ * moved on meanwhile), request untouched.
+ */
+export type ClientFailureOutcome = 'stopped' | 'stale' | 'already_handled' | 'next_release' | 'failed';
 
-/** The next search's Bull job id: a second run of the same failure never queues a second search */
+/** The next search's Bull job id: Bull drops a second add while it keeps the job */
 export function nextReleaseSearchJobId(downloadHistoryId: string): string {
   return `next-release-${downloadHistoryId}`;
+}
+
+/** Bull's view of a run: attempts is the job's total, attemptsMade counts earlier failed attempts */
+export interface BullAttempt {
+  attemptsMade?: number;
+  attempts?: number;
+}
+
+/** True on Bull's last attempt (no retry follows a failure); an unknown attempt counts as last */
+export function isLastAttempt(attempt?: BullAttempt): boolean {
+  return (attempt?.attemptsMade ?? 0) + 1 >= (attempt?.attempts ?? 1);
+}
+
+/**
+ * Closing notification for a chain (at least one client failure) that ends `failed` at an exit
+ * with no notification of its own: the next search threw, or the next grab failed. Call it on
+ * Bull's last attempt only, once the request is (or will be) `failed`.
+ */
+export async function notifyChainEndedFailed(
+  clientFailures: number | undefined,
+  requestId: string,
+  message: string,
+  logger: JobLogger
+): Promise<void> {
+  if (!clientFailures) return;
+  await notifyRequestError(requestId, message, logger);
+}
+
+/**
+ * True when an earlier run of this failure already got past its request write: the next search
+ * has a `jobs` row, or the download row is `failed` and the request has left `downloading` and
+ * `searching` (the next search ended, or the request already failed). A cut run that wrote
+ * `searching` but queued nothing is not handled: this run queues the search.
+ */
+async function failureAlreadyHandled(requestId: string, downloadHistoryId: string): Promise<boolean> {
+  const searchJob = await prisma.job.findFirst({
+    where: { bullJobId: nextReleaseSearchJobId(downloadHistoryId) },
+    select: { id: true },
+  });
+  if (searchJob) return true;
+  const history = await prisma.downloadHistory.findUnique({ where: { id: downloadHistoryId }, select: { downloadStatus: true } });
+  if (history?.downloadStatus !== 'failed') return false;
+  const request = await prisma.request.findUnique({ where: { id: requestId }, select: { status: true } });
+  return !MOVE_ON_FROM.includes(request?.status ?? '');
+}
+
+/** Back to `searching`, only from the download's own status (or a cut run's `searching`) */
+async function moveRequestToSearching(requestId: string): Promise<boolean> {
+  const { count } = await prisma.request.updateMany({
+    where: { id: requestId, deletedAt: null, status: { in: MOVE_ON_FROM } },
+    data: { status: 'searching', progress: 0, errorMessage: null, updatedAt: new Date() },
+  });
+  return count > 0;
 }
 
 /** Block the failed release; true only when a blocklist row exists for it afterwards */
@@ -156,16 +236,30 @@ async function queueNextReleaseSearch(input: ClientFailureInput, failures: numbe
   );
 }
 
+/** Record this download's failure and block its release, leaving the request as it is */
+async function recordWithoutRequestChange(input: ClientFailureInput, failureText: string, releaseFault: boolean): Promise<void> {
+  try {
+    await markHistoryFailed(input.downloadHistoryId, failureText);
+    if (releaseFault) await blockFailedRelease(input);
+  } catch (error) {
+    input.logger.error('Failed to record the download as failed', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 /**
  * Handle a client-reported `failed`. Order: request write (guarded) → history `failed` → block →
  * next search → notify. Nothing after the request write throws, so a failure here never reaches
  * the monitor's generic error path (which would mark the request failed over a new chain).
+ * A second run of the same failure changes nothing an earlier run did (`already_handled`).
  */
 export async function handleClientReportedFailure(input: ClientFailureInput): Promise<ClientFailureOutcome> {
   const { requestId, downloadHistoryId, clientType, clientError, clientFailures, logger } = input;
-  const detail = (clientError ?? '').trim().slice(0, DETAIL_MAX);
-  const failureText = `Download failed in ${getClientDisplayName(clientType)}${detail ? ` (${detail})` : ''}`;
+  const clientName = getClientDisplayName(clientType);
+  const reason = requesterFailureReason(clientType, clientError);
+  // Requester-visible: the client's name and a short reason, never the client's own text
+  const failureText = `Download failed in ${clientName}${reason ? ` (${reason})` : ''}`;
   const releaseFault = isReleaseFault(clientType, clientError);
+  logger.warn(`${clientName} reported the download failed: ${clientError?.trim() || '(no reason given)'}`);
 
   // Only the request's newest selected download may change the request
   const newest = await prisma.downloadHistory.findFirst({
@@ -176,13 +270,15 @@ export async function handleClientReportedFailure(input: ClientFailureInput): Pr
   if (newest?.id !== downloadHistoryId) {
     if (await getRequestStopReason(requestId)) return 'stopped';
     logger.warn(`Download ${downloadHistoryId} failed but is not request ${requestId}'s current download; request left unchanged`);
-    try {
-      await markHistoryFailed(downloadHistoryId, failureText);
-      if (releaseFault) await blockFailedRelease(input);
-    } catch (error) {
-      logger.error('Failed to record the earlier download as failed', { error: error instanceof Error ? error.message : String(error) });
-    }
+    await recordWithoutRequestChange(input, failureText, releaseFault);
     return 'stale';
+  }
+
+  if (await failureAlreadyHandled(requestId, downloadHistoryId)) {
+    if (await getRequestStopReason(requestId)) return 'stopped';
+    logger.info(`Download ${downloadHistoryId}'s failure was already handled for request ${requestId}; request left unchanged`);
+    await recordWithoutRequestChange(input, failureText, releaseFault);
+    return 'already_handled';
   }
 
   const failures = (clientFailures ?? 0) + 1;
@@ -195,11 +291,17 @@ export async function handleClientReportedFailure(input: ClientFailureInput): Pr
       : failureText;
 
   const written = mayMoveOn
-    ? await updateRequestUnlessStopped(requestId, { status: 'searching', progress: 0, errorMessage: null })
+    ? await moveRequestToSearching(requestId)
     : await markRequestFailedUnlessStopped(requestId, finalMessage);
   if (!written) {
-    logger.info(`Request ${requestId} was cancelled or deleted, leaving it unchanged`);
-    return 'stopped';
+    if (!mayMoveOn || (await getRequestStopReason(requestId))) {
+      logger.info(`Request ${requestId} was cancelled or deleted, leaving it unchanged`);
+      return 'stopped';
+    }
+    // The request left `downloading` meanwhile (the next search of an earlier run ended)
+    logger.info(`Request ${requestId} moved on before this failure was handled; request left unchanged`);
+    await recordWithoutRequestChange(input, failureText, releaseFault);
+    return 'already_handled';
   }
 
   let searchQueued = false;
