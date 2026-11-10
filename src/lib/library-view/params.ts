@@ -16,7 +16,7 @@ import {
   STATUS_GROUPS,
 } from './constants';
 import { decodeCursor, filterHashOf, type CursorScope, type SortTuple } from './cursor';
-import { fold } from './merge';
+import { fold } from './fold';
 import type { LibraryFilters, LibrarySortSpec } from './query';
 import type { LibraryGroupMode, LibrarySortKey, LibrarySortOrder, LibrarySource, StatusGroup } from './types';
 

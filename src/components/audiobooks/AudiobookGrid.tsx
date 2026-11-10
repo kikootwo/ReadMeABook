@@ -22,7 +22,7 @@ interface AudiobookGridProps {
 
 // Grid classes with generous spacing for premium feel
 // IMPORTANT: Classes must be explicit strings for Tailwind purging
-function getGridClasses(size: number): string {
+export function getGridClasses(size: number): string {
   const sizeMap: Record<number, string> = {
     1: 'grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10',
     2: 'grid-cols-3 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-9',
@@ -85,7 +85,7 @@ export function AudiobookGrid({
 }
 
 // Premium skeleton with shimmer effect
-function SkeletonCard({ squareCovers = false, index = 0 }: { squareCovers?: boolean; index?: number }) {
+export function SkeletonCard({ squareCovers = false, index = 0 }: { squareCovers?: boolean; index?: number }) {
   return (
     <div
       className="animate-pulse"

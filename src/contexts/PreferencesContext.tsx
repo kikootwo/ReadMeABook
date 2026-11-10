@@ -20,6 +20,8 @@ interface PreferencesContextType {
   setSquareCovers: (enabled: boolean) => void;
   hideAvailable: boolean;
   setHideAvailable: (enabled: boolean) => void;
+  /** True once the stored preferences have been read (pages that fetch by a preference wait for it). */
+  hydrated: boolean;
 }
 
 const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined);
@@ -36,6 +38,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const [cardSize, setCardSizeState] = useState<number>(DEFAULT_PREFERENCES.cardSize);
   const [squareCovers, setSquareCoversState] = useState<boolean>(DEFAULT_PREFERENCES.squareCovers);
   const [hideAvailable, setHideAvailableState] = useState<boolean>(DEFAULT_PREFERENCES.hideAvailable);
+  const [hydrated, setHydrated] = useState(false);
 
   // Load preferences from localStorage on mount
   useEffect(() => {
@@ -63,6 +66,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       setSquareCoversState(DEFAULT_PREFERENCES.squareCovers);
       setHideAvailableState(DEFAULT_PREFERENCES.hideAvailable);
     }
+    setHydrated(true);
   }, []);
 
   // Update card size in state and localStorage
@@ -145,7 +149,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <PreferencesContext.Provider value={{ cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable }}>
+    <PreferencesContext.Provider value={{ cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable, hydrated }}>
       {children}
     </PreferencesContext.Provider>
   );

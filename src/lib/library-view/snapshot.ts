@@ -5,7 +5,8 @@
  * Holds the prepared rows (indexes plus scan-only entries) of the active library, keyed by backend
  * and library id, with the content version (libraryRowsVersion) read before its rows loaded. When
  * the version moves, callers keep getting the current snapshot while ONE rebuild per library runs;
- * a viewer can therefore see library rows up to one rebuild old. A write that lands during a rebuild
+ * a viewer can therefore see library rows up to two rebuild times plus the wait for the next call
+ * old (doc: Staleness bound). A write that lands during a rebuild
  * moves the version again, so the next call starts the rebuild that sees it. Only a library with no
  * snapshot yet (first call, library switch) waits for its build. Holds no request or viewer data.
  */

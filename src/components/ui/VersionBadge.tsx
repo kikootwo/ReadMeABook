@@ -22,7 +22,15 @@ function compareVersions(current: string, latest: string): number {
   return 0;
 }
 
-export function VersionBadge() {
+interface VersionBadgeProps {
+  /**
+   * From 1024 to 1279 px (lg) only the update notice shows, as a dot: the header's inline nav needs
+   * the room. With no update the badge is hidden in that band.
+   */
+  compactAtLg?: boolean;
+}
+
+export function VersionBadge({ compactAtLg = false }: VersionBadgeProps = {}) {
   const [version, setVersion] = useState<string | null>(null);
   const [rawVersion, setRawVersion] = useState<string | null>(null);
   const [commit, setCommit] = useState<string | null>(null);
@@ -99,6 +107,10 @@ export function VersionBadge() {
     ? `${version}${commit ? ` (${commit})` : ''} — Update available: v${latestVersion}`
     : commit ? `${version} (${commit})` : version;
 
+  const showUpdate = updateAvailable && !!latestVersion;
+  // the bare dot at 1024-1279 stays a 24 px target, centred
+  const compact = compactAtLg ? (showUpdate ? 'lg:px-1.5 lg:min-w-6 lg:justify-center' : 'lg:hidden xl:inline-flex') : '';
+
   return (
     <a
       href={updateAvailable && latestVersion
@@ -107,19 +119,21 @@ export function VersionBadge() {
       }
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:shadow-md transition-shadow no-underline"
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:shadow-md transition-shadow no-underline ${compact}`}
       title={tooltipText}
+      aria-label={tooltipText}
+      data-update-available={showUpdate ? 'true' : undefined}
     >
-      <span className="text-xs font-mono font-medium text-gray-700 dark:text-gray-300">
+      <span className={`text-xs font-mono font-medium text-gray-700 dark:text-gray-300 ${compactAtLg ? 'lg:hidden xl:inline' : ''}`}>
         {version}
       </span>
-      {updateAvailable && latestVersion && (
+      {showUpdate && (
         <span className="inline-flex items-center gap-1 text-xs font-mono font-medium text-amber-600 dark:text-amber-400">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
           </span>
-          v{latestVersion}
+          <span className={compactAtLg ? 'lg:hidden xl:inline' : undefined}>v{latestVersion}</span>
         </span>
       )}
     </a>

@@ -4,22 +4,14 @@
  */
 
 import { RMABLogger } from '@/lib/utils/logger';
-import { SORT_KEY_LENGTH, STATUS_GROUP_OF } from './constants';
+import { STATUS_GROUP_OF } from './constants';
 import { buildAsinIndex, matchByAsin, type AsinIndex } from './asin-rule';
+import { fold, sortKey } from './fold';
 import type { LibraryEntry, LibraryRowRecord, RequestRecord, StatusGroup } from './types';
 
+export { fold, sortKey };
+
 const logger = RMABLogger.create('LibraryView.Merge');
-
-/** Case, diacritics and whitespace folded (search tokens, sort and group keys). */
-export function fold(value: string | null | undefined): string {
-  if (!value) return '';
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
-/** A folded sort/group key, truncated so cursors stay small. */
-export function sortKey(value: string | null | undefined): string {
-  return fold(value).slice(0, SORT_KEY_LENGTH);
-}
 
 /** A library value, or null when empty (ABS's 'Unknown Author' counts as empty, as on request cards). */
 function shown(value: string | null | undefined): string | null {

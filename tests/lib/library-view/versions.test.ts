@@ -54,3 +54,73 @@ describe('library view content versions', () => {
     expect(await loader.libraryRowsVersion('lib-1')).toBe('0:0');
   });
 });
+
+describe('row version single-flight', () => {
+  /** A $queryRaw call that settles only when the test says so. */
+  function deferredQuery() {
+    let resolve!: (value: { n: number; h: string }[]) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<{ n: number; h: string }[]>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    prismaMock.$queryRaw.mockReturnValueOnce(promise);
+    return { resolve, reject };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('concurrent calls for one library share one read', async () => {
+    const loader = await import('@/lib/library-view/loader');
+    const query = deferredQuery();
+    const calls = Array.from({ length: 10 }, () => loader.libraryRowsVersion('lib-1'));
+    query.resolve([{ n: 7, h: '42' }]);
+    expect(await Promise.all(calls)).toEqual(Array(10).fill('7:42'));
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('a call after the read settles starts a new read', async () => {
+    const loader = await import('@/lib/library-view/loader');
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ n: 1, h: '1' }]).mockResolvedValueOnce([{ n: 2, h: '2' }]);
+    expect(await loader.libraryRowsVersion('lib-1')).toBe('1:1');
+    expect(await loader.libraryRowsVersion('lib-1')).toBe('2:2');
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('different libraries never share a read', async () => {
+    const loader = await import('@/lib/library-view/loader');
+    const a = deferredQuery();
+    const b = deferredQuery();
+    const first = loader.libraryRowsVersion('lib-a');
+    const second = loader.libraryRowsVersion('lib-b');
+    a.resolve([{ n: 1, h: 'a' }]);
+    b.resolve([{ n: 1, h: 'b' }]);
+    expect(await first).toBe('1:a');
+    expect(await second).toBe('1:b');
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failure reaches only the callers that joined; the next call reads again', async () => {
+    const loader = await import('@/lib/library-view/loader');
+    const query = deferredQuery();
+    const joined = [loader.libraryRowsVersion('lib-1'), loader.libraryRowsVersion('lib-1')];
+    query.reject(new Error('db down'));
+    for (const call of joined) await expect(call).rejects.toThrow('db down');
+    prismaMock.$queryRaw.mockResolvedValueOnce([{ n: 3, h: '3' }]);
+    expect(await loader.libraryRowsVersion('lib-1')).toBe('3:3');
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('the requests version is never shared (an action refetch must see its own write)', async () => {
+    const loader = await import('@/lib/library-view/loader');
+    const first = deferredQuery();
+    const second = deferredQuery();
+    const calls = [loader.libraryRequestsVersion(), loader.libraryRequestsVersion()];
+    first.resolve([{ n: 1, h: 'before' }]);
+    second.resolve([{ n: 1, h: 'after' }]);
+    expect(await Promise.all(calls)).toEqual(['1:before', '1:after']);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+});
