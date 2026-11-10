@@ -279,12 +279,12 @@ One rule for request delete, the seeding cleanup and the cancel step: `holdOf()`
 The admin table's bulk Delete ([bulk-request-actions.md](bulk-request-actions.md)) calls `DELETE /api/admin/requests/:id?keepLibrary=1` once per request, one at a time.
 - **Rule** (`deleteTouchesLibrary(row, bookBeingImported)`, `src/lib/utils/delete-touches-library.ts`), by data, not by the request's own status:
   - audiobook request: book `filePath`, `absItemId` or `plexGuid` set
-  - ebook request: `placedEbookFiles` set and not `[]` (markers and unreadable records count)
+  - ebook request: `placedEbookFiles` set and not `[]` (markers and unreadable records count), or delivered (`status === 'downloaded'` or `completedAt` set) with no record or `[]`
   - any request: a live request on the same `audiobookId` is `processing` (`BEING_IMPORTED_WHERE`), this one included
 - **Where:** inside `deleteRequest`, right after its own load, before any side effect (download step, files, records, soft delete). A cancelled or denied request sharing a book row with a delivered or importing one is refused.
 - **List flag:** `GET /api/admin/requests` returns `inLibrary` from the same rule (book `filePath`/`plexGuid` and `requests: {where: processing, take 1}` loaded in the same query, never returned) so the bar can count the skipped.
 - **Over-skip is the safe direction:** a stale stored folder still counts. Single delete handles those.
-- **Still true per item:** RMAB's `plex_library` rows for the book (by ASIN, else exact title and author) are deleted as in a single delete; a same-titled edition can look missing until the next library scan.
+- **Library index left alone:** a delete that passes skips `deleteLibraryRecords` (RMAB's `plex_library` rows for the book: by ASIN, else exact title and author). The book can be in the library by another route (added by hand after a cancel or deny, another edition), and removing its rows would let a user or a shelf request it again before the next scan. The single delete still removes them.
 
 ## Re-Requesting After Deletion
 

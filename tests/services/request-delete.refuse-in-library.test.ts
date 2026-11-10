@@ -40,13 +40,13 @@ vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => config
 
 const BOOK = { id: 'ab-1', title: 'Made Up Book', author: 'Made Up Author', narrator: null, audibleAsin: 'B0FAKE0001', fileFormat: null, filesHash: null };
 
-function loadRequest(over: { type?: string; status?: string; placedEbookFiles?: unknown; book?: Record<string, unknown> } = {}) {
+function loadRequest(over: { type?: string; status?: string; completedAt?: Date | null; placedEbookFiles?: unknown; book?: Record<string, unknown> } = {}) {
   prismaMock.request.findFirst.mockResolvedValue({
     id: 'req-1',
     audiobookId: 'ab-1',
     type: over.type ?? 'audiobook',
     status: over.status ?? 'failed',
-    completedAt: null,
+    completedAt: over.completedAt ?? null,
     placedEbookFiles: over.placedEbookFiles ?? null,
     audiobook: { ...BOOK, filePath: null, absItemId: null, plexGuid: null, ...over.book },
     downloadHistory: [{ id: 'dh-1', indexerName: 'Fake Indexer', torrentHash: 'hash-1' }],
@@ -121,9 +121,35 @@ describe('deleteRequest refuseInLibrary (bulk delete)', () => {
     }));
   });
 
-  it('an ebook request with an empty placement record is not in the library', async () => {
+  it('an undelivered ebook request with an empty placement record is not in the library', async () => {
     loadRequest({ type: 'ebook', placedEbookFiles: [] });
     expect((await run({ refuseInLibrary: true })).success).toBe(true);
+  });
+
+  it.each([
+    ['downloaded, no placement record', { status: 'downloaded', placedEbookFiles: null }],
+    ['downloaded, an empty placement record', { status: 'downloaded', placedEbookFiles: [] }],
+    ['completed earlier, no placement record', { status: 'cancelled', completedAt: new Date('2026-01-01'), placedEbookFiles: null }],
+    ['completed earlier, an empty placement record', { status: 'cancelled', completedAt: new Date('2026-01-01'), placedEbookFiles: [] }],
+  ])('refuses a delivered ebook request (%s), changing nothing', async (_label, over) => {
+    loadRequest({ type: 'ebook', ...over });
+    expect(await run({ refuseInLibrary: true })).toMatchObject({ success: false, error: 'InLibrary' });
+    expectNoSideEffect();
+  });
+
+  it('a passing bulk delete leaves the library index rows of its book (a cancelled request, book in the library by another route)', async () => {
+    loadRequest({ status: 'cancelled' });
+    const result = await run({ refuseInLibrary: true });
+    expect(result.success).toBe(true);
+    expect(filesMock.deleteBackendItem).not.toHaveBeenCalled();
+    expect(filesMock.deleteLibraryRecords).not.toHaveBeenCalled();
+    expect(prismaMock.request.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('the single delete of the same request still clears the index rows, as before', async () => {
+    loadRequest({ status: 'cancelled' });
+    expect((await run()).success).toBe(true);
+    expect(filesMock.deleteLibraryRecords).toHaveBeenCalledTimes(1);
   });
 
   it('a missing request is still NotFound with the option', async () => {

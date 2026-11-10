@@ -28,6 +28,14 @@ describe('deleteTouchesLibrary', () => {
     expect(deleteTouchesLibrary({ type: 'ebook', placedEbookFiles: null, audiobook: { ...empty, filePath: '/media/a' } }, false)).toBe(false);
   });
 
+  it('a delivered ebook request counts even with no placement record or an empty one', () => {
+    for (const placedEbookFiles of [null, []]) {
+      expect(deleteTouchesLibrary({ type: 'ebook', status: 'downloaded', completedAt: null, placedEbookFiles, audiobook: empty }, false)).toBe(true);
+      expect(deleteTouchesLibrary({ type: 'ebook', status: 'cancelled', completedAt: new Date(), placedEbookFiles, audiobook: empty }, false)).toBe(true);
+      expect(deleteTouchesLibrary({ type: 'ebook', status: 'failed', completedAt: null, placedEbookFiles, audiobook: empty }, false)).toBe(false);
+    }
+  });
+
   it('a book being imported (a live processing request on it) always counts', () => {
     expect(deleteTouchesLibrary({ type: 'audiobook', audiobook: empty }, true)).toBe(true);
     expect(deleteTouchesLibrary({ type: 'ebook', placedEbookFiles: [], audiobook: empty }, true)).toBe(true);

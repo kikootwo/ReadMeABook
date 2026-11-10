@@ -87,7 +87,8 @@ export interface DeleteRequestResult {
  * Note: No backend library deletion or audiobook linkage clearing for ebooks
  *
  * With `refuseInLibrary` (bulk delete): right after step 1, a request whose book is in the
- * library or being imported (deleteTouchesLibrary) is refused with error 'InLibrary', nothing changed
+ * library or being imported (deleteTouchesLibrary) is refused with error 'InLibrary', nothing changed;
+ * one that passes leaves the plex_library rows (deleteLibraryRecords) as they are
  */
 export async function deleteRequest(
   requestId: string,
@@ -149,7 +150,8 @@ export async function deleteRequest(
     // Bulk delete: decided on this load, before any side effect
     if (options.refuseInLibrary) {
       const importing = await prisma.request.count({ where: { audiobookId: request.audiobookId, ...BEING_IMPORTED_WHERE } });
-      if (deleteTouchesLibrary({ type: requestType, placedEbookFiles: request.placedEbookFiles, audiobook: request.audiobook }, importing > 0)) {
+      const row = { type: requestType, status: request.status, completedAt: request.completedAt, placedEbookFiles: request.placedEbookFiles, audiobook: request.audiobook };
+      if (deleteTouchesLibrary(row, importing > 0)) {
         logger.info(`Request ${requestId} not deleted (bulk delete): its book is in the library or being imported`);
         return {
           success: false,
@@ -225,7 +227,8 @@ export async function deleteRequest(
         if (outcome.kind === 'removed' || outcome.kind === 'gone') {
           await deleteBackendItem(book, outcome, backendMode, configService);
         }
-        await deleteLibraryRecords(book);
+        // Bulk delete leaves the library index alone: the book can be in the library by another route
+        if (!options.refuseInLibrary) await deleteLibraryRecords(book);
 
         // Reset to requested, clear the library linkage and the (now removed) stored folder
         await prisma.audiobook.update({
