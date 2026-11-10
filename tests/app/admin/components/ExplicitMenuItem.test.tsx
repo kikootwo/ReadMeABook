@@ -54,7 +54,7 @@ describe('ExplicitMenuItem in the admin request menu', () => {
   });
 
   it('marked: "Remove explicit mark" clears it; the server message is a warning toast', async () => {
-    const message = 'Mark removed. Audiobookshelf still marks this book explicit; change it there.';
+    const message = 'Mark removed. If the book is marked explicit in Audiobookshelf, change it there.';
     setExplicitMock.mockResolvedValue({ explicit: false, message });
     openMenu({ explicit: true });
 

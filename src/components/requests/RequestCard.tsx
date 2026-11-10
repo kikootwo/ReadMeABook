@@ -46,9 +46,11 @@ interface RequestCardProps {
     };
   };
   showActions?: boolean;
+  /** After a change saved from the card (the Explicit mark): reload the list it came from */
+  onChanged?: () => void;
 }
 
-export function RequestCard({ request, showActions = true }: RequestCardProps) {
+export function RequestCard({ request, showActions = true, onChanged }: RequestCardProps) {
   const { cancelRequest, isLoading } = useCancelRequest();
   const { squareCovers } = usePreferences();
   const [showError, setShowError] = React.useState(false);
@@ -259,7 +261,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
             {showActions && (
               <div className="flex flex-wrap items-center gap-2">
                 {showExplicit && (
-                  <RequestExplicitControl requestId={request.id} explicit={request.explicit === true} isAdmin={user?.role === 'admin'} />
+                  <RequestExplicitControl requestId={request.id} explicit={request.explicit === true} isAdmin={user?.role === 'admin'} onSaved={onChanged} />
                 )}
                 {canCancel && (
                   <Button

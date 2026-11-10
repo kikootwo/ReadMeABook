@@ -19,7 +19,7 @@ const searchModalProps = vi.hoisted(() => vi.fn());
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1', username: 'user', role: state.role } }) }));
 vi.mock('@/contexts/PreferencesContext', () => ({ usePreferences: () => ({ squareCovers: false }) }));
-vi.mock('@/lib/hooks/useExplicitMark', () => ({ useIsAudiobookshelf: () => state.isABS }));
+vi.mock('@/lib/hooks/useExplicitMark', () => ({ useIsAudiobookshelf: () => state.isABS, useSetExplicit: () => ({ setExplicit: vi.fn(), isLoading: false }) }));
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
   useAudiobookDetails: () => ({ audiobook: { asin: 'ASIN1', title: 'Book', author: 'Author', description: '' }, isLoading: false, error: null }),
 }));

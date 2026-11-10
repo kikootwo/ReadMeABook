@@ -26,7 +26,7 @@ import { fetchWithAuth } from '@/lib/utils/api';
 import { useIsIgnored, useToggleIgnore } from '@/lib/hooks/useIgnoredAudiobooks';
 import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-statuses';
 import { ExplicitCheckbox } from '@/components/requests/ExplicitCheckbox';
-import { useIsAudiobookshelf } from '@/lib/hooks/useExplicitMark';
+import { useIsAudiobookshelf, useSetExplicit } from '@/lib/hooks/useExplicitMark';
 
 interface AudiobookDetailsModalProps {
   asin: string;
@@ -132,6 +132,7 @@ export function AudiobookDetailsModal({
     setExplicit(requestExplicit);
   }
   const isABS = useIsAudiobookshelf();
+  const { setExplicit: saveExplicitMark } = useSetExplicit();
 
   // Sync local status when the prop changes (e.g. page data refreshes)
   useEffect(() => {
@@ -158,6 +159,13 @@ export function AudiobookDetailsModal({
     && (requestedByUserId === user.id || user.role === 'admin')
     && advanceableStatuses.includes(effectiveStatus ?? '');
   const advanceRequestId = shouldAdvance ? requestId ?? undefined : undefined;
+  // Advancing sends no mark (select-torrent): a new tick is saved on the request when the pick is
+  // confirmed, before the download starts; a failed save starts nothing (#542)
+  const markBeforeAdvance = advanceRequestId && sendExplicit && !requestExplicit
+    ? () => saveExplicitMark(advanceRequestId, true).then(() => undefined, () => {
+        throw new Error("The Explicit mark wasn't saved, so the download didn't start. Try again.");
+      })
+    : undefined;
 
   useEffect(() => {
     setMounted(true);
@@ -854,6 +862,7 @@ export function AudiobookDetailsModal({
             }}
             fullAudiobook={audiobook}
             explicit={sendExplicit}
+            beforeSelect={markBeforeAdvance}
           />
         </div>,
         document.body

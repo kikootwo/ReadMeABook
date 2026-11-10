@@ -58,6 +58,7 @@ interface InteractiveTorrentSearchModalProps {
   replaceIssueId?: string; // Optional - when set, confirm handler calls replace endpoint instead
   onConfirm?: (torrent: TorrentResult) => Promise<void>; // Optional - overrides default confirm handler
   explicit?: boolean; // Optional - new request from the details modal is marked Explicit (#542)
+  beforeSelect?: () => Promise<void>; // Optional - runs before select-torrent on an existing request; a throw stops the pick and shows its message (#542)
 }
 
 // Format relative time from publish date
@@ -113,6 +114,7 @@ export function InteractiveTorrentSearchModal({
   replaceIssueId,
   onConfirm,
   explicit,
+  beforeSelect,
 }: InteractiveTorrentSearchModalProps) {
   // Hooks for existing audiobook request flow
   const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError, searchFailures: byRequestFailures } = useInteractiveSearch();
@@ -135,6 +137,7 @@ export function InteractiveTorrentSearchModal({
 
   const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
+  const [beforeSelectError, setBeforeSelectError] = useState<string | null>(null);
   const [blockedLookup, setBlockedLookup] = useState<BlockedReleaseLookup>(EMPTY_BLOCKED_LOOKUP);
 
   // Per locked decision #3, interactive search is NOT filtered — it shows
@@ -170,13 +173,13 @@ export function InteractiveTorrentSearchModal({
       : isEbookMode
         ? (useAsinMode ? isSelectingEbookByAsin : isSelectingEbook)
         : (hasRequestId ? isSelectingTorrent : isRequestingWithTorrent);
-  const error = replaceIssueId
+  const error = beforeSelectError || (replaceIssueId
     ? (replaceError || (hasRequestId ? searchByRequestError : searchByAudiobookError))
     : isEbookMode
       ? (useAsinMode ? (searchEbooksByAsinError || selectEbookByAsinError) : (searchEbooksError || selectEbookError))
       : (hasRequestId
           ? (searchByRequestError || selectTorrentError)
-          : (searchByAudiobookError || requestWithTorrentError));
+          : (searchByAudiobookError || requestWithTorrentError)));
 
   // Some or all indexer searches failed (#522): shown instead of a bare "nothing found"
   const searchFailures = isEbookMode
@@ -297,6 +300,7 @@ export function InteractiveTorrentSearchModal({
   const handleConfirmDownload = async () => {
     if (!confirmTorrent) return;
     let outcome: { needsApproval?: boolean } | undefined;
+    setBeforeSelectError(null);
     try {
       if (onConfirm) {
         // Custom confirm handler (e.g., admin approve-with-torrent flow)
@@ -316,6 +320,10 @@ export function InteractiveTorrentSearchModal({
         }
         outcome = { needsApproval: result?.needsApproval === true };
       } else if (hasRequestId) {
+        await beforeSelect?.().catch((err: unknown) => {
+          setBeforeSelectError(err instanceof Error ? err.message : String(err));
+          throw err;
+        });
         await selectTorrent(requestId, confirmTorrent);
       } else {
         if (!fullAudiobook) throw new Error('Audiobook data required to create request');

@@ -5,7 +5,8 @@
  * useBackendMode: the library backend from the public /api/auth/providers (null while loading or on
  * error), so the Explicit controls show in Audiobookshelf mode only.
  * useSetExplicit: PUT /api/requests/[id]/explicit; returns the server's message (shown as a toast)
- * and revalidates the request lists.
+ * and revalidates the plain request keys (the admin table). The filter mutate skips infinite lists:
+ * My Requests reloads its own through RequestCard's onChanged.
  */
 
 'use client';

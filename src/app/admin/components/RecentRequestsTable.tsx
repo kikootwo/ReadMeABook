@@ -968,6 +968,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
           requestStatus={viewDetailsStatus}
           requestId={viewDetailsRequestId}
           requestedByUserId={viewDetailsUserId}
+          requestExplicit={requests.find((r) => r.requestId === viewDetailsRequestId)?.explicit === true}
         />
       )}
     </div>

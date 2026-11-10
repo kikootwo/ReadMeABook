@@ -92,6 +92,24 @@ describe('ExplicitCheckbox', () => {
     expect(screen.queryByText(EXPLICIT_LOCKED_REASON)).toBeNull();
   });
 
+  it('locked and checked keeps the rose tick: no opacity, no native disabled look', () => {
+    render(<ExplicitCheckbox checked={true} onChange={vi.fn()} isAdmin={false} />);
+
+    const cls = box().className;
+    expect(cls).not.toMatch(/opacity/);
+    expect(cls).toMatch(/(^|\s)appearance-none(\s|$)/);
+    expect(cls).toMatch(/(^|\s)checked:bg-rose-600(\s|$)/);
+    expect(cls).not.toMatch(/disabled:[^\s]*bg-/); // a disabled style never repaints the checked box
+  });
+
+  it("an admin's locked box (a re-request in the details modal) gives the re-request reason, not the requester's", () => {
+    render(<ExplicitCheckbox checked={true} onChange={vi.fn()} isAdmin={true} locked={true} />);
+
+    expect(box()).toBeDisabled();
+    expect(screen.getByText('A re-request keeps the mark')).toBeVisible();
+    expect(screen.queryByText(EXPLICIT_LOCKED_REASON)).toBeNull();
+  });
+
   it('has a 44px touch target', () => {
     render(<ExplicitCheckbox checked={false} onChange={vi.fn()} isAdmin={false} />);
 
@@ -143,15 +161,25 @@ describe('RequestCard Explicit control', () => {
   });
 
   it('confirming saves through the mark route; a server message becomes a toast', async () => {
-    setExplicitMock.mockResolvedValue({ explicit: true, message: "Saved. Audiobookshelf wasn't updated: x." });
+    setExplicitMock.mockResolvedValue({ explicit: true, message: "Saved. Audiobookshelf wasn't updated; an admin needs to check it." });
     render(<RequestCard request={request()} />);
 
     fireEvent.click(box());
     fireEvent.click(screen.getByRole('button', { name: 'Mark explicit' }));
 
     await waitFor(() => expect(setExplicitMock).toHaveBeenCalledWith('req-1', true));
-    await waitFor(() => expect(toastMock.warning).toHaveBeenCalledWith("Saved. Audiobookshelf wasn't updated: x.", 10000));
+    await waitFor(() => expect(toastMock.warning).toHaveBeenCalledWith("Saved. Audiobookshelf wasn't updated; an admin needs to check it.", 10000));
     expect(box()).toBeChecked();
+  });
+
+  it("a saved mark asks the list to reload (onChanged), so the card's data holds the mark", async () => {
+    const onChanged = vi.fn();
+    render(<RequestCard request={request()} onChanged={onChanged} />);
+
+    fireEvent.click(box());
+    fireEvent.click(screen.getByRole('button', { name: 'Mark explicit' }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
   });
 
   it('a failed save puts the box back and says why', async () => {

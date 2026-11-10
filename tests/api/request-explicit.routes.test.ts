@@ -3,9 +3,9 @@
  * Documentation: documentation/features/explicit-flag.md
  *
  * The requester or an admin sets the mark; only an admin clears it. A mark on a book already in
- * the library (Audiobookshelf mode) writes the flag at once after the key-user check, and a repeat
- * mark retries it; a failure says ABS wasn't updated and promises nothing more. Clearing writes
- * nothing to ABS and says what is left to do. Real: the route, explicit-flag. Mocked: prisma, auth,
+ * the library (Audiobookshelf mode) writes the flag at once after the key-user check; an admin's
+ * repeat mark retries it, a requester's is a plain 200. A failure says ABS wasn't updated in a short
+ * line by viewer. No row updated is a 404. Clearing writes nothing to ABS and says what is left to do. Real: the route, explicit-flag. Mocked: prisma, auth,
  * config, writeABSItem, canKeyUserSeeExplicit.
  */
 
@@ -83,7 +83,19 @@ describe('PUT /api/requests/[id]/explicit', () => {
     expect(canSeeMock).not.toHaveBeenCalled();
   });
 
-  it('a repeat mark on an available book retries the write without a DB write', async () => {
+  it("a requester's repeat mark on an already marked request: a plain 200, no Audiobookshelf call (the scan repair retries)", async () => {
+    prismaMock.request.findFirst.mockResolvedValue(row({ explicit: true }));
+
+    const res = await put({ explicit: true });
+
+    expect(res).toEqual({ status: 200, body: { success: true, request: { id: 'req-1', explicit: true } } });
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+    expect(canSeeMock).not.toHaveBeenCalled();
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it("an admin's repeat mark on an available book retries the write without a DB write", async () => {
+    as('admin');
     prismaMock.request.findFirst.mockResolvedValue(row({ explicit: true }));
 
     const res = await put({ explicit: true });
@@ -93,21 +105,40 @@ describe('PUT /api/requests/[id]/explicit', () => {
     expect(writeMock).toHaveBeenCalledWith('li-1', { explicit: true });
   });
 
+  const guardFails = () => canSeeMock.mockResolvedValue(false);
+  const write403 = () => writeMock.mockResolvedValue({ tags: 'none', addedTags: [], explicit: 'failed', error: 'ABS API error: 403 Forbidden', httpStatus: 403 });
+  const writeTimeout = () => writeMock.mockResolvedValue({ tags: 'none', addedTags: [], explicit: 'failed', error: 'aborted due to timeout' });
+  const REQUESTER_MSG = "Saved. Audiobookshelf wasn't updated; an admin needs to check it.";
+  const GUARD_MSG = "Saved. Audiobookshelf wasn't updated: its API user can't see explicit content.";
+  const WRITE_MSG = "Saved. Audiobookshelf wasn't updated; the next library scan tries again.";
+
   it.each([
-    ["the key user can't see explicit books", () => canSeeMock.mockResolvedValue(false), "can't see explicit books"],
-    ['a 403 on the write', () => writeMock.mockResolvedValue({ tags: 'none', addedTags: [], explicit: 'failed', error: 'ABS API error: 403 Forbidden', httpStatus: 403 }), 'needs permission to update items'],
-    ['a timeout', () => writeMock.mockResolvedValue({ tags: 'none', addedTags: [], explicit: 'failed', error: 'aborted due to timeout' }), 'the write failed (aborted due to timeout)'],
-  ])('%s: saved; the message says Audiobookshelf was not updated and promises no later retry', async (_label, arrange, reason) => {
+    ['requester', "the key user can't see explicit books", guardFails, REQUESTER_MSG],
+    ['requester', 'a 403 on the write', write403, REQUESTER_MSG],
+    ['requester', 'a timeout', writeTimeout, REQUESTER_MSG],
+    ['admin', "the key user can't see explicit books", guardFails, GUARD_MSG],
+    ['admin', 'a 403 on the write', write403, WRITE_MSG],
+    ['admin', 'a timeout', writeTimeout, WRITE_MSG],
+  ] as const)('%s, %s: saved; a short message by viewer, no raw error text', async (viewer, _label, arrange, message) => {
+    if (viewer === 'admin') as('admin');
     arrange();
 
     const res = await put({ explicit: true });
 
     expect(res.status).toBe(200);
     expect(res.body.absUpdated).toBe(false);
-    expect(res.body.message).toMatch(/^Saved\. Audiobookshelf wasn't updated: /);
-    expect(res.body.message).toContain(reason);
-    expect(res.body.message).not.toMatch(/scan|retr/i);
-    if (reason.includes("can't see")) expect(writeMock).not.toHaveBeenCalled();
+    expect(res.body.message).toBe(message);
+    expect(res.body.message).not.toMatch(/403|timeout|Forbidden|API key/i);
+    if (arrange === guardFails) expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it('no row updated (replaced or deleted since the read): 404, nothing written to Audiobookshelf', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await put({ explicit: true });
+
+    expect(res).toEqual({ status: 404, body: { error: 'NotFound', message: 'Request not found' } });
+    expect(writeMock).not.toHaveBeenCalled();
   });
 
   it('the requester cannot clear: 403, nothing written', async () => {
@@ -129,13 +160,13 @@ describe('PUT /api/requests/[id]/explicit', () => {
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith({ where: { id: 'req-1', deletedAt: null }, data: { explicit: false } });
     expect(writeMock).not.toHaveBeenCalled();
     expect(canSeeMock).not.toHaveBeenCalled();
-    expect(res.body.message).toBe('Mark removed. Audiobookshelf still marks this book explicit; change it there.');
+    expect(res.body.message).toBe('Mark removed. If the book is marked explicit in Audiobookshelf, change it there.');
   });
 
   it.each([
-    [1, '1 other request for this book is still marked; remove that mark too, or ReadMeABook will mark the book explicit again.'],
-    [2, '2 other requests for this book are still marked; remove those marks too, or ReadMeABook will mark the book explicit again.'],
-  ])('an admin clear counts %i other marked request(s) of the book', async (others, line) => {
+    [1, '1 other request for this book is still marked; remove that mark too, or ReadMeABook marks the book explicit again once delivered.'],
+    [2, '2 other requests for this book are still marked; remove those marks too, or ReadMeABook marks the book explicit again once delivered.'],
+  ])('an admin clear counts %i other marked request(s) that can still flag the book', async (others, line) => {
     as('admin');
     prismaMock.request.findFirst.mockResolvedValue(row({ explicit: true, status: 'failed' }));
     prismaMock.request.count.mockResolvedValue(others);
@@ -144,7 +175,10 @@ describe('PUT /api/requests/[id]/explicit', () => {
 
     expect(res.body.message).toBe(line);
     expect(prismaMock.request.count).toHaveBeenCalledWith({
-      where: { audiobookId: 'ab-1', id: { not: 'req-1' }, type: 'audiobook', deletedAt: null, explicit: true },
+      where: {
+        audiobookId: 'ab-1', id: { not: 'req-1' }, type: 'audiobook', deletedAt: null, explicit: true,
+        status: { notIn: ['cancelled', 'denied'] },
+      },
     });
   });
 

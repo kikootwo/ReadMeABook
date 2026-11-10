@@ -282,6 +282,7 @@ function MyRequestsContent() {
     isLoadingMore,
     isEmpty,
     loadMore,
+    revalidate,
   } = useMyRequests(filter);
 
   const countsLoaded = !isLoading || requests.length > 0;
@@ -379,7 +380,8 @@ function MyRequestsContent() {
                 style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
                 className="animate-[fadeInUp_0.25s_ease-out_both]"
               >
-                <RequestCard request={request} showActions={true} />
+                {/* revalidate reloads every loaded page (a filter mutate skips the infinite list) */}
+                <RequestCard request={request} showActions={true} onChanged={() => void revalidate()} />
               </div>
             ))}
           </div>
