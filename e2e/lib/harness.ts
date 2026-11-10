@@ -180,6 +180,8 @@ export interface Recorded {
   added?: { hash?: string; nzoId?: string; releaseId: string | null }[];
   /** qBittorrent add: hashes the client already had (answered "Fails." when nothing was new). */
   duplicates?: string[];
+  /** qBittorrent multipart add: each uploaded .torrent as received (#290). */
+  files?: { filename: string; bytes: number; sha256: string }[];
   /** Form fields: qBittorrent delete / setCategory / add / create|editCategory, SABnzbd addfile. */
   body?: { hashes?: string; deleteFiles?: boolean; category?: string; savePath?: string; autoTMM?: string; savepath?: string; cat?: string };
 }
