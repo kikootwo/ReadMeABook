@@ -45,11 +45,12 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
   - **Plex:** ASIN extracted from Plex GUID (e.g., `com.plexapp.agents.audible://B00ABC123`) + stored in dedicated field
   - **Audiobookshelf:** ASIN/ISBN retrieved directly from ABS metadata + stored in dedicated fields
   - **Matching:** Prioritizes exact ASIN/ISBN matches (100% confidence) before fuzzy title/author matching
-- **Cached cover path:** Local path to cached library cover (e.g., `/app/cache/library/{hash}.jpg`), populated during scans
+- **Cached cover path:** Local path to cached library cover, populated during scans. Audiobookshelf: `/app/cache/library/<hash>-<ASIN>.<ext>` (the ASIN the file was fetched for; a legacy `<hash>.<ext>` name carries none, see [fixes/file-hash-matching.md](../fixes/file-hash-matching.md)); Plex: `/app/cache/library/<hash>.<ext>`
 
 ### Audiobooks
 - `id` (UUID PK), `audible_asin` (nullable), `title`, `author`, `narrator`, `description`
 - `cover_art_url`, `file_path`, `file_format`, `file_size_bytes`
+  - **File fields:** the audiobook organize writes `file_path` and `file_format` (organize-files.processor.ts ~301); the ebook organize overwrites both on the same row with the ebook's folder and format (~899-908), so neither is reliable for an audiobook once an ebook was organized. `file_size_bytes` is never written. The Library view never reads `file_format` and withholds the admin path after an ebook organize ([features/library-view.md](../features/library-view.md))
 - `plex_guid` (nullable), `plex_library_id` (nullable), `abs_item_id` (nullable)
 - `library_asin` (nullable, #325a) - ASIN of the linked ABS item when it differs from `audible_asin`; written only by the library scans' follow ([fixes/file-hash-matching.md](../fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)); display only; the Prisma client omits it from every audiobook result unless a query selects it (`src/lib/db.ts`)
 - `files_hash` (nullable) - SHA256 hash of sorted audio filenames for library matching

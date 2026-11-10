@@ -11,7 +11,7 @@
  * Indexed once per load so a 30k-row library merges in linear time.
  */
 
-import { asinShaped } from '@/lib/utils/asin';
+import { ASIN_PATTERN } from '@/lib/utils/asin';
 
 export interface AsinIndexedRow {
   plexGuid: string;
@@ -39,7 +39,7 @@ export function buildAsinIndex<T extends AsinIndexedRow>(rows: readonly T[]): As
   const byField = new Map<string, T>();
   const byGuid = new Map<string, T>();
   for (const row of rows) {
-    const field = row.asin?.trim().toUpperCase();
+    const field = row.asin?.toUpperCase();
     if (field && !byField.has(field)) byField.set(field, row);
     for (const w of new Set(guidAsinWindows(row.plexGuid))) {
       if (!byGuid.has(w)) byGuid.set(w, row);
@@ -50,10 +50,11 @@ export function buildAsinIndex<T extends AsinIndexedRow>(rows: readonly T[]): As
 
 /** The library row the ASIN rule picks for `asin`, or null. Field match beats guid match. */
 export function matchByAsin<T extends AsinIndexedRow>(index: AsinIndex<T>, asin: string | null | undefined): T | null {
-  const value = asin?.trim().toUpperCase();
-  if (!value) return null;
+  // Like findPlexMatch: an empty/blank ASIN never matches; the value itself is not trimmed
+  if (!asin || asin.trim() === '') return null;
+  const value = asin.toUpperCase();
   const byField = index.byField.get(value);
   if (byField) return byField;
-  const shaped = asinShaped(value);
+  const shaped = ASIN_PATTERN.test(value) ? value : null;
   return shaped ? index.byGuid.get(shaped) ?? null : null;
 }

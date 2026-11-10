@@ -121,6 +121,9 @@
 - **Pages: home, search, requests, profile** → [frontend/components.md](frontend/components.md)
 - **Home page sections (per-user, configurable)** → [features/home-sections.md](features/home-sections.md)
 
+## Library View
+- **Library page (/library), GET /api/library (list + live mode), filters/facets, detail view, Live updates** → [features/library-view.md](features/library-view.md)
+
 ## BookDate (AI Recommendations)
 - **AI-powered recommendations, swipe interface** → [features/bookdate.md](features/bookdate.md)
 - **Configuration, OpenAI/Claude integration** → [features/bookdate.md](features/bookdate.md)
@@ -170,6 +173,7 @@
 **"How do I use Transmission instead of qBittorrent?"** → [phase3/download-clients.md](phase3/download-clients.md)
 **"How do I set different download paths per client?"** → [phase3/download-clients.md](phase3/download-clients.md#per-client-custom-download-path)
 **"How do I test a branch end to end without touching my own Docker setup?"** → [testing/e2e-harness.md](testing/e2e-harness.md)
+**"How does the Library page work?"** → [features/library-view.md](features/library-view.md)
 **"How does Plex matching work?"** → [integrations/plex.md](integrations/plex.md)
 **"How does e-book support work?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 **"How do I enable e-book downloads?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md), [settings-pages.md](settings-pages.md#e-book-sidecar)

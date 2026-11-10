@@ -8,7 +8,7 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 ## Key Details
 - **Route:** `src/app/api/library/route.ts`, `requireAuth` (all roles; refuses deleted/pending accounts). **Not** on `API_TOKEN_ALLOWED_ENDPOINTS`.
 - **Engine:** `src/lib/library-view/` (kept apart from `src/lib/services/library/`, the backend adapters):
-  - `params.ts` (strict query parsing), `cursor.ts` (opaque keyset cursor), `loader.ts` (Prisma loads, live query), `merge.ts` (pure merge/derive), `query.ts` (pure filter/facets/sort/page/groups), `enrich.ts` (per-page covers/size/admin path), `serialize.ts` (the one gating choke point), `asin-rule.ts` (the ASIN rule), `types.ts` (exported response types), `constants.ts`.
+  - `service.ts` (full + live pipelines), `params.ts` (strict query parsing), `cursor.ts` (opaque keyset cursor), `loader.ts` (Prisma loads, live query), `merge.ts` (pure merge/derive), `query.ts` (pure filter/facets/sort/page/groups), `enrich.ts` (per-page covers/size/admin path), `serialize.ts` (the one gating choke point), `asin-rule.ts` (the ASIN rule), `types.ts` (exported response types), `constants.ts`.
 - **Pipeline (full mode):** load (one RepeatableRead transaction) → merge → derive → filter/facet/sort/page → page enrichment → serialize per viewer.
 - **Active library id:** ABS `audiobookshelf.library_id`, Plex `plex_audiobook_library_id` (bookdate/library pattern). Never `audiobookshelf.ebook_library_id`. None configured → 200 with RMAB entries only, `libraryConfigured:false`.
 
