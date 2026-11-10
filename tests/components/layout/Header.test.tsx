@@ -415,7 +415,11 @@ describe('Header', () => {
     // jsdom has no layout: the e2e header check measures overflow at 768 and 1024
     const nav = screen.getByRole('link', { name: 'Library' }).closest('nav')!;
     expect(nav.className).toContain('hidden lg:flex');
+    expect(nav.className).toContain('whitespace-nowrap'); // "My Requests" never wraps
     expect(screen.getByRole('button', { name: 'Toggle menu' }).className).toContain('lg:hidden');
     expect(screen.getByText('a-sixteen-chars!').className).toContain('hidden xl:inline');
+    // The version badge steps aside while the inline nav is on a narrow desktop (1024-1279)
+    const badge = (await screen.findByText(/v\.test/)).closest('div.flex-shrink-0')!;
+    expect(badge.className).toContain('hidden sm:block lg:hidden xl:block');
   });
 });

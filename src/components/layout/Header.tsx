@@ -132,14 +132,14 @@ export function Header() {
                 ReadMeABook
               </span>
             </Link>
-            {/* Hide version badge on mobile to prevent overlap */}
-            <div className="hidden sm:block flex-shrink-0">
+            {/* Version badge: not on phones; from 1024 to 1279 px the inline nav needs its room */}
+            <div className="hidden sm:block lg:hidden xl:block flex-shrink-0">
               <VersionBadge />
             </div>
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center gap-5 xl:gap-6">
+          <nav className="hidden lg:flex items-center gap-5 xl:gap-6 whitespace-nowrap">
             <Link
               href="/"
               className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
