@@ -23,7 +23,7 @@ import { test, expect } from '@playwright/test';
 import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, waitFor, writeEvidence, type Book } from '../../lib/harness';
 import { asApp, psql, sqlStr } from './242-helpers';
 import {
-  absItemFor, adminPage, blocklistRows, bookFolder, devOf, elementShot, fileId, filesUnder, fullShot, loadRelease, openPaths,
+  absBookPageShot, absItemFor, adminPage, blocklistRows, bookFolder, devOf, elementShot, fileId, filesUnder, fullShot, loadRelease, openPaths,
   requestAndWait, requestMessage, requestStatus, savePaths, seedBook, SHARED_DOWNLOADS, STOCK_DOWNLOADS, torrentOf,
 } from './68-helpers';
 
@@ -224,7 +224,7 @@ test('3: separate mounts, Hard link only: nothing imported, request in warn; Ret
   expect.soft(after.download.map((f) => f.sha), 'download unchanged').toEqual(before.map((f) => f.sha));
 });
 
-test('1, 4, 5: one mount, Hard link + OPF: one file on disk, Audiobookshelf reads the OPF, the download is never changed', async () => {
+test('1, 4, 5: one mount, Hard link + OPF: one file on disk, Audiobookshelf reads the OPF, the download is never changed', async ({ browser }) => {
   asApp(`mkdir -p ${SHARED_DOWNLOADS}`);
   expect((await savePaths(rmab, { ...OFF, downloadDir: SHARED_DOWNLOADS, filePlacement: 'hardlink', metadataOpfEnabled: true })).status).toBe(200);
   const book = books.martian;
@@ -246,8 +246,9 @@ test('1, 4, 5: one mount, Hard link + OPF: one file on disk, Audiobookshelf read
   expect.soft(library.length, 'one audio file').toBe(1);
   expect.soft(library[0] && { dev: library[0].dev, ino: library[0].ino, nlink: library[0].nlink, sha: library[0].sha }, 'library file IS the download')
     .toEqual(download[0] && { dev: download[0].dev, ino: download[0].ino, nlink: 2, sha: download[0].sha });
-  expect.soft(Boolean(opf && cover), 'metadata.opf and cover.jpg written').toBe(true);
-  expect.soft(leg1.cover?.nlink, 'cover is its own file').toBe(1);
+  expect.soft(leg1.opf?.nlink, 'metadata.opf written, its own file').toBe(1);
+  // The fixture's cover is inside the m4b and offline there is no cover URL: a cover.jpg, if any, is a copy
+  if (leg1.cover) expect.soft(leg1.cover.nlink, 'cover.jpg is its own file').toBe(1);
   expect.soft(libraryAll.filter((f) => /\.tmp$|\.part$|rmab-partial/.test(f)), 'no partials').toEqual([]);
   expect.soft(jobLines).toContain('Linked 1 file(s) to the download (one copy on disk)');
   expect.soft(leg1.message, 'no request message').toBe('');
@@ -262,6 +263,8 @@ test('1, 4, 5: one mount, Hard link + OPF: one file on disk, Audiobookshelf read
   expect.soft(item.asin).toBe(book.asin);
   expect.soft(String(item.publishedYear)).toBe('2011');
   expect.soft(fileId(download[0].path).sha, 'ABS scan did not change the file').toBe(download[0].sha);
+  const shotError = await absBookPageShot(browser, item.id, book.title, 'abs-book-page-opf-metadata');
+  expect.soft(shotError, 'Audiobookshelf book page screenshot').toBeNull();
 
   // 5. Seeded-torrent cleanup (seeding rule not met), then a request delete
   await rmab.triggerScheduledJob('cleanup_seeded_torrents');

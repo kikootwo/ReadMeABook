@@ -4,7 +4,7 @@
  */
 
 import { expect, type Browser, type Page } from '@playwright/test';
-import { Abs, authState, ctl, evidencePath, fakeArr, Rmab, urls, waitFor, type Book } from '../../lib/harness';
+import { Abs, authState, ctl, env, evidencePath, fakeArr, Rmab, urls, waitFor, type Book } from '../../lib/harness';
 import { markJobs, psql, sh, sqlStr, waitOrganized } from './242-helpers';
 
 export const SHOTS = '68';
@@ -102,6 +102,34 @@ export async function absItemFor(folder: string) {
     publishedYear: m.publishedYear ?? null,
     audioFiles: (full.media?.audioFiles || []).map((f: { metadata?: { path?: string } }) => f.metadata?.path),
   };
+}
+
+/**
+ * Screenshot the Audiobookshelf book page (its own web client, root user from the test env).
+ * Returns null when it worked, else the error text (the API values are the assertion; this is the picture).
+ */
+export async function absBookPageShot(browser: Browser, itemId: string, title: string, name: string): Promise<string | null> {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  try {
+    await page.goto(`${urls.abs()}/`);
+    await page.waitForURL(/\/login/, { timeout: 30_000 });
+    const base = page.url().replace(/\/login.*$/, '');
+    await page.locator('input:not([type=password])').first().fill(env('ABS_ROOT_USER'));
+    await page.locator('input[type=password]').first().fill(env('ABS_ROOT_PASSWORD'));
+    await page.locator('input[type=password]').first().press('Enter');
+    await page.waitForURL((u) => !u.pathname.includes('/login'), { timeout: 30_000 });
+    await page.goto(`${base}/item/${itemId}`);
+    await expect(page.getByText(title).first()).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1_000);
+    await page.screenshot({ path: evidencePath(SHOTS, 'shots', `${name}.jpg`), type: 'jpeg', quality: 82 });
+    return null;
+  } catch (error) {
+    await page.screenshot({ path: evidencePath(SHOTS, `${name}-failed.jpg`), type: 'jpeg', quality: 60 }).catch(() => undefined);
+    return String(error);
+  } finally {
+    await ctx.close();
+  }
 }
 
 /** A browser page on RMAB as the admin. */
