@@ -4,8 +4,10 @@
  *
  * run.mjs --stop-specs 540-stop --stop-cycles 4 --stop-time 10 runs the phases below; between two
  * phases the harness runs a timed `docker stop --time 10` on this run's rmab container and starts it
- * again (stop/stop-<n>.json). Stop-time limits are on the container's own stop (Docker's kill event to
- * the container's exit), not the docker CLI's wall time, which a busy host stretches. A merge is held
+ * again (stop/stop-<n>.json). Times start at Docker's kill event for SIGTERM (daemon clock). The app's
+ * own part (to `[App] node exited`) has limits: 2 s idle, 6 s with a job running. Every stop's whole
+ * container (to its exit) must end inside the stop time with exit 0. PostgreSQL's shutdown checkpoint,
+ * which a busy disk stretches by seconds, and the docker CLI's wall time are logged only. A merge is held
  * busy by SIGSTOPping its ffmpeg (generated audio, short fixtures), so a job is reliably running when
  * the stop lands.
  *   stop-0  merging on, tagging off, nothing running                     → stop 1 (E1: idle)
@@ -28,10 +30,14 @@ import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackLogsSync, wr
 import { psql, setConfig, sh, sqlStr } from './library-delete-helpers';
 
 const phase = process.env.E2E_PHASE ?? '';
-/** containerStopSeconds: Docker's kill event → exit (daemon clock), asserted; killToDieSeconds, stopSeconds (CLI): logged only */
+/**
+ * From the SIGTERM kill event (daemon clock): appStopSeconds to `[App] node exited`, containerStopSeconds to
+ * the exit, both asserted; pgCheckpointSeconds, killToDieSeconds, stopSeconds (CLI): logged only
+ */
 const stops: Array<{
-  cycle: number; containerStopSeconds: number | null; killToDieSeconds: number | null; stopSeconds: number;
-  exitCode: number; health: string[]; healthySeconds: number | null;
+  cycle: number; stopTime: number; appStopSeconds: number | null; containerStopSeconds: number | null;
+  pgCheckpointSeconds: number | null; killToDieSeconds: number | null; stopSeconds: number;
+  exitCode: number | null; health: string[]; healthySeconds: number | null;
 }> =
   JSON.parse(process.env.E2E_STOP_RESULTS || '[]');
 
@@ -245,37 +251,46 @@ test('#540 stop phases', async () => {
 
   save();
 
-  // Checks on values already written. Stop times: the container's own (signal → exit); CLI time is a note
+  // Checks on values already written. Every stop: the whole container exits on its own inside the stop
+  // time, exit 0. Stops 1-3: the app's own part (SIGTERM → node exited) within its limit. A missing
+  // reading is 99 and fails. PostgreSQL's checkpoint and the CLI time are notes.
   const e = (out.e1 ?? out.e2 ?? out.e2b) as ReturnType<typeof stopReport> | undefined;
-  const timing = (e ?? (out.e5 as ReturnType<typeof stopReport> | undefined))?.timing;
+  const f = out.e5 as ReturnType<typeof stopReport> | undefined;
+  const timing = (e ?? f)?.timing;
   if (timing) {
-    const note = `container ${timing.containerStopSeconds ?? 'unread'} s (kill → exit), kill → die ${timing.killToDieSeconds ?? 'unread'} s, docker CLI ${timing.stopSeconds} s`;
+    const s = (v: number | null) => (v === null ? 'unread' : `${v} s`);
+    const note = `app ${s(timing.appStopSeconds)} (kill → node exited), container ${s(timing.containerStopSeconds)} (kill → exit), `
+      + `PostgreSQL checkpoint ${s(timing.pgCheckpointSeconds)}, kill → die ${s(timing.killToDieSeconds)}, docker CLI ${timing.stopSeconds} s, exit ${timing.exitCode}`;
     test.info().annotations.push({ type: `stop ${timing.cycle} seconds`, description: note });
     console.log(`[540-stop] stop ${timing.cycle}: ${note}`);
   }
+  for (const r of [e, f]) {
+    if (!r) continue;
+    expect.soft(r.timing?.containerStopSeconds ?? 99, "container exited inside the stop time, before Docker's kill (kill → exit)")
+      .toBeLessThan(r.timing?.stopTime ?? 10);
+    expect.soft(r.timing?.exitCode, "exit 0, not 137 from Docker's SIGKILL").toBe(0);
+    expect.soft(r.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
+    expect.soft(r.order.pgDown, 'PostgreSQL shut down cleanly').toBeGreaterThan(r.order.pgFastShutdown);
+    expect.soft(r.recoveryNextStart, 'no crash recovery on the next start').toBe(0);
+  }
   if (e) {
-    expect.soft(e.timing?.containerStopSeconds ?? 99, 'container stop seconds (kill → exit)').toBeLessThanOrEqual(phase === 'stop-1' ? 3 : 8);
-    expect.soft(e.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
+    const appLimit = phase === 'stop-1' ? 2 : 6;
+    expect.soft(e.timing?.appStopSeconds ?? 99, `app's own stop seconds (kill → node exited), ${phase === 'stop-1' ? 'idle' : 'job running'}`)
+      .toBeLessThanOrEqual(appLimit);
     expect.soft(e.order.sigterm, '[Shutdown] SIGTERM received').toBeGreaterThanOrEqual(0);
     expect.soft(e.order.done, 'Done after SIGTERM').toBeGreaterThan(e.order.sigterm);
     expect.soft(e.order.nodeExited, 'wrapper waited for node').toBeGreaterThan(e.order.done);
     expect.soft(e.order.pgFastShutdown, 'PostgreSQL stopped after node').toBeGreaterThan(e.order.nodeExited);
     expect.soft(e.terminatingConnections, 'no sessions left for PostgreSQL to end').toBe(0);
-    expect.soft(e.recoveryNextStart, 'no crash recovery on the next start').toBe(0);
     if (phase !== 'stop-1') expect.soft(e.shutdown.join('\n'), 'job left for retry').toContain('left for retry on next start');
   }
-  const f = out.e5 as ReturnType<typeof stopReport> | undefined;
   if (f) {
-    // Frozen node: the wrapper's wall-clock watchdog ends it, so PostgreSQL and Redis still stop cleanly
-    expect.soft(f.timing?.containerStopSeconds ?? 99, "container exited before Docker's kill (kill → exit)").toBeLessThan(10);
-    expect.soft(f.timing?.exitCode, "exit 0, not 137 from Docker's SIGKILL").toBe(0);
-    expect.soft(f.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
+    // Frozen node: the wrapper's wall-clock watchdog ends it (its 6 s is the app's part here, logged), so
+    // PostgreSQL and Redis still stop cleanly; container, exit code and recovery are checked above
     expect.soft(f.order.sigterm, 'frozen node ran no shutdown').toBe(-1);
     expect.soft(f.order.watchdog, 'wrapper SIGKILLed node by wall clock').toBeGreaterThanOrEqual(0);
     expect.soft(f.order.nodeExited, 'node exited after the watchdog').toBeGreaterThan(f.order.watchdog);
     expect.soft(f.shutdown.join('\n'), 'node status 137').toContain('node exited (status 137)');
     expect.soft(f.order.pgFastShutdown, 'PostgreSQL stopped after node').toBeGreaterThan(f.order.nodeExited);
-    expect.soft(f.order.pgDown, 'PostgreSQL shut down cleanly').toBeGreaterThan(f.order.pgFastShutdown);
-    expect.soft(f.recoveryNextStart, 'no crash recovery on the next start').toBe(0);
   }
 });
