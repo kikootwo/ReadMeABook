@@ -15,14 +15,17 @@ export interface UserSession {
   storage: { cookies: never[]; origins: { origin: string; localStorage: { name: string; value: string }[] }[] };
 }
 
+/** A documentation-range address (TEST-NET-2) per name: the register route keys its limit on a valid client address. */
+const addressFor = (name: string) => `198.51.100.${([...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 254) + 1}`;
+
 /**
  * Register a local user (registration on, no approval) with auto-approve on, and keep its tokens as a
- * browser storage state. The register route allows 5 attempts an hour per X-Forwarded-For value.
+ * browser storage state. The register route allows 5 attempts an hour per client address.
  */
 export async function registerSession(admin: Rmab, username: string): Promise<UserSession> {
   const res = await fetch(`${urls.rmab()}/api/auth/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `e2e-542-${encodeURIComponent(username)}` },
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': addressFor(username) },
     body: JSON.stringify({ username, password: PASSWORD }),
   });
   const body = await res.json();

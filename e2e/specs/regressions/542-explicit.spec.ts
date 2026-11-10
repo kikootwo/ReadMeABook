@@ -5,8 +5,9 @@
  * Run with: --offline-fixtures --overrides abs-fake-metadata (real ABS; fake Audible/Audnexus answers;
  * generated audio). Schedules off (back on at the end). Names and made-up ASINs carry this run's suffix <r>.
  * 1. Requester tagging OFF (the default). eve<r> (local, auto-approve) opens book A (fixture phm) from
- *    Search: the Explicit row at 375 dark; at 1280 light the tick asks first (confirm shot), then Request
- *    sends explicit: true. B (made up) is requested unmarked through the API.
+ *    Search (search and details answers replayed in the browser: the proxy refuses RMAB's catalog calls):
+ *    the Explicit row at 375 dark; at 1280 light the tick asks first (confirm shot), then Request sends
+ *    explicit: true to the real route. B (made up) is requested unmarked through the API.
  * 2. Both delivered (manual import of generated audio), a manual ABS tag `keepme` on each, ONE
  *    recently-added check: A explicit in ABS with title, authors, ASIN and tags as before; B untouched
  *    (explicit false, not saved again).
@@ -81,9 +82,18 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
 
   // 1. The details modal: the Explicit row at 375 dark; at 1280 light the tick asks first, then Request
   const ui: Record<string, unknown> = {};
+  // Replayed in the browser (page.route): with the fake-metadata proxy RMAB can't reach the catalog
+  const shown = { asin: A.asin, title: A.title, author: A.author, narrator: A.narrator, durationMinutes: A.runtimeMin ?? undefined, language: 'english' };
   const openA = async (page: import('@playwright/test').Page) => {
-    await page.goto(`/search?q=${encodeURIComponent(A.title)}`);
-    await page.getByRole('button', { name: `View details for ${A.title} by ${A.author}` }).first().click();
+    await page.route((url) => url.pathname === '/api/audiobooks/search', (route) =>
+      route.fulfill({ json: { success: true, results: [shown], totalResults: 1, page: 1, hasMore: false } }));
+    await page.route((url) => url.pathname === `/api/audiobooks/${A.asin}`, (route) =>
+      route.fulfill({ json: { success: true, audiobook: shown, audibleBaseUrl: 'https://www.audible.com' } }));
+    await page.goto('/search');
+    await page.getByPlaceholder('Search by title, author, or narrator...').fill(A.title);
+    const card = page.getByRole('button', { name: `View details for ${A.title} by ${A.author}` }).first();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await card.click();
     const box = page.getByRole('checkbox', { name: /^Explicit/ });
     await expect(box).toBeVisible({ timeout: 30_000 });
     await box.scrollIntoViewIfNeeded();
