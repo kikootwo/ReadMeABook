@@ -7,10 +7,13 @@
  * step window doubles while the stored percent does not move, until two rising non-zero values
  * are seen. After each move the real /requests card (1280 light and 375 dark, the page's own 5 s
  * poll) shows the stored percent and a bar of that width; the admin row shows "Merging chapters ·
- * N%" once. Released, the request ends downloaded/available at progress 100 with one merged m4b
- * over the merge's size floor (0.4 MB per minute). "Organizing files" lasts a moment, so its shot
- * is staged (psql), and so is a Downloaded card if the scan has already taken it to available.
- * Tagging off, merging on (both restored). Exec bridge required.
+ * N%" once; the /library card (1280 light at the default size and at size 4, the smallest with
+ * the pill; 375 dark) shows the same percent, first, never cut off. Released, the request ends
+ * downloaded/available at progress 100 with one merged m4b over the merge's size floor (0.4 MB per
+ * minute). The Downloaded card is shot from the real state (staged and named so if the scan has
+ * already taken it to available); "Organizing files" lasts a moment, so its shot is staged (psql)
+ * after it. Tagging off, merging on (both restored). Run with `--offline-fixtures --overrides
+ * abs-fake-metadata` (made-up book names everywhere). Exec bridge required.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -64,6 +67,53 @@ async function firstProgress(id: string): Promise<{ status: string; progress: nu
 const card = (page: Page, title: string) =>
   page.locator('h3', { hasText: title }).locator('xpath=ancestor::div[contains(@class,"shadow-md")][1]');
 
+/**
+ * The /library card at a card size: pill and status line start with the stored percent, which is
+ * not cut off (its glyphs end inside the element's padding box). Also records whether the text is
+ * truncated and whether the old wording ("Merging chapters N%") would have been cut at this size.
+ */
+async function libraryCardAt(page: Page, title: string, percent: number, cardSize: number) {
+  await page.evaluate((size) => localStorage.setItem('preferences', JSON.stringify({ cardSize: size, squareCovers: false, hideAvailable: false })), cardSize);
+  await page.goto('/library');
+  const c = page.locator('[data-library-card]', { hasText: title });
+  await expect(c).toHaveAttribute('aria-label', /Merging chapters$/, { timeout: 30_000 });
+  await c.scrollIntoViewIfNeeded();
+  const pill = c.locator('span.truncate');
+  const line = c.locator('p.truncate').last();
+  await expect(pill).toHaveText(`${percent}% Merging chapters`);
+  await expect(line).toHaveText(`${percent}% · Merging chapters`);
+  // Runs in the page (serialized: no closure over this scope)
+  const measure = (el: Element, old: string) => {
+    const box = el.getBoundingClientRect();
+    const right = box.right - parseFloat(getComputedStyle(el).paddingRight);
+    const text = el.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, text.data.indexOf('%') + 1);
+    const probe = el.cloneNode() as HTMLElement;
+    probe.textContent = old;
+    el.parentElement!.appendChild(probe);
+    const oldCut = probe.scrollWidth > probe.clientWidth;
+    probe.remove();
+    return {
+      text: text.data,
+      width: Math.round(box.width),
+      truncated: (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth,
+      percentVisible: range.getBoundingClientRect().right <= right + 0.5,
+      oldWording: old,
+      oldWordingCut: oldCut,
+    };
+  };
+  const result = {
+    cardSize,
+    pill: await pill.evaluate(measure, `Merging chapters ${percent}%`),
+    line: await line.evaluate(measure, `Merging chapters · ${percent}%`),
+  };
+  expect(result.pill.percentVisible, `size ${cardSize}: the pill shows the percent`).toBe(true);
+  expect(result.line.percentVisible, `size ${cardSize}: the status line shows the percent`).toBe(true);
+  return result;
+}
+
 /** The card shows "Merging chapters", the stored percent and a bar of that width. */
 async function expectCardAt(page: Page, title: string, percent: number) {
   const c = card(page, title);
@@ -75,6 +125,7 @@ async function expectCardAt(page: Page, title: string, percent: number) {
 }
 
 test('#216 the card and the admin row show the chapter merge moving', async ({ browser }) => {
+  test.setTimeout(15 * 60_000); // worst case of the waits below is about 14.5 min
   const started = Date.now();
   const out: Record<string, unknown> = {};
   const save = () => writeEvidence(`${DIR}/result.json`, out);
@@ -147,6 +198,24 @@ test('#216 the card and the admin row show the chapter merge moving', async ({ b
     out.steppedSeconds = Math.round((Date.now() - started) / 1000);
     save();
 
+    // Still held: the Library card shows the same percent as My Requests (default size, size 4, phone)
+    const library: unknown[] = [];
+    const lightLibrary = await session(browser, 1280, 900, false);
+    await lightLibrary.page.goto('/library');
+    library.push({ view: '1280-light', ...(await libraryCardAt(lightLibrary.page, book.title, prev, 5)) });
+    await lightLibrary.settled(DIR, 'library-card-merging-1280-light');
+    library.push({ view: '1280-light', ...(await libraryCardAt(lightLibrary.page, book.title, prev, 4)) });
+    await lightLibrary.settled(DIR, 'library-card-merging-size4-1280-light');
+    await lightLibrary.ctx.close();
+    const darkLibrary = await session(browser, 375, 812, true);
+    await darkLibrary.page.goto('/library');
+    library.push({ view: '375-dark', ...(await libraryCardAt(darkLibrary.page, book.title, prev, 5)) });
+    await darkLibrary.settled(DIR, 'library-card-merging-375-dark');
+    await darkLibrary.ctx.close();
+    out.library = library;
+    expect(stored(id), 'the merge was still held for the Library shots').toEqual({ status: 'processing', progress: prev });
+    save();
+
     // Released: the merge finishes, progress is 100 again and the request moves on
     release(pid);
     pid = '';
@@ -175,24 +244,31 @@ test('#216 the card and the admin row show the chapter merge moving', async ({ b
     expect(Number(probe.duration)).toBeGreaterThan(530);
     expect(mbPerMinute).toBeGreaterThanOrEqual(0.4);
 
-    // Staged: "Organizing files" (processing at 100, not completed yet) lasts a moment in a real run
+    // A Downloaded card is unchanged: no phase line, no bar. Shot from the real state first; staged
+    // (psql, named so) only when the scan has already made it available
     const completedAt = psql(`select completed_at from requests where id = ${sqlStr(id)}`);
-    psql(`update requests set status = 'processing', progress = 100, completed_at = null, updated_at = now() where id = ${sqlStr(id)}`);
-    await light.page.reload();
-    await expect(card(light.page, book.title).getByText('Organizing files', { exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(card(light.page, book.title).getByRole('progressbar')).toHaveCount(0);
-    await light.settled(DIR, 'organizing-files-STAGED-1280-light');
-
-    // A Downloaded card is unchanged: no phase line, no bar (staged when the scan already made it available)
-    const downloadedStaged = final.status !== 'downloaded';
-    psql(`update requests set status = 'downloaded', progress = 100, completed_at = ${completedAt ? sqlStr(completedAt) : 'null'}, updated_at = now() where id = ${sqlStr(id)}`);
-    await light.page.reload();
     const c = card(light.page, book.title);
+    await light.page.reload();
+    const real = stored(id).status === 'downloaded'
+      && await c.getByText('Downloaded', { exact: true }).waitFor({ timeout: 20_000 }).then(() => true, () => false);
+    if (!real) {
+      psql(`update requests set status = 'downloaded', progress = 100, updated_at = now() where id = ${sqlStr(id)}`);
+      await light.page.reload();
+    }
+    out.downloadedShot = real ? 'real' : 'staged';
     await expect(c.getByText('Downloaded', { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(c.getByText(/Organizing files|Merging chapters|library scan/)).toHaveCount(0);
     await expect(c.getByRole('progressbar')).toHaveCount(0);
-    await light.settled(DIR, downloadedStaged ? 'downloaded-card-STAGED-1280-light' : 'downloaded-card-1280-light');
-    psql(`update requests set status = ${sqlStr(final.status)}, progress = 100, updated_at = now() where id = ${sqlStr(id)}`);
+    await light.settled(DIR, real ? 'downloaded-card-1280-light' : 'downloaded-card-STAGED-1280-light');
+    const restoreStatus = real ? stored(id).status : final.status;
+
+    // Staged: "Organizing files" (processing at 100, not completed yet) lasts a moment in a real run
+    psql(`update requests set status = 'processing', progress = 100, completed_at = null, updated_at = now() where id = ${sqlStr(id)}`);
+    await light.page.reload();
+    await expect(c.getByText('Organizing files', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(c.getByRole('progressbar')).toHaveCount(0);
+    await light.settled(DIR, 'organizing-files-STAGED-1280-light');
+    psql(`update requests set status = ${sqlStr(restoreStatus)}, progress = 100, completed_at = ${completedAt ? sqlStr(completedAt) : 'null'}, updated_at = now() where id = ${sqlStr(id)}`);
 
     await light.ctx.close();
     await dark.ctx.close();
