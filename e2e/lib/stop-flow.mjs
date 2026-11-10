@@ -7,6 +7,11 @@
  * run's own rmab container (found by compose project + service + harness label, never by a name from a
  * spec), saves its exit code and the logs, starts it again and waits for Docker's health status.
  * Results go to summary.json (`stops`) and stop/stop-<i>.json for the next phase.
+ * Times per stop: `containerStopSeconds` is the container's own stop, Docker's first `kill` event (the
+ * stop signal) to the container's exit (`State.FinishedAt`, containerd's exit time), both on the daemon's
+ * clock. Specs assert it. `killToDieSeconds` (to Docker's `die` event) and `stopSeconds` (the docker CLI's
+ * wall time on the host) also count the daemon's work after the exit, which a busy machine stretches by
+ * seconds; they are recorded only.
  */
 
 import fs from 'node:fs';
@@ -32,6 +37,60 @@ function inspect(id, format) {
   return run('docker', ['inspect', '-f', format, id], { capture: true, allowFail: true, quiet: true });
 }
 
+/** RFC 3339 time with up to 9 fraction digits (`docker inspect`) → Unix nanoseconds, or null. */
+export function rfc3339Ns(value) {
+  const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)$/.exec(String(value || '').trim());
+  const ms = m ? Date.parse(`${m[1]}${m[3]}`) : NaN;
+  if (!m || !Number.isFinite(ms) || ms <= 0) return null; // Docker's zero time (0001-…) is "never"
+  return BigInt(ms) * 1_000_000n + BigInt((m[2] ?? '').padEnd(9, '0'));
+}
+
+const secondsBetween = (from, to) => Math.round(Number(to - from) / 1e6) / 1e3;
+
+/**
+ * Docker events (`<TimeNano> <Actor.ID> <Action>` lines) + the container's FinishedAt → its last stop:
+ * the first `kill` after any earlier `die` and not after the exit, to the exit. Several kills are
+ * Docker's follow-up signal (SIGKILL at the timeout); lines for other containers are ignored. `seconds`
+ * is null when the kill or the exit is missing; `killToDieSeconds` when the kill or the die is.
+ */
+export function parseStopEvents(text, id, finishedAt) {
+  const events = String(text || '').split(/\r?\n/).map((l) => l.trim().split(/\s+/)).filter(([ns, actor, action]) =>
+    /^\d+$/.test(ns ?? '') && id && actor?.startsWith(id) && (action === 'kill' || action === 'die'))
+    .map(([ns, , action]) => ({ ns: BigInt(ns), action })).sort((a, b) => (a.ns < b.ns ? -1 : a.ns > b.ns ? 1 : 0));
+  const exited = rfc3339Ns(finishedAt);
+  const after = exited === null ? -1n : events.filter((e) => e.action === 'die' && e.ns < exited).at(-1)?.ns ?? -1n;
+  const kill = exited === null ? undefined : events.find((e) => e.action === 'kill' && e.ns > after && e.ns <= exited);
+  const die = kill && events.find((e) => e.action === 'die' && e.ns >= kill.ns);
+  return {
+    seconds: kill ? secondsBetween(kill.ns, exited) : null,
+    killToDieSeconds: die ? secondsBetween(kill.ns, die.ns) : null,
+    events: events.map((e) => `${e.ns} ${e.action}`),
+  };
+}
+
+/**
+ * The container's own stop time. Window: its last StartedAt (`docker inspect`) to the daemon's current
+ * time (`docker info` SystemTime), so the daemon's clock bounds it, never the host's, and a die the
+ * daemon logged late is still inside. Read right after the stop (the daemon keeps only its latest
+ * events), before the next `docker start`. Nulls when anything can't be read: never a guess.
+ */
+export function containerStopTime(id) {
+  const none = { seconds: null, killToDieSeconds: null, exitedAt: null, events: [] };
+  try {
+    const [started, finished] = inspect(id, '{{.State.StartedAt}} {{.State.FinishedAt}}').split(/\s+/);
+    const now = run('docker', ['info', '--format', '{{.SystemTime}}'], { capture: true, allowFail: true, quiet: true, timeoutMs: 30_000 });
+    if (rfc3339Ns(started) === null || rfc3339Ns(finished) === null || rfc3339Ns(now) === null) return none;
+    const out = run('docker', [
+      'events', '--since', started, '--until', now,
+      '--filter', `container=${id}`, '--filter', 'event=kill', '--filter', 'event=die',
+      '--format', '{{.TimeNano}} {{.Actor.ID}} {{.Action}}',
+    ], { capture: true, allowFail: true, quiet: true, timeoutMs: 30_000 });
+    return { ...parseStopEvents(out, id, finished), exitedAt: finished };
+  } catch {
+    return none;
+  }
+}
+
 /** Timed stop + start of the rmab container; returns what the next phase and summary.json need. */
 export async function stopAndStart(id, stopTime) {
   const startedAt = new Date().toISOString();
@@ -39,6 +98,7 @@ export async function stopAndStart(id, stopTime) {
   run('docker', ['stop', '--time', String(stopTime), id]);
   const stopSeconds = Number(process.hrtime.bigint() - t0) / 1e9;
   const exitCode = Number(inspect(id, '{{.State.ExitCode}}'));
+  const container = containerStopTime(id);
   run('docker', ['start', id]);
   const t1 = Date.now();
   const health = [];
@@ -50,7 +110,8 @@ export async function stopAndStart(id, stopTime) {
     await sleep(2000);
   }
   return {
-    startedAt, stopTime, stopSeconds: Math.round(stopSeconds * 100) / 100, exitCode,
+    startedAt, stopTime, containerStopSeconds: container.seconds, killToDieSeconds: container.killToDieSeconds,
+    stopSeconds: Math.round(stopSeconds * 100) / 100, exitedAt: container.exitedAt, stopEvents: container.events, exitCode,
     health, healthySeconds: status === 'healthy' ? Math.round((Date.now() - t1) / 1000) : null,
   };
 }

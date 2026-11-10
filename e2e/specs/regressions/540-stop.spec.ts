@@ -4,8 +4,10 @@
  *
  * run.mjs --stop-specs 540-stop --stop-cycles 4 --stop-time 10 runs the phases below; between two
  * phases the harness runs a timed `docker stop --time 10` on this run's rmab container and starts it
- * again (stop/stop-<n>.json). A merge is held busy by SIGSTOPping its ffmpeg (generated audio, short
- * fixtures), so a job is reliably running when the stop lands.
+ * again (stop/stop-<n>.json). Stop-time limits are on the container's own stop (Docker's kill event to
+ * the container's exit), not the docker CLI's wall time, which a busy host stretches. A merge is held
+ * busy by SIGSTOPping its ffmpeg (generated audio, short fixtures), so a job is reliably running when
+ * the stop lands.
  *   stop-0  merging on, tagging off, nothing running                     → stop 1 (E1: idle)
  *   stop-1  E1 log order; martian merge held                             → stop 2 (E2: job running)
  *   stop-2  E2 log lines, rerun → downloaded, temp leftovers; artemis merge held, node SIGKILLed
@@ -26,7 +28,11 @@ import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackLogsSync, wr
 import { psql, setConfig, sh, sqlStr } from './library-delete-helpers';
 
 const phase = process.env.E2E_PHASE ?? '';
-const stops: Array<{ cycle: number; stopSeconds: number; exitCode: number; health: string[]; healthySeconds: number | null }> =
+/** containerStopSeconds: Docker's kill event → exit (daemon clock), asserted; killToDieSeconds, stopSeconds (CLI): logged only */
+const stops: Array<{
+  cycle: number; containerStopSeconds: number | null; killToDieSeconds: number | null; stopSeconds: number;
+  exitCode: number; health: string[]; healthySeconds: number | null;
+}> =
   JSON.parse(process.env.E2E_STOP_RESULTS || '[]');
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -239,10 +245,16 @@ test('#540 stop phases', async () => {
 
   save();
 
-  // Checks on values already written
+  // Checks on values already written. Stop times: the container's own (signal → exit); CLI time is a note
   const e = (out.e1 ?? out.e2 ?? out.e2b) as ReturnType<typeof stopReport> | undefined;
+  const timing = (e ?? (out.e5 as ReturnType<typeof stopReport> | undefined))?.timing;
+  if (timing) {
+    const note = `container ${timing.containerStopSeconds ?? 'unread'} s (kill → exit), kill → die ${timing.killToDieSeconds ?? 'unread'} s, docker CLI ${timing.stopSeconds} s`;
+    test.info().annotations.push({ type: `stop ${timing.cycle} seconds`, description: note });
+    console.log(`[540-stop] stop ${timing.cycle}: ${note}`);
+  }
   if (e) {
-    expect.soft(e.timing?.stopSeconds ?? 99, 'docker stop seconds').toBeLessThanOrEqual(phase === 'stop-1' ? 3 : 8);
+    expect.soft(e.timing?.containerStopSeconds ?? 99, 'container stop seconds (kill → exit)').toBeLessThanOrEqual(phase === 'stop-1' ? 3 : 8);
     expect.soft(e.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
     expect.soft(e.order.sigterm, '[Shutdown] SIGTERM received').toBeGreaterThanOrEqual(0);
     expect.soft(e.order.done, 'Done after SIGTERM').toBeGreaterThan(e.order.sigterm);
@@ -255,7 +267,7 @@ test('#540 stop phases', async () => {
   const f = out.e5 as ReturnType<typeof stopReport> | undefined;
   if (f) {
     // Frozen node: the wrapper's wall-clock watchdog ends it, so PostgreSQL and Redis still stop cleanly
-    expect.soft(f.timing?.stopSeconds ?? 99, "container exited before Docker's kill").toBeLessThan(10);
+    expect.soft(f.timing?.containerStopSeconds ?? 99, "container exited before Docker's kill (kill → exit)").toBeLessThan(10);
     expect.soft(f.timing?.exitCode, "exit 0, not 137 from Docker's SIGKILL").toBe(0);
     expect.soft(f.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
     expect.soft(f.order.sigterm, 'frozen node ran no shutdown').toBe(-1);
