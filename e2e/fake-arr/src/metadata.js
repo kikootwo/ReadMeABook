@@ -10,7 +10,8 @@
  * forwarded. Data comes from the fixture book index (offline fixtures: made-up titles); every free-text
  * field is synthetic.
  *   api.audible.<tld>  GET /1.0/catalog/products?title=&author=  → { products: [{ asin }] }
- *   api.audnex.us      GET /books/<ASIN>                         → Audnexus-shaped book (no image)
+ *   api.audnex.us      GET /books/<ASIN>                         → Audnexus-shaped book (no image); `genres` holds
+ *                      `type:'tag'` entries only for an ASIN given tags with POST /__control/metadata-tags (#232)
  *                      GET /authors?name=                        → []
  *   other Audible/Audnexus paths → 404; non-GET to a faked host → 405; any other host or CONNECT → 403
  */
@@ -51,7 +52,7 @@ export function searchBooks(books, title) {
   });
 }
 
-export function audnexusBook(book) {
+export function audnexusBook(book, tags = []) {
   return {
     asin: book.asin,
     title: book.title,
@@ -62,7 +63,7 @@ export function audnexusBook(book) {
     summary: `<p>Synthetic e2e summary for ${book.title}. Not a real book description.</p>`,
     description: `Synthetic e2e summary for ${book.title}.`,
     releaseDate: '2020-01-01T00:00:00.000Z',
-    genres: [],
+    genres: tags.map((name, i) => ({ asin: `E2ETAG${String(i).padStart(4, '0')}`, name, type: 'tag' })),
     language: 'english',
     runtimeLengthMin: book.runtimeMin || 60,
     formatType: 'unabridged',
@@ -127,7 +128,7 @@ export async function handleMetadata(state, req, res, entry) {
     const m = target.pathname.match(/^\/books\/([A-Za-z0-9]{10})$/);
     if (m) {
       const book = Object.values(books).find((b) => b.asin.toUpperCase() === m[1].toUpperCase());
-      return book ? sendJson(res, 200, audnexusBook(book)) : sendJson(res, 404, { error: 'Book not found' });
+      return book ? sendJson(res, 200, audnexusBook(book, state.metadataTags?.get(book.asin.toUpperCase()) ?? [])) : sendJson(res, 404, { error: 'Book not found' });
     }
     if (target.pathname === '/authors') return sendJson(res, 200, []);
     return sendJson(res, 404, { error: 'not faked' });

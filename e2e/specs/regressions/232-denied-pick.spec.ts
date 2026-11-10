@@ -7,13 +7,15 @@
  * releases for, or pick a release for, the denied request (403 RequestDenied; on main the pick
  * started a download, because select-torrent re-checks approval on current settings only). The
  * admin still can: the admin's search returns results and the admin's pick starts the download.
- * API-level (real routes, real Prowlarr fake, real download job queue).
+ * API-level (real routes, real Prowlarr fake, real download job queue). The admin cancels the
+ * request at the end, so nothing is left downloading for later specs.
  */
 
 import { test, expect } from '@playwright/test';
 import { fakeArr, urls, writeEvidence, Rmab } from '../../lib/harness';
 
-const USER = { username: 'carol232', password: 'e2e-carol-232-pass' };
+// A fresh name per run, so the spec can run again on the same stack
+const USER = { username: `carol232-${Date.now().toString(36)}`, password: 'e2e-carol-232-pass' };
 
 async function registerUser(admin: Rmab): Promise<{ id: string; rmab: Rmab }> {
   const settings = await admin.raw('PUT', '/api/admin/settings/registration', { enabled: true, requireAdminApproval: false });
@@ -85,4 +87,8 @@ test('#232: a user can\'t search or pick a release for a denied request; an admi
   expect.soft(afterUserPick, 'the request stays denied after the user\'s pick').toBe('denied');
   expect.soft(adminPick.status, 'admin pick on a denied request').toBe(200);
   expect.soft(afterAdminPick, 'the admin\'s pick starts the download').toBe('downloading');
+
+  // Leave nothing downloading: other specs request martian
+  const cancel = await admin.raw('POST', `/api/requests/${requestId}/cancel`);
+  expect.soft(cancel.status, 'cleanup: the admin cancels the request').toBe(200);
 });

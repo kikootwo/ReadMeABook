@@ -9,8 +9,11 @@ import { prisma } from '../db';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
 import { RMABLogger } from '../utils/logger';
-import { oncePerProcess, peekProcessSingleton, processSingleton } from '../utils/process-singleton';
+import { processSingleton } from '../utils/process-singleton';
+import { isProcessStopping } from '../utils/process-stopping';
 import { markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
+import { createQueueShutdownTarget, JOB_QUEUE_SINGLETON_KEY, JobActivityTracker, QueueShutdownTarget } from './job-activity-tracker';
+import { handleStallLimitFailure } from './job-stall-failure';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
 
 const logger = RMABLogger.create('JobQueue');
@@ -31,6 +34,7 @@ export type JobType =
   | 'monitor_rss_feeds'
   | 'sync_reading_shelves'
   | 'check_watched_lists'
+  | 'backfill_requester_tags'
   | 'send_notification'
   // Ebook-specific job types
   | 'search_ebook'
@@ -201,6 +205,8 @@ export class JobQueueService {
   private redis: Redis;
   /** Schedule ids already warned about a missing scheduled_jobs row (one warning per id) */
   private missingScheduleWarned = new Set<string>();
+  /** Jobs running in this process and pending jobs-table writes (read at shutdown) */
+  private readonly activity = new JobActivityTracker();
 
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -235,7 +241,9 @@ export class JobQueueService {
     this.queue.setMaxListeners(20);
 
     this.setupEventHandlers();
-    this.startProcessors();
+    // A queue created while the app is stopping must not start a job it would cut
+    if (isProcessStopping()) logger.warn('App is stopping; job processors not started');
+    else this.startProcessors();
   }
 
   /**
@@ -244,18 +252,14 @@ export class JobQueueService {
   private setupEventHandlers(): void {
     this.queue.on('completed', async (job: BullJob, result: any) => {
       logger.info(`Job ${job.id} completed`, { result });
-      await this.updateJobInDatabase(job.id as string, 'completed', result);
+      await this.activity.trackWrite(this.updateJobInDatabase(job.id as string, 'completed', result));
     });
 
-    this.queue.on('failed', async (job: BullJob, error: Error) => {
+    this.queue.on('failed', async (job: BullJob | null, error: Error) => {
+      if (!job) return; // stall-limit failure for a job already removed from Redis
       logger.error(`Job ${job.id} failed`, { error: error.message });
-      await this.updateJobInDatabase(
-        job.id as string,
-        'failed',
-        null,
-        error.message,
-        error.stack
-      );
+      await this.activity.trackWrite(this.updateJobInDatabase(job.id as string, 'failed', null, error.message, error.stack));
+      await this.activity.trackWrite(handleStallLimitFailure(job, error, this.activity));
 
       // Handle permanent failures for specific job types after all retries exhausted
       if (job.name === 'monitor_download' && job.data) {
@@ -312,11 +316,13 @@ export class JobQueueService {
 
     this.queue.on('stalled', async (job: BullJob) => {
       logger.warn(`Job ${job.id} stalled`);
-      await this.updateJobInDatabase(job.id as string, 'stuck');
+      await this.activity.trackWrite(this.updateJobInDatabase(job.id as string, 'stuck'));
     });
 
-    this.queue.on('active', async (job: BullJob) => {
-      await this.updateJobInDatabase(job.id as string, 'active');
+    // Local event: `running` is the handler's promise
+    this.queue.on('active', async (job: BullJob, running?: Promise<unknown>) => {
+      this.activity.trackActive(job, running);
+      await this.activity.trackWrite(this.updateJobInDatabase(job.id as string, 'active'));
     });
 
     this.queue.on('error', (error: Error) => {
@@ -412,6 +418,12 @@ export class JobQueueService {
       const { processSyncShelves } = await import('../processors/sync-shelves.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'sync_reading_shelves');
       return await processSyncShelves(payloadWithJobId);
+    });
+
+    this.queue.process('backfill_requester_tags', 1, async (job: BullJob<JobPayload>) => {
+      const { processBackfillRequesterTags } = await import('../processors/backfill-requester-tags.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'backfill_requester_tags');
+      return await processBackfillRequesterTags(payloadWithJobId);
     });
 
     this.queue.process('check_watched_lists', 1, async (job: BullJob<CheckWatchedListsPayload>) => {
@@ -845,6 +857,19 @@ export class JobQueueService {
   }
 
   /**
+   * Add the requester tag backfill (#232), at most one waiting or active; attempts 1 (no retry).
+   * Returns null when one is already queued.
+   */
+  async addBackfillRequesterTagsJob(): Promise<string | null> {
+    const pending = await this.queue.getJobs(['waiting', 'active', 'delayed']);
+    if (pending.some((job) => job?.name === 'backfill_requester_tags')) {
+      logger.info('Requester tag backfill already queued or running; not queuing another');
+      return null;
+    }
+    return await this.addJob('backfill_requester_tags', {}, { priority: 7, attempts: 1 });
+  }
+
+  /**
    * Add check watched lists job (watched series + watched authors)
    */
   async addCheckWatchedListsJob(scheduledJobId?: string): Promise<string> {
@@ -1082,11 +1107,16 @@ export class JobQueueService {
   }
 
   /**
-   * Close queue connection (for graceful shutdown)
+   * Close queue connection
    */
   async close(): Promise<void> {
     await this.queue.close();
     this.redis.disconnect();
+  }
+
+  /** Stop API for the shutdown coordinator (src/lib/startup/shutdown-coordinator.ts) */
+  shutdownTarget(): QueueShutdownTarget {
+    return createQueueShutdownTarget(this.queue, this.redis, this.activity);
   }
 
   /**
@@ -1175,19 +1205,7 @@ export class JobQueueService {
 
 // Process-wide singleton: the constructor starts every processor, so it must
 // exist once per process even if this module is evaluated more than once.
-const JOB_QUEUE_SINGLETON = 'job-queue-service';
-
+// Stopped by the shutdown coordinator (src/lib/startup/shutdown-coordinator.ts).
 export function getJobQueueService(): JobQueueService {
-  return processSingleton(JOB_QUEUE_SINGLETON, () => new JobQueueService());
+  return processSingleton(JOB_QUEUE_SINGLETON_KEY, () => new JobQueueService());
 }
-
-// Graceful shutdown
-oncePerProcess('job-queue-sigterm', () => {
-  process.on('SIGTERM', async () => {
-    const jobQueueService = peekProcessSingleton<JobQueueService>(JOB_QUEUE_SINGLETON);
-    if (jobQueueService) {
-      logger.info('Closing job queue...');
-      await jobQueueService.close();
-    }
-  });
-});

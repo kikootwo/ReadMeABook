@@ -114,9 +114,10 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
     test.info().annotations.push({ type: 'skipped-check', description: `new_releases_since: ${EXEC_BRIDGE_SKIP}` });
   }
   // #232: the startup schema sync added requests.approval_bypassed_by (nullable), NULL on every
-  // seeded row. Required, never skipped: without the exec bridge this check fails.
-  expect(execBridgeAvailable(), `approval_bypassed_by: ${EXEC_BRIDGE_SKIP}`).toBe(true);
-  {
+  // seeded row. Required, never skipped: without the exec bridge this check fails (soft, so the
+  // checks below still run and report).
+  expect.soft(execBridgeAvailable(), `approval_bypassed_by: ${EXEC_BRIDGE_SKIP}`).toBe(true);
+  if (execBridgeAvailable()) {
     const column = psql("select is_nullable from information_schema.columns where table_name = 'requests' and column_name = 'approval_bypassed_by'");
     const rows = psql('select count(*) from requests');
     const set = psql('select count(*) from requests where approval_bypassed_by is not null');

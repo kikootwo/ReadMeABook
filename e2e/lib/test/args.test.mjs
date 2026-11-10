@@ -93,6 +93,18 @@ test('worktrees outside the trusted root are refused; the trusted checkout itsel
   assert.throws(() => parseArgs(['--slug', 'x', '--port', '3400', '--image', 'y']), /3401-3499/);
 });
 
+test('--stop-specs: cycles and time validated, refused with upgrade/isolate, sub-options need it', () => {
+  const opts = parseArgs(stack('--image', 'y', '--stop-specs', '540-stop', '--stop-cycles', '3', '--stop-time', '10'));
+  assert.equal(opts['stop-specs'], '540-stop');
+  assert.equal(opts['stop-cycles'], '3');
+  assert.throws(() => parseArgs(stack('--image', 'y', '--stop-cycles', '2')), /only apply with --stop-specs/);
+  assert.throws(() => parseArgs(stack('--image', 'y', '--stop-specs', 'a', '--stop-cycles', '0')), /--stop-cycles must be 1-9/);
+  assert.throws(() => parseArgs(stack('--image', 'y', '--stop-specs', 'a', '--stop-time', '0')), /--stop-time must be 1-180/);
+  assert.throws(() => parseArgs(stack('--image', 'y', '--stop-specs', 'a', '--stop-time', '181')), /--stop-time must be 1-180/);
+  assert.throws(() => parseArgs(stack('--image', 'y', '--stop-specs', 'a', '--upgrade-from', '1.2.10')), /--stop-specs is for/);
+  assert.throws(() => parseArgs(stack('--image', 'y', '--stop-specs', 'a', '--isolate-specs')), /--stop-specs is for/);
+});
+
 test('--upgrade-specs needs --upgrade-from', () => {
   assert.throws(() => parseArgs(stack('--image', 'y', '--upgrade-specs', '423-upgrade')), /only applies with --upgrade-from/);
   assert.equal(parseArgs(stack('--image', 'y', '--upgrade-from', '1.2.10', '--upgrade-specs', '423-upgrade'))['upgrade-specs'], '423-upgrade');

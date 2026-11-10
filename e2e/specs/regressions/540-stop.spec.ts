@@ -1,0 +1,296 @@
+/**
+ * Component: E2E regression #540 (the app stops cleanly when the container stops)
+ * Documentation: documentation/testing/e2e-harness.md
+ *
+ * run.mjs --stop-specs 540-stop --stop-cycles 4 --stop-time 10 runs the phases below; between two
+ * phases the harness runs a timed `docker stop --time 10` on this run's rmab container and starts it
+ * again (stop/stop-<n>.json). Times start at Docker's kill event for SIGTERM (daemon clock). The app's
+ * own part (to `[App] node exited`) has limits: 2 s idle, 6 s with a job running. Every stop's whole
+ * container (to its exit) must end inside the stop time with exit 0. PostgreSQL's shutdown checkpoint,
+ * which a busy disk stretches by seconds, and the docker CLI's wall time are logged only. A merge is held
+ * busy by SIGSTOPping its ffmpeg (generated audio, short fixtures), so a job is reliably running when
+ * the stop lands.
+ *   stop-0  merging on, tagging off, nothing running                     → stop 1 (E1: idle)
+ *   stop-1  E1 log order; martian merge held                             → stop 2 (E2: job running)
+ *   stop-2  E2 log lines, rerun → downloaded, temp leftovers; artemis merge held, node SIGKILLed
+ *           (crash: no ffmpeg left, app restarted), rerun held again     → stop 3 (second cut)
+ *   stop-3  E4: the request cut twice is reset and imported by retry_failed_imports; E3: phm merge
+ *           held, released together with a SIGTERM sent straight to app-start.sh (app restart with
+ *           the database up, not supervisorctl); passes whether the import ends inside the drain
+ *           or is left for retry and rerun once, as long as it ends in one import; then node is
+ *           frozen (SIGSTOP)                                             → stop 4 (E5: node frozen)
+ *   stop-4  E5: the wrapper SIGKILLs node at 6 s by wall clock; the container exits before Docker's
+ *           kill, PostgreSQL shuts down cleanly, no recovery on the next start
+ * Values are read first and checked with expect.soft, so a run on main records every difference.
+ * Exec bridge required.
+ */
+
+import { test, expect } from '@playwright/test';
+import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackLogsSync, writeEvidence, type Book } from '../../lib/harness';
+import { psql, setConfig, sh, sqlStr } from './library-delete-helpers';
+
+const phase = process.env.E2E_PHASE ?? '';
+/**
+ * From the SIGTERM kill event (daemon clock): appStopSeconds to `[App] node exited`, containerStopSeconds to
+ * the exit, both asserted; pgCheckpointSeconds, killToDieSeconds, stopSeconds (CLI): logged only
+ */
+const stops: Array<{
+  cycle: number; stopTime: number; appStopSeconds: number | null; containerStopSeconds: number | null;
+  pgCheckpointSeconds: number | null; killToDieSeconds: number | null; stopSeconds: number;
+  exitCode: number | null; health: string[]; healthySeconds: number | null;
+}> =
+  JSON.parse(process.env.E2E_STOP_RESULTS || '[]');
+
+test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
+test.skip(!/^stop-\d$/.test(phase), '540-stop only runs via run.mjs --stop-specs');
+test.setTimeout(15 * 60_000);
+
+const BANNER = 'ReadMeABook Unified Container Starting';
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll until fn returns a value, or null at the timeout (main never gets there for some checks). */
+async function poll<T>(fn: () => T | null | undefined | false | Promise<T | null | undefined | false>, timeoutMs: number, intervalMs = 2000): Promise<T | null> {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const value = await fn();
+      if (value) return value as T;
+    } catch { /* retry */ }
+    if (Date.now() > end) return null;
+    await sleep(intervalMs);
+  }
+}
+
+/** rmab logs split at each container start: segment k ends with stop k's lines. */
+const segments = () => stackLogsSync('rmab').split(BANNER);
+const count = (text: string, needle: string) => text.split(needle).length - 1;
+const lines = (text: string, re: RegExp) => text.split('\n').filter((l) => re.test(l)).map((l) => l.trim().slice(0, 300));
+
+/** What stop k left in the logs, and what the following start reported. */
+function stopReport(k: number) {
+  const seg = segments();
+  const stop = seg[k] ?? '';
+  const next = seg[k + 1] ?? '';
+  // PostgreSQL also stops at container start (entrypoint init) and a crash restarts node: look after the last stop request
+  const from = Math.max(0, stop.lastIndexOf('[App] Stop requested'));
+  const atAfter = (needle: string) => stop.indexOf(needle, from);
+  return {
+    timing: stops.find((s) => s.cycle === k) ?? null,
+    shutdown: lines(stop, /\[Shutdown\]|\[App\] (Stop requested|node did not stop|node exited|Ending leftover)/),
+    order: {
+      sigterm: atAfter('[Shutdown] SIGTERM received'), done: atAfter('[Shutdown] Done in'), nodeExited: atAfter('[App] node exited'),
+      watchdog: atAfter('[App] node did not stop within'),
+      pgFastShutdown: atAfter('received fast shutdown request'), pgDown: atAfter('database system is shut down'),
+    },
+    terminatingConnections: count(stop, 'terminating connection due to administrator command'),
+    recoveryNextStart: count(next, 'database system was not properly shut down') + count(next, 'automatic recovery in progress'),
+  };
+}
+
+const status = (id: string) => psql(`select status from requests where id = ${sqlStr(id)}`);
+const organizeJobs = (id: string) =>
+  psql(`select bull_job_id || ':' || status from jobs where request_id = ${sqlStr(id)} and type = 'organize_files' order by created_at`).split('\n').filter(Boolean);
+/** PIDs whose comm starts with `comm` (node shows as "next-server (v…", truncated to 15 chars) */
+const pids = (comm: string) =>
+  sh(`for d in /proc/[0-9]*; do c=$(cat "$d/comm" 2>/dev/null) || continue; case "$c" in "${comm}"*) echo "\${d#/proc/}" ;; esac; done; true`).split(/\s+/).filter(Boolean);
+const NODE = 'next-server';
+const healthy = () => poll(() => sh('curl -sf --max-time 2 http://localhost:3030/api/health >/dev/null && echo ok || true').trim() === 'ok', 120_000);
+
+/** Hold the next merge's ffmpeg (SIGSTOP) once it starts; its PID lands in /tmp/e2e-ffpid. */
+function holdNextMerge() {
+  const skip = pids('ffmpeg').join(' ');
+  sh(`rm -f /tmp/e2e-ffpid
+cat > /tmp/e2e-hold.sh <<'EOS'
+#!/bin/bash
+skip=" $1 "
+for _ in $(seq 1 15000); do
+  for d in /proc/[0-9]*; do
+    read -r c < "$d/comm" 2>/dev/null || continue
+    [ "$c" = ffmpeg ] || continue
+    p="\${d#/proc/}"
+    case "$skip" in *" $p "*) continue ;; esac
+    case "$(tr '\\0' ' ' < "$d/cmdline" 2>/dev/null)" in *concat*) kill -STOP "$p" && echo "$p" > /tmp/e2e-ffpid && exit 0 ;; esac
+  done
+  sleep 0.02
+done
+EOS
+setsid bash /tmp/e2e-hold.sh '${skip}' >/dev/null 2>&1 </dev/null &`);
+}
+const heldPid = () => poll(() => sh('cat /tmp/e2e-ffpid 2>/dev/null || true').trim(), 240_000, 1000);
+
+async function requestHeld(rmab: Rmab, scenario: string, key: 'martian' | 'artemis' | 'phm') {
+  await fakeArr.scenario(scenario);
+  const book: Book = (await fakeArr.books())[key];
+  holdNextMerge();
+  const id = (await rmab.requestBook(book)).request.id;
+  const pid = await heldPid();
+  return { id, pid };
+}
+
+test('#540 stop phases', async () => {
+  const rmab = await Rmab.loginAdmin();
+  const out: Record<string, unknown> = { phase };
+  const save = () => writeEvidence(`540/${phase}.json`, out); // after each step, so a failure keeps what was read
+
+  if (phase === 'stop-0') {
+    setConfig('chapter_merging_enabled', 'true');
+    setConfig('metadata_tagging_enabled', 'false');
+    out.idle = { ffmpeg: pids('ffmpeg').length, activeJobs: psql(`select count(*) from jobs where status = 'active'`) };
+  }
+
+  if (phase === 'stop-1') {
+    out.e1 = stopReport(1);
+    save();
+    const held = await requestHeld(rmab, 'stop-merge-martian', 'martian');
+    out.martian = { ...held, status: status(held.id), jobs: organizeJobs(held.id) };
+    expect(held.pid, 'martian merge held').toBeTruthy();
+  }
+
+  if (phase === 'stop-2') {
+    out.e2 = stopReport(2);
+    save();
+    const martian = psql(`select r.id from requests r join audiobooks a on a.id = r.audiobook_id where a.audible_asin = 'B082BHJMFF' and r.deleted_at is null`);
+    const done = await poll(() => (['downloaded', 'available'].includes(status(martian)) ? status(martian) : null), 240_000);
+    out.e2Recovery = {
+      status: status(martian), done, jobs: organizeJobs(martian),
+      stalledLog: count(stackLogsSync('rmab'), 'stalled'),
+      tmp: sh('ls -la /tmp/readmeabook 2>&1 || true'),
+      tmpTagCopies: sh("find /downloads -name '*.tmp' 2>/dev/null | head -20; true"),
+      partials: sh("find /media -name '.rmab-partial-*' 2>/dev/null | head; true"),
+      library: sh("find /media/audiobooks -type f 2>/dev/null | sort | head -40; true"),
+    };
+
+    save();
+
+    // Crash: node SIGKILLed during a held merge
+    const held = await requestHeld(rmab, 'asin-merge', 'artemis');
+    const nodeBefore = pids(NODE);
+    sh(`for p in ${nodeBefore.join(' ')}; do kill -KILL "$p"; done`);
+    // Second cut: the rerun starts within seconds of the restart, so hold it now
+    holdNextMerge();
+    const restarted = await poll(() => {
+      const now = pids(NODE);
+      return now.length > 0 && now.every((p) => !nodeBefore.includes(p)) ? now : null;
+    }, 60_000, 1000);
+    const ffmpegAfterCrash = pids('ffmpeg').filter((p) => p === held.pid); // the held rerun is a new PID
+    out.crash = {
+      ...held, nodeBefore, nodeAfter: restarted, ffmpegAfterCrash, healthy: await healthy(),
+      wrapperLines: lines(stackLogsSync('rmab'), /\[App\] (node exited|ERROR|Ending leftover)/).slice(-4),
+    };
+    save();
+    // The harness then stops the container while the rerun is held
+    const rerun = await heldPid();
+    out.crash = { ...(out.crash as object), rerunHeld: rerun, jobs: organizeJobs(held.id) };
+    expect.soft(ffmpegAfterCrash, 'no ffmpeg left after the crash').toEqual([]);
+    expect(rerun, 'artemis rerun held for the second cut').toBeTruthy();
+  }
+
+  if (phase === 'stop-3') {
+    out.e2b = stopReport(3);
+    save();
+    const artemis = psql(`select r.id from requests r join audiobooks a on a.id = r.audiobook_id where a.audible_asin = 'B072R1CY4P' and r.deleted_at is null`);
+    const reset = await poll(() => (status(artemis) !== 'processing' ? status(artemis) : null), 150_000);
+    const resetMessage = psql(`select coalesce(error_message, '') from requests where id = ${sqlStr(artemis)}`);
+    if (reset === 'awaiting_import') await rmab.triggerScheduledJob('retry_failed_imports');
+    const imported = await poll(() => (['downloaded', 'available'].includes(status(artemis)) ? status(artemis) : null), 180_000);
+    out.e4 = { statusAfterSecondCut: reset ?? 'processing (unchanged after 150 s)', resetMessage, imported, final: status(artemis), jobs: organizeJobs(artemis) };
+    save();
+    expect.soft(reset, 'request cut twice is reset').toBe('awaiting_import');
+    expect.soft(imported, 'retried import completes').toBeTruthy();
+
+    // E3: app restart with PostgreSQL and Redis still up. SIGTERM goes straight to app-start.sh (what
+    // supervisord sends it), not through supervisorctl; supervisord's autorestart starts it again.
+    // The held merge is released at the same moment. Whether the import ends inside the 3.5 s drain
+    // depends on the host, so both outcomes pass if they end consistently in one import.
+    const held = await requestHeld(rmab, 'asin-merge-tagged', 'phm');
+    const nodeBefore = pids(NODE);
+    const wrapper = pids('app-start.sh');
+    out.e3 = { ...held, wrapper };
+    save();
+    if (held.pid) sh(`kill -CONT ${held.pid}; kill -TERM ${wrapper.join(' ')}`);
+    const restarted = await poll(() => {
+      const now = pids(NODE);
+      return now.length > 0 && now.every((p) => !nodeBefore.includes(p)) ? now : null;
+    }, 60_000, 1000);
+    await healthy();
+    const logs = stackLogsSync('rmab');
+    const done = lines(logs, /\[Shutdown\] Done in/).at(-1) ?? '';
+    const finishedInWindow = /finished 1, left 0 for retry/.test(done);
+    const leftForRetry = /finished 0, left 1 for retry/.test(done);
+    const statusRightAfter = status(held.id);
+    await sleep(75_000); // a job left active reruns through the stall check by now
+    const final = await poll(() => (['downloaded', 'available'].includes(status(held.id)) ? status(held.id) : null), 180_000);
+    const jobs = organizeJobs(held.id);
+    const stalled = jobs.map((j) => count(stackLogsSync('rmab'), `Job ${j.split(':')[0]} stalled`));
+    out.e3 = {
+      ...held, wrapper, restarted, outcome: finishedInWindow ? 'finished in the drain' : leftForRetry ? 'left for retry' : 'neither',
+      statusRightAfter, final: final ?? status(held.id), jobs, stalled,
+      shutdown: lines(logs, /\[Shutdown\] (SIGTERM|Done|Job )|\[App\] node exited/).slice(-5),
+    };
+    expect.soft(restarted, 'app started again').toBeTruthy();
+    expect.soft(done, 'stop reports the job finished or left for retry').toMatch(/finished 1, left 0 for retry|finished 0, left 1 for retry/);
+    expect.soft(final, 'request imported').toMatch(/^(downloaded|available)$/);
+    expect.soft(jobs.map((j) => j.split(':')[1]), 'one jobs row, completed').toEqual(['completed']);
+    if (finishedInWindow) {
+      expect.soft(statusRightAfter, 'imported before node exited').toMatch(/^(downloaded|available)$/);
+      expect.soft(stalled, 'not rerun after the restart').toEqual([0]);
+    } else {
+      expect.soft(stalled, 'rerun once after the restart').toEqual([1]);
+    }
+
+    // E5: node frozen (SIGSTOP), so it cannot run its shutdown; the harness then stops the container
+    const frozen = pids(NODE);
+    sh(`for p in ${frozen.join(' ')}; do kill -STOP "$p"; done`);
+    out.e5Frozen = { node: frozen, state: frozen.map((p) => sh(`cut -d' ' -f3 /proc/${p}/stat 2>/dev/null || true`).trim()) };
+    expect(frozen.length, 'node found to freeze').toBeGreaterThan(0);
+  }
+
+  if (phase === 'stop-4') {
+    out.e5 = stopReport(4);
+  }
+
+  save();
+
+  // Checks on values already written. Every stop: the whole container exits on its own inside the stop
+  // time, exit 0. Stops 1-3: the app's own part (SIGTERM → node exited) within its limit. A missing
+  // reading is 99 and fails. PostgreSQL's checkpoint and the CLI time are notes.
+  const e = (out.e1 ?? out.e2 ?? out.e2b) as ReturnType<typeof stopReport> | undefined;
+  const f = out.e5 as ReturnType<typeof stopReport> | undefined;
+  const timing = (e ?? f)?.timing;
+  if (timing) {
+    const s = (v: number | null) => (v === null ? 'unread' : `${v} s`);
+    const note = `app ${s(timing.appStopSeconds)} (kill → node exited), container ${s(timing.containerStopSeconds)} (kill → exit), `
+      + `PostgreSQL checkpoint ${s(timing.pgCheckpointSeconds)}, kill → die ${s(timing.killToDieSeconds)}, docker CLI ${timing.stopSeconds} s, exit ${timing.exitCode}`;
+    test.info().annotations.push({ type: `stop ${timing.cycle} seconds`, description: note });
+    console.log(`[540-stop] stop ${timing.cycle}: ${note}`);
+  }
+  for (const r of [e, f]) {
+    if (!r) continue;
+    expect.soft(r.timing?.containerStopSeconds ?? 99, "container exited inside the stop time, before Docker's kill (kill → exit)")
+      .toBeLessThan(r.timing?.stopTime ?? 10);
+    expect.soft(r.timing?.exitCode, "exit 0, not 137 from Docker's SIGKILL").toBe(0);
+    expect.soft(r.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
+    expect.soft(r.order.pgDown, 'PostgreSQL shut down cleanly').toBeGreaterThan(r.order.pgFastShutdown);
+    expect.soft(r.recoveryNextStart, 'no crash recovery on the next start').toBe(0);
+  }
+  if (e) {
+    const appLimit = phase === 'stop-1' ? 2 : 6;
+    expect.soft(e.timing?.appStopSeconds ?? 99, `app's own stop seconds (kill → node exited), ${phase === 'stop-1' ? 'idle' : 'job running'}`)
+      .toBeLessThanOrEqual(appLimit);
+    expect.soft(e.order.sigterm, '[Shutdown] SIGTERM received').toBeGreaterThanOrEqual(0);
+    expect.soft(e.order.done, 'Done after SIGTERM').toBeGreaterThan(e.order.sigterm);
+    expect.soft(e.order.nodeExited, 'wrapper waited for node').toBeGreaterThan(e.order.done);
+    expect.soft(e.order.pgFastShutdown, 'PostgreSQL stopped after node').toBeGreaterThan(e.order.nodeExited);
+    expect.soft(e.terminatingConnections, 'no sessions left for PostgreSQL to end').toBe(0);
+    if (phase !== 'stop-1') expect.soft(e.shutdown.join('\n'), 'job left for retry').toContain('left for retry on next start');
+  }
+  if (f) {
+    // Frozen node: the wrapper's wall-clock watchdog ends it (its 6 s is the app's part here, logged), so
+    // PostgreSQL and Redis still stop cleanly; container, exit code and recovery are checked above
+    expect.soft(f.order.sigterm, 'frozen node ran no shutdown').toBe(-1);
+    expect.soft(f.order.watchdog, 'wrapper SIGKILLed node by wall clock').toBeGreaterThanOrEqual(0);
+    expect.soft(f.order.nodeExited, 'node exited after the watchdog').toBeGreaterThan(f.order.watchdog);
+    expect.soft(f.shutdown.join('\n'), 'node status 137').toContain('node exited (status 137)');
+    expect.soft(f.order.pgFastShutdown, 'PostgreSQL stopped after node').toBeGreaterThan(f.order.nodeExited);
+  }
+});

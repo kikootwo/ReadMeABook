@@ -46,6 +46,8 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 
 **check_watched_lists:** scheduled run (no payload ASIN) checks every watched series and author; a targeted run (payload `userId` + `seriesAsin` or `authorAsin`, queued when a watch is added) runs only that series or author, never the user's other watched lists (#429). See [features/watched-lists.md](../../features/watched-lists.md).
 
+**backfill_requester_tags:** queued only by the ABS settings PUT on a saved off → on change of `audiobookshelf.tag_requester`; attempts 1, at most one waiting or active (`addBackfillRequesterTagsJob`). Tags every eligible available request's ABS item; result counts in the job record. See [features/requester-tags.md](../../features/requester-tags.md).
+
 **cleanup_seeded_torrents:** pages through every candidate, strict probe, ownership check before any remove; see [scheduler.md](scheduler.md).
 
 **monitor_download:**
@@ -174,10 +176,26 @@ queue.on('stalled', async (job) => {
 });
 ```
 
+- Every jobs-table write from these handlers goes through `JobActivityTracker.trackWrite` so the shutdown can flush them
+- `active` (local event) also gets the handler's promise: `JobActivityTracker.trackActive` counts the job as running in this process until it settles (`src/lib/services/job-activity-tracker.ts`)
+- A `failed` event with a null job (removed before the stall check read it) is ignored
+
+## Shutdown and Cut Jobs
+
+- **Stop:** the app shutdown coordinator (see [unified.md](../../deployment/unified.md#shutdown-sequence)) uses `getJobQueueService().shutdownTarget()` (peeked, never created): local pause without waiting → `whenCurrentJobsFinished` until 3.5 s → `close()` only when nothing runs → flush job-row writes → the service's own Redis client disconnects. Jobs still running are logged `left for retry on next start` and rerun from the start after the restart; with jobs left the queue is not closed and Bull's Redis connections end with the process
+- **Stopping flag** (`src/lib/utils/process-stopping.ts`, on globalThis): a `JobQueueService` constructed after the signal starts no processors
+- **Bull defaults** (no `settings` passed): lockDuration 30 s, stalledInterval 30 s, **maxStalledCount 1**. A job left active by a dead process returns to `wait` 30-60 s after the next start (`stalled` event, row `stuck`) and reruns with `attemptsMade` unchanged. A **second** cut fails it with `job stalled more than allowable limit`, ignoring attempts/backoff
+- **Stall-limit failure** (`src/lib/services/job-stall-failure.ts`, only that error, job and `requestId` present, one conditional `updateMany`):
+  - `organize_files`, client download, request `processing` → `awaiting_import` (+1 `importAttempts`, `lastImportAt`; `warn` at `maxImportRetries`); `retry_failed_imports` picks it up
+  - `organize_files`, manual/bulk import (`!downloadHistoryId && typeof cleanupSource === 'boolean'`), request `processing` → `failed`, "Import from <path> was interrupted when the app stopped. Run the import again."
+  - `start_direct_download`, job's `downloadHistoryId` = request's latest `selected` download, request `downloading` → `failed` + that download history row `failed` (never over a row recorded `removed`, same rule as `monitor_download`)
+  - Skipped while an `organize_files`/`start_direct_download` job for the same request still runs in this process (event loop blocked past the lock)
+- **Not handled:** a cut during source cleanup after the request reached `downloaded` reruns and can report a failure for an imported book (audiobooks heal at the next library scan); a cut chapter merge's `concat_<ts>.txt` and `chapters_<ts>.txt` stay in `/tmp/readmeabook` even after the rerun succeeds (each run uses new timestamped names and removes only its own; a few hundred bytes per cut, in the container layer); `.tmp` tag copies and `.rmab-partial-*` when a job never reruns
+
 ## Concurrency Settings
 
 - **Registered with 2:** search_indexers, download_torrent, monitor_download, organize_files, send_notification, search_ebook, start_direct_download, monitor_direct_download
-- **Registered with 1:** scan_plex, plex_library_scan, plex_recently_added_check, monitor_rss_feeds, audible_refresh, retry_missing_torrents, retry_failed_imports, find_missing_ebooks, cleanup_seeded_torrents, sync_reading_shelves, check_watched_lists
+- **Registered with 1:** scan_plex, plex_library_scan, plex_recently_added_check, monitor_rss_feeds, audible_refresh, retry_missing_torrents, retry_failed_imports, find_missing_ebooks, cleanup_seeded_torrents, sync_reading_shelves, check_watched_lists, backfill_requester_tags
 - **Not a per-type limit:** Bull 4.16.5 sums the concurrency of every named processor on the queue and any free worker takes any job type, so two jobs of one type can overlap (e.g. two scans; ASIN writes are idempotent per `plexGuid`)
 
 ## Fixed Issues ✅
@@ -192,6 +210,7 @@ queue.on('stalled', async (job) => {
 - ✅ System logs page incomplete and missing detailed events → Added JobEvent table, JobLogger utility, comprehensive event logging with timestamps and metadata
 - ✅ Scheduled jobs triggered by timer not appearing in system logs → Added ensureJobRecord() to create Job records for timer-triggered scheduled jobs
 - ✅ Scheduled jobs triggered by timer not updating lastRun timestamp → ensureJobRecord() now updates lastRun for timer-triggered jobs
+- ✅ Container stop cut running jobs at once and a job cut twice left its request `processing`/`downloading` forever (#540) → shutdown drain + stall-limit failure handler (see [Shutdown and Cut Jobs](#shutdown-and-cut-jobs))
 
 ## API Endpoints
 

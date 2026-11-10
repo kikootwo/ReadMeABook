@@ -21,7 +21,7 @@ const logger = RMABLogger.create('API.Admin.Requests');
  * 4. Handles torrents based on seeding configuration:
  *    - Seeding time and ratio limit both 0: keeps torrent, stops monitoring
  *    - Every set limit met (or download incomplete): deletes torrent + files,
- *      unless another active request still uses it
+ *      unless another request still keeps it (shared-torrent rule)
  *    - Still seeding: keeps torrent for the cleanup job
  * 5. Allows re-requesting the same audiobook after deletion
  */

@@ -20,12 +20,12 @@ import {
 import { evaluateSeeding, type SeedingRequirement } from '../utils/seeding-policy';
 import { createIndexerConfigLookup, parseSavedIndexers, type IndexerConfigMatch, type IndexerRef } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership } from '../utils/torrent-ownership';
-import { torrentHashForms } from '../integrations/torrent-ids';
 import {
-  otherActiveRequestsSharingTorrent,
+  PARTIAL_TORRENT_STATES,
+  clearlyPartial,
+  markOtherRowsRemoved,
   sameBookGrabInProgress,
-  siblingKeepsTorrent,
-  softDeletedHoldersOfTorrent,
+  torrentHolds,
 } from '../utils/shared-torrent';
 import { CANCEL_STEP_BUDGET_MS, CancelDeadline, withinDeadline } from './cancel-deadline';
 import { cancelUsenetDownload } from './cancelled-download-usenet';
@@ -86,7 +86,6 @@ export interface CancelledRequestRef {
 }
 
 const FINISHED_STATES = new Set(['completed', 'seeding']);
-const PARTIAL_STATES = new Set(['downloading', 'queued', 'paused']);
 
 /**
  * qBittorrent answers an add before it lists the torrent. At cancel time a row younger than this
@@ -245,14 +244,14 @@ async function decide(
   }
 
   // A recheck reports progress < 1 on a finished torrent: anything not clearly partial or finished is kept
-  const finished = FINISHED_STATES.has(info.status) || info.progress >= 1 || !!info.completedAt
-    || row.downloadStatus === 'completed';
-  const unclear = !FINISHED_STATES.has(info.status) && !PARTIAL_STATES.has(info.status);
+  const unclear = !FINISHED_STATES.has(info.status) && !PARTIAL_TORRENT_STATES.has(info.status);
   if (unclear) return result('retry_later', `state ${info.status}`, { clientName });
+  const finished = !clearlyPartial(info, row.downloadStatus);
 
   const torrentHash = row.torrentHash || clientId;
   const remove = async (why: string): Promise<CancelStepResult> => {
-    const hold = await holdReason(request, torrentHash, clientType, finished ? info : null, configFor);
+    const holdsReadAt = new Date();
+    const hold = await holdReason(request, torrentHash, clientType, info, finished ? info : null, configFor);
     if (hold) {
       logger.info(`Keeping ${info.name} in ${clientName} for cancelled request ${request.id}: ${hold}`);
       return result('kept_shared', hold, { clientName });
@@ -272,7 +271,7 @@ async function decide(
     ctx.deletedHashes?.add(clientId.toLowerCase());
     logger.info(`Removed ${info.name} and its files from ${clientName} (cancelled request ${request.id}, ${why})`);
     await markRemoved(`Removed ${info.name}`);
-    await markSiblingRowsRemoved(request.id, torrentHash, deadline);
+    if (!deadline.passed()) await markOtherRowsRemoved(request.id, torrentHash, clientType, holdsReadAt);
     return result('removed', why, { clientName });
   };
 
@@ -298,50 +297,25 @@ async function decide(
 }
 
 /**
- * Why the torrent must stay for someone else, or null. `finishedInfo` is the client's answer for a
- * finished torrent (null for a partial one).
+ * Why the torrent must stay for someone else, or null: the shared-torrent rule (`torrentHolds`), then a
+ * grab for the same book in progress (cancel only). `finishedInfo` is the client's answer for a finished
+ * torrent (null for a partial one).
  */
 async function holdReason(
   request: CancelledRequestRef,
   torrentHash: string,
   clientType: string,
+  info: DownloadInfo,
   finishedInfo: DownloadInfo | null,
   configFor: ConfigFor
 ): Promise<string | null> {
-  // Cancelled siblings never hold it, nor one whose every row on this hash is recorded removed (it no longer uses it)
-  const siblings = (await otherActiveRequestsSharingTorrent(request.id, torrentHash))
-    .filter((s) => s.status !== 'cancelled' && s.downloadHistory.some((r) => r.downloadStatus !== 'removed'));
-  if (finishedInfo === null) {
-    if (siblings.length > 0) return `other request(s) use it: ${siblings.map((s) => s.id).join(', ')}`;
-  } else {
-    for (const sibling of siblings) {
-      const reason = siblingKeepsTorrent(sibling, clientType, (r) => evaluateSeeding(configFor(r), finishedInfo));
-      if (reason) return `request ${sibling.id} still uses it (${reason})`;
-    }
-    // A deleted request keeping the finished torrent to seed holds it until its own rule is met
-    for (const holder of await softDeletedHoldersOfTorrent(request.id, torrentHash)) {
-      for (const r of holder.downloadHistory) {
-        if ((r.downloadClient || 'qbittorrent') !== clientType) return `deleted request ${holder.id} recorded it for another client`;
-        const seeding = evaluateSeeding(configFor(r), finishedInfo);
-        if (seeding.unlimited || !seeding.met) return `deleted request ${holder.id} still seeds it (${seeding.progress})`;
-      }
-    }
-  }
+  const [hold] = await torrentHolds(request.id, torrentHash, {
+    clientType,
+    addedAt: info.addedAt,
+    seeding: finishedInfo ? (r) => evaluateSeeding(configFor(r), finishedInfo) : null,
+  });
+  if (hold) return `request ${hold.requestId} still uses it (${hold.reason})`;
   const grab = await sameBookGrabInProgress(request.id, request.audiobookId, request.type);
   if (grab) return `request ${grab.id} for the same book is ${grab.status} without a download yet`;
   return null;
-}
-
-/** The torrent is gone: every other request's selected row for it says so too */
-async function markSiblingRowsRemoved(requestId: string, torrentHash: string, deadline: CancelDeadline): Promise<void> {
-  if (deadline.passed()) return;
-  await prisma.downloadHistory.updateMany({
-    where: {
-      requestId: { not: requestId },
-      selected: true,
-      torrentHash: { in: torrentHashForms(torrentHash) },
-      OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }],
-    },
-    data: { downloadStatus: 'removed' },
-  });
 }
