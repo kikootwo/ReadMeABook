@@ -4,8 +4,8 @@
  *
  * Queued when the admin turns requester tagging on. Lists the configured Audiobookshelf library
  * once and runs the shared item step in backfill mode: every eligible available request of a taggable
- * user whose item is listed, sequentially, uncapped; the items of marked requests also get the
- * Explicit flag (#542). Stops when tagging is turned off or after consecutive ABS failures.
+ * user whose item is listed, sequentially, uncapped; while the Explicit mark setting is on, the items
+ * of marked requests also get the Explicit flag (#542). Stops when tagging is turned off or after consecutive ABS failures.
  * Idempotent.
  */
 
@@ -13,6 +13,7 @@ import { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { getLibraryService } from '../services/library';
 import { applyItemMarks, isRequesterTaggingOn, REQUESTER_TAG_SETTING_KEY, type ItemMarkResult } from '../services/audiobookshelf/requester-tags';
+import { isExplicitMarkOn } from '../services/audiobookshelf/explicit-flag';
 
 export interface BackfillRequesterTagsPayload {
   jobId?: string;
@@ -45,6 +46,7 @@ export async function processBackfillRequesterTags(payload: BackfillRequesterTag
     listedItems,
     logger,
     tagging: true,
+    explicit: await isExplicitMarkOn(),
     mode: 'backfill',
     shouldContinue: async () => {
       configService.clearCache(REQUESTER_TAG_SETTING_KEY);

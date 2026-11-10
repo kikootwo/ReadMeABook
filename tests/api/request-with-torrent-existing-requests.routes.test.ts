@@ -16,6 +16,7 @@ let authRequest: { user: { id: string; role: string }; json: () => Promise<unkno
 let rows: Row[];
 
 const prismaMock = createPrismaMock();
+const explicitSetting = vi.hoisted(() => ({ on: true }));
 const jobQueueMock = vi.hoisted(() => ({
   addDownloadJob: vi.fn(),
   addNotificationJob: vi.fn(() => Promise.resolve()),
@@ -40,6 +41,7 @@ vi.mock('@/lib/integrations/prowlarr-connection', () => ({
 vi.mock('@/lib/middleware/interactive-search-access', () => ({
   denyWithoutInteractiveSearchAccess: async () => null,
 }));
+vi.mock('@/lib/services/audiobookshelf/explicit-flag', () => ({ isExplicitMarkOn: async () => explicitSetting.on }));
 
 const BOOK = { id: 'ab-1', audibleAsin: 'B000000001', title: 'Title', author: 'Author' };
 const PICK = {
@@ -179,6 +181,7 @@ describe('request-with-torrent and the Explicit mark (#542)', () => {
     prismaMock.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(prismaMock));
     prismaMock.blockedRelease.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.request.deleteMany.mockResolvedValue({ count: 1 });
+    explicitSetting.on = true;
   });
 
   async function pickWith(body: Record<string, unknown>) {
@@ -197,6 +200,25 @@ describe('request-with-torrent and the Explicit mark (#542)', () => {
 
     expect(result.status).toBe(201);
     expect(result.data.explicit).toBe(expected);
+  });
+
+  it('setting off: explicit true is ignored, the request is created unmarked', async () => {
+    explicitSetting.on = false;
+
+    const result = await pickWith({ explicit: true });
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(false);
+  });
+
+  it('setting off: re-picking a marked failed request still copies its stored mark', async () => {
+    explicitSetting.on = false;
+    rows.push({ ...row('failed', 'user-1'), explicit: true });
+
+    const result = await pickWith({});
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(true);
   });
 
   it('a non-boolean explicit → 400, nothing created', async () => {

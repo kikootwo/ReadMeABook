@@ -24,7 +24,7 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1
 vi.mock('@/contexts/PreferencesContext', () => ({ usePreferences: () => ({ squareCovers: false }) }));
 vi.mock('@/lib/hooks/useExplicitMark', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hooks/useExplicitMark')>()),
-  useIsAudiobookshelf: () => true,
+  useExplicitMarkEnabled: () => true,
 }));
 vi.mock('@/lib/utils/api', () => ({ fetchWithAuth: fetchMock }));
 vi.mock('@/lib/hooks/useAudiobooks', () => ({

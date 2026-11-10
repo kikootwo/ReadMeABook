@@ -5,8 +5,10 @@
  * The requester or an admin sets the mark; only an admin clears it. A mark on a book already in
  * the library (Audiobookshelf mode) writes the flag at once after the key-user check; an admin's
  * repeat mark retries it, a requester's is a plain 200. A failure says ABS wasn't updated in a short
- * line by viewer. No row updated is a 404. Clearing writes nothing to ABS and says what is left to do. Real: the route, explicit-flag. Mocked: prisma, auth,
- * config, writeABSItem, canKeyUserSeeExplicit.
+ * line by viewer. No row updated is a 404. Clearing writes nothing to ABS and says what is left to do.
+ * While the admin setting is off (or absent) every call is a 403 FeatureDisabled that reads and
+ * writes nothing. Real: the route, explicit-flag. Mocked: prisma, auth, config, writeABSItem,
+ * canKeyUserSeeExplicit.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +18,7 @@ const prismaMock = createPrismaMock();
 const state = vi.hoisted(() => ({
   auth: { user: { id: 'user-1', sub: 'user-1', username: 'reader', role: 'user' }, json: async (): Promise<unknown> => ({}) },
   mode: 'audiobookshelf' as string,
+  setting: 'true' as string | null,
   canSee: true,
   writeResult: { tags: 'none', addedTags: [], explicit: 'set' } as Record<string, unknown>,
 }));
@@ -26,7 +29,12 @@ vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: (_req: unknown, handler: (r: unknown) => unknown) => handler(state.auth),
 }));
-vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => ({ getBackendMode: async () => state.mode }) }));
+vi.mock('@/lib/services/config.service', () => ({
+  getConfigService: () => ({
+    getBackendMode: async () => state.mode,
+    get: async (key: string) => (key === 'audiobookshelf.explicit_mark_enabled' ? state.setting : null),
+  }),
+}));
 vi.mock('@/lib/services/audiobookshelf/api', () => ({ writeABSItem: writeMock, canKeyUserSeeExplicit: canSeeMock }));
 
 function row(over: Record<string, unknown> = {}) {
@@ -53,11 +61,32 @@ beforeEach(() => {
   vi.clearAllMocks();
   as('user');
   state.mode = 'audiobookshelf';
+  state.setting = 'true';
   canSeeMock.mockResolvedValue(true);
   writeMock.mockResolvedValue({ tags: 'none', addedTags: [], explicit: 'set' });
   prismaMock.request.findFirst.mockResolvedValue(row());
   prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.request.count.mockResolvedValue(0);
+});
+
+describe('PUT /api/requests/[id]/explicit while the setting is off', () => {
+  it.each([
+    ['off', 'false', 'user', true],
+    ['absent (an upgrade)', null, 'user', true],
+    ['off', 'false', 'admin', true],
+    ['off', 'false', 'admin', false],
+  ] as const)('setting %s (%s): a %s sending explicit %s gets 403 FeatureDisabled, nothing read or written', async (_label, setting, role, explicit) => {
+    state.setting = setting;
+    as(role);
+
+    const res = await put({ explicit });
+
+    expect(res).toEqual({ status: 403, body: { error: 'FeatureDisabled', message: 'The Explicit mark is turned off in Settings' } });
+    expect(prismaMock.request.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+    expect(canSeeMock).not.toHaveBeenCalled();
+    expect(writeMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('PUT /api/requests/[id]/explicit', () => {

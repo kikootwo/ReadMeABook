@@ -7,8 +7,9 @@
  * backfill job. Candidates are the available requests of this run's delivered books and listed
  * items (one read per 1,000 item ids). Tags (setting on): a request completed without approval
  * (`approvalBypassedBy` set) and an admin's request that RMAB never downloaded are never tagged.
- * Explicit (any mode): an item is flagged when any candidate request of it is marked; those rules
- * don't apply because the flag only restricts. One shared write per item (writeABSItem). Never
+ * Explicit (while its admin setting is on; off writes, reads and checks nothing): an item is
+ * flagged when any candidate request of it is marked; those rules don't apply because the flag
+ * only restricts. One shared write per item (writeABSItem). Never
  * throws for an ABS failure; stops a run after consecutive failures.
  */
 
@@ -18,7 +19,7 @@ import type { RMABLogger } from '@/lib/utils/logger';
 import type { LibraryItem } from '@/lib/services/library/ILibraryService';
 import { writeABSItem, type ABSItemWriteResult } from './api';
 import { loadRequesterTagMap, logRunWarning } from './requester-tag-users';
-import { createExplicitGuard, hasMarkedAvailableRequests, type ExplicitGuard } from './explicit-flag';
+import { createExplicitGuard, hasMarkedAvailableRequests, isExplicitMarkOn, type ExplicitGuard } from './explicit-flag';
 import {
   REQUESTER_TAG_FAILURE_LIMIT,
   REQUESTER_TAG_ITEM_IDS_PER_READ,
@@ -180,7 +181,7 @@ const succeeded = (o: ABSItemWriteResult) =>
 
 /**
  * Writes this run's requester tags and Explicit flags. `tagging: false` reads only marked requests
- * and writes only the flag. `mode: 'backfill'` writes every listed item that needs it, uncapped,
+ * and writes only the flag; `explicit: false` (the setting is off) never flags or checks the guard. `mode: 'backfill'` writes every listed item that needs it, uncapped,
  * and may read items listed without a tag array.
  */
 export async function applyItemMarks(opts: {
@@ -188,6 +189,7 @@ export async function applyItemMarks(opts: {
   listedItems: LibraryItem[];
   logger: RMABLogger;
   tagging: boolean;
+  explicit: boolean;
   mode?: 'scan' | 'backfill';
   shouldContinue?: () => Promise<boolean>;
 }): Promise<ItemMarkResult> {
@@ -200,7 +202,7 @@ export async function applyItemMarks(opts: {
   };
   await writePlannedItems(opts, guard, result);
   // Once per scan while marked books are in the library: warn even when nothing was written (#542)
-  if (mode === 'scan' && !guard.checked() && (await hasMarkedAvailableRequests())) await guard.allowed();
+  if (opts.explicit && mode === 'scan' && !guard.checked() && (await hasMarkedAvailableRequests())) await guard.allowed();
   result.explicitHeldBack = guard.finish();
   return result;
 }
@@ -210,10 +212,10 @@ async function writePlannedItems(
   guard: ExplicitGuard,
   result: ItemMarkResult
 ): Promise<void> {
-  const { listedItems, logger, tagging, mode = 'scan', shouldContinue } = opts;
+  const { listedItems, logger, tagging, explicit, mode = 'scan', shouldContinue } = opts;
   const delivered = new Set(opts.deliveredBookIds);
   const listed = new Map(listedItems.map((item) => [item.externalId, item]));
-  if (delivered.size === 0 && listed.size === 0) return;
+  if ((delivered.size === 0 && listed.size === 0) || (!tagging && !explicit)) return;
 
   const candidates = await loadCandidates([...delivered], [...listed.keys()], !tagging);
   result.considered = candidates.length;
@@ -225,7 +227,7 @@ async function writePlannedItems(
     items.set(itemId, plan);
     return plan;
   };
-  for (const r of candidates) if (r.explicit) planFor(r).explicit = true;
+  if (explicit) for (const r of candidates) if (r.explicit) planFor(r).explicit = true;
   if (tagging) await planTags(candidates, planFor, result, logger);
 
   // Delivered books first: they are never held back by the repair cap
@@ -287,12 +289,12 @@ async function writePlannedItems(
 
 /**
  * The scan's delivery step (Audiobookshelf): writes this run's deliveries and repairs listed items.
- * Tags only while the setting is on; the Explicit flag whenever a request is marked.
+ * Tags only while tagging is on; the Explicit flag for marked requests only while its setting is on.
  */
 export async function runItemMarkStep(opts: {
   deliveredBookIds: Iterable<string>;
   listedItems: LibraryItem[];
   logger: RMABLogger;
 }): Promise<ItemMarkResult> {
-  return applyItemMarks({ ...opts, tagging: await isRequesterTaggingOn(), mode: 'scan' });
+  return applyItemMarks({ ...opts, tagging: await isRequesterTaggingOn(), explicit: await isExplicitMarkOn(), mode: 'scan' });
 }

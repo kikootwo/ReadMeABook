@@ -6,7 +6,8 @@
  * marked (tag rules don't apply); tagging off reads only marked rows and never sends tags; repair
  * acts on a listed flag that is off (null counts as off), shares the 25-item cap and the 3-failure
  * stop; the key-user guard skips the write and warns once per run, also when marked books sit in
- * the library and nothing is written. Real: match-requests, request-library-link, requester-tags,
+ * the library and nothing is written. With the admin setting off nothing is flagged, read or
+ * checked (no ABS call) even with marked requests present; tags still go out. Real: match-requests, request-library-link, requester-tags,
  * explicit-flag. Mocked: prisma (in-memory holder), the ASIN matcher, the job queue, config,
  * writeABSItem, canKeyUserSeeExplicit.
  */
@@ -49,7 +50,8 @@ vi.mock('@/lib/services/audiobookshelf/api', async (importOriginal) => ({
 
 const db = createLibraryDb();
 const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
-const TAGS_ON = { 'audiobookshelf.tag_requester': 'true' };
+const EXPLICIT_ON = { 'audiobookshelf.explicit_mark_enabled': 'true' };
+const TAGS_ON = { ...EXPLICIT_ON, 'audiobookshelf.tag_requester': 'true' };
 
 /** A book already in the library (absItemId set) with an available request. */
 function available(reqId: string, bookId: string, userId: string, over: Row = {}) {
@@ -134,7 +136,7 @@ describe('Explicit flag in the delivery step (#542)', () => {
 
   describe('tagging off (the default)', () => {
     beforeEach(() => {
-      state.config = {};
+      state.config = { ...EXPLICIT_ON };
     });
 
     it('a marked delivery is flagged; the body carries no tags; no users query; reads are filtered to marked rows', async () => {
@@ -232,7 +234,7 @@ describe('Explicit flag in the delivery step (#542)', () => {
     });
 
     it('tagging off and no access: no ABS write at all', async () => {
-      state.config = {};
+      state.config = { ...EXPLICIT_ON };
       state.canSee = false;
       asinMatched('r1', 'asin1', 'u-alice', { explicit: true });
 
@@ -270,6 +272,51 @@ describe('Explicit flag in the delivery step (#542)', () => {
       expect(state.meReads).toBe(1);
       expect(state.writes.filter((w) => w.explicit)).toHaveLength(3);
       expect(warnings()).toEqual([]);
+    });
+  });
+
+  describe('the Explicit mark setting off (the default)', () => {
+    const markedEverywhere = () => {
+      state.canSee = false; // would warn if the guard ran
+      asinMatched('r1', 'asin1', 'u-alice', { explicit: true });
+      available('r2', 'b2', 'u-alice', { explicit: true });
+      return [listed('item-b2', { tags: ['req:alice'], explicit: false })];
+    };
+
+    it.each([['off', 'false'], ['absent (an upgrade)', undefined]])('setting %s, tagging off, marked requests present: no ABS call, no read, no warning', async (_label, value) => {
+      state.config = value === undefined ? {} : { 'audiobookshelf.explicit_mark_enabled': value };
+      const listedItems = markedEverywhere();
+
+      await run(listedItems);
+
+      expect(state.writes).toEqual([]);
+      expect(state.meReads).toBe(0);
+      expect(warnings()).toEqual([]);
+      expect(prismaMock.request.findMany.mock.calls.map((c) => c[0]).filter((a) => a?.where?.OR && a.where.explicit)).toEqual([]);
+      expect(db.requests.filter((r) => r.explicit).map((r) => r.id)).toEqual(['r1', 'r2']); // marks kept
+    });
+
+    it('tagging on: the tag still goes out, never the flag, and the access is never checked', async () => {
+      state.config = { 'audiobookshelf.tag_requester': 'true' };
+      const listedItems = markedEverywhere();
+
+      await run(listedItems);
+
+      expect(state.writes).toEqual([{ itemId: 'item-asin1', tags: ['req:alice'] }]);
+      expect(state.meReads).toBe(0);
+      expect(warnings()).toEqual([]);
+    });
+
+    it('turning it back on resumes: the next scan repairs the marked item', async () => {
+      state.config = {};
+      const listedItems = markedEverywhere();
+      await run(listedItems);
+      state.canSee = true;
+      state.config = { ...EXPLICIT_ON };
+
+      await run(listedItems);
+
+      expect(state.writes).toEqual([{ itemId: 'item-b2', explicit: true }]);
     });
   });
 

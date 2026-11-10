@@ -6,7 +6,8 @@
  * only an admin may clear it. Setting it on a book already in the library (Audiobookshelf mode)
  * turns on the item's Explicit flag at once; an admin's repeat mark retries that write (a
  * requester's repeat is a plain 200: the scan repair retries). Clearing writes nothing to
- * Audiobookshelf. Not on the API token allowlist (UI only).
+ * Audiobookshelf. Not on the API token allowlist (UI only). 403 FeatureDisabled while the admin
+ * setting (audiobookshelf.explicit_mark_enabled, off by default) is off.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,7 +18,8 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { zodIssueDetails } from '@/lib/utils/zod-validation';
 import { getConfigService } from '@/lib/services/config.service';
-import { markItemExplicitNow } from '@/lib/services/audiobookshelf/explicit-flag';
+import { isExplicitMarkOn, markItemExplicitNow } from '@/lib/services/audiobookshelf/explicit-flag';
+import { EXPLICIT_MARK_OFF_MESSAGE } from '@/lib/constants/explicit-mark';
 
 const logger = RMABLogger.create('API.RequestExplicit');
 
@@ -50,6 +52,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     try {
       if (!req.user) return json(401, 'Unauthorized', 'User not authenticated');
+      if (!(await isExplicitMarkOn())) return json(403, 'FeatureDisabled', EXPLICIT_MARK_OFF_MESSAGE);
       const { id } = await params;
       const bodyResult = await readJsonBody<unknown>(req, { fallback: null }); // missing or bad JSON → 400 below
       if (!bodyResult.ok) return bodyResult.response;

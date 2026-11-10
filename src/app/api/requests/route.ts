@@ -14,6 +14,7 @@ import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { withLibraryDisplayAll } from '@/lib/services/library/library-display';
+import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -29,7 +30,7 @@ const CreateRequestSchema = z.object({
     releaseDate: z.string().optional(),
     rating: z.number().nullable().optional(),
   }),
-  /** Mark the request Explicit (#542): Audiobookshelf mode flags the book when it arrives */
+  /** Mark the request Explicit (#542): Audiobookshelf mode flags the book when it arrives; ignored while the setting is off */
   explicit: z.boolean().optional(),
 });
 
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
         narrator: audiobook.narrator,
         description: audiobook.description,
         coverArtUrl: audiobook.coverArtUrl,
-      }, { skipAutoSearch, bypassIgnore: true, explicit });
+      }, { skipAutoSearch, bypassIgnore: true, explicit: explicit === true && (await isExplicitMarkOn()) });
 
       if (!result.success) {
         const statusMap: Record<string, { error: string; status: number }> = {

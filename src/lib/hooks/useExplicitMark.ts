@@ -2,8 +2,9 @@
  * Component: Explicit mark hooks (#542)
  * Documentation: documentation/features/explicit-flag.md
  *
- * useBackendMode: the library backend from the public /api/auth/providers (null while loading or on
- * error), so the Explicit controls show in Audiobookshelf mode only.
+ * useExplicitMarkEnabled: true only once the public /api/auth/providers (cached by SWR, one request
+ * for every card) says Audiobookshelf mode and the admin setting is on; false while loading, on
+ * error, in Plex mode or with the setting off, so no control flashes before the answer arrives.
  * useSetExplicit: PUT /api/requests/[id]/explicit; returns the server's message (shown as a toast)
  * and revalidates the plain request keys (the admin table). The filter mutate skips infinite lists:
  * My Requests reloads its own through RequestCard's onChanged.
@@ -15,23 +16,19 @@ import { useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import { fetchWithAuth } from '@/lib/utils/api';
 
-export type BackendMode = 'plex' | 'audiobookshelf';
+/** SWR key of the public providers response; the settings save revalidates it. */
+export const PROVIDERS_KEY = '/api/auth/providers';
 
-const providersFetcher = async (url: string): Promise<{ backendMode?: string }> => {
+const providersFetcher = async (url: string): Promise<{ backendMode?: string; explicitMarkEnabled?: boolean }> => {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 };
 
-export function useBackendMode(): BackendMode | null {
-  const { data } = useSWR('/api/auth/providers', providersFetcher, { revalidateOnFocus: false });
-  const mode = data?.backendMode;
-  return mode === 'plex' || mode === 'audiobookshelf' ? mode : null;
-}
-
-/** True only once the backend is known to be Audiobookshelf. */
-export function useIsAudiobookshelf(): boolean {
-  return useBackendMode() === 'audiobookshelf';
+/** True only once the backend is known to be Audiobookshelf and the Explicit mark setting is on. */
+export function useExplicitMarkEnabled(): boolean {
+  const { data } = useSWR(PROVIDERS_KEY, providersFetcher, { revalidateOnFocus: false });
+  return data?.backendMode === 'audiobookshelf' && data.explicitMarkEnabled === true;
 }
 
 export interface SetExplicitResult {

@@ -26,7 +26,7 @@ import { fetchWithAuth } from '@/lib/utils/api';
 import { useIsIgnored, useToggleIgnore } from '@/lib/hooks/useIgnoredAudiobooks';
 import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-statuses';
 import { ExplicitCheckbox } from '@/components/requests/ExplicitCheckbox';
-import { useIsAudiobookshelf, useSetExplicit } from '@/lib/hooks/useExplicitMark';
+import { useExplicitMarkEnabled, useSetExplicit } from '@/lib/hooks/useExplicitMark';
 
 interface AudiobookDetailsModalProps {
   asin: string;
@@ -131,7 +131,7 @@ export function AudiobookDetailsModal({
     setExplicitFrom({ requestExplicit, isOpen });
     setExplicit(requestExplicit);
   }
-  const isABS = useIsAudiobookshelf();
+  const explicitMarkOn = useExplicitMarkEnabled();
   const { setExplicit: saveExplicitMark } = useSetExplicit();
 
   // Sync local status when the prop changes (e.g. page data refreshes)
@@ -143,8 +143,8 @@ export function AudiobookDetailsModal({
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
   const summaryText = audiobook?.description?.trim() ?? '';
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
-  // Explicit mark (#542): wherever Request shows, Audiobookshelf only, never on a denied request
-  const showExplicit = isABS && !!user && status.canRequest && effectiveStatus !== 'denied' && requestType !== 'ebook';
+  // Explicit mark (#542): wherever Request shows, Audiobookshelf with the setting on, never on a denied request
+  const showExplicit = explicitMarkOn && !!user && status.canRequest && effectiveStatus !== 'denied' && requestType !== 'ebook';
   const sendExplicit = showExplicit && explicit;
 
   // Advance the existing request via select-torrent (instead of creating a new one)

@@ -11,7 +11,14 @@
 
 import { prisma } from '@/lib/db';
 import type { RMABLogger } from '@/lib/utils/logger';
+import { getConfigService } from '@/lib/services/config.service';
+import { EXPLICIT_MARK_SETTING_KEY } from '@/lib/constants/explicit-mark';
 import { canKeyUserSeeExplicit, writeABSItem } from './api';
+
+/** The admin setting (off by default): while off, nothing reads, writes or checks the mark. */
+export async function isExplicitMarkOn(): Promise<boolean> {
+  return (await getConfigService().get(EXPLICIT_MARK_SETTING_KEY)) === 'true';
+}
 
 const ACCESS_HINT = 'turn on "Can access explicit content" for that user in Audiobookshelf';
 

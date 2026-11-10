@@ -17,7 +17,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { COMPLETED_STATUSES, CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
 import { useAuth } from '@/contexts/AuthContext';
-import { useIsAudiobookshelf } from '@/lib/hooks/useExplicitMark';
+import { useExplicitMarkEnabled } from '@/lib/hooks/useExplicitMark';
 import { RequestExplicitControl } from './ExplicitCheckbox';
 
 interface RequestCardProps {
@@ -68,8 +68,8 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
   const { user } = useAuth();
-  // Explicit mark (#542): Audiobookshelf only, audiobook requests, not on denied ones (never delivered)
-  const showExplicit = useIsAudiobookshelf() && !isEbook && request.status !== 'denied';
+  // Explicit mark (#542): Audiobookshelf with the setting on, audiobook requests, not on denied ones (never delivered)
+  const showExplicit = useExplicitMarkEnabled() && !isEbook && request.status !== 'denied';
 
   const releaseDateLabel = React.useMemo(() => {
     if (request.status !== 'awaiting_release' || !request.releaseDate) return null;

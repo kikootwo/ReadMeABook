@@ -13,13 +13,13 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ isABS: true, role: 'user' }));
+const state = vi.hoisted(() => ({ enabled: true, role: 'user' }));
 const createRequestMock = vi.hoisted(() => vi.fn());
 const searchModalProps = vi.hoisted(() => vi.fn());
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1', username: 'user', role: state.role } }) }));
 vi.mock('@/contexts/PreferencesContext', () => ({ usePreferences: () => ({ squareCovers: false }) }));
-vi.mock('@/lib/hooks/useExplicitMark', () => ({ useIsAudiobookshelf: () => state.isABS, useSetExplicit: () => ({ setExplicit: vi.fn(), isLoading: false }) }));
+vi.mock('@/lib/hooks/useExplicitMark', () => ({ useExplicitMarkEnabled: () => state.enabled, useSetExplicit: () => ({ setExplicit: vi.fn(), isLoading: false }) }));
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
   useAudiobookDetails: () => ({ audiobook: { asin: 'ASIN1', title: 'Book', author: 'Author', description: '' }, isLoading: false, error: null }),
 }));
@@ -52,7 +52,7 @@ async function open(props: Partial<React.ComponentProps<typeof AudiobookDetailsM
 
 beforeEach(() => {
   vi.clearAllMocks();
-  state.isABS = true;
+  state.enabled = true;
   state.role = 'user';
   createRequestMock.mockResolvedValue({ id: 'req-1' });
 });
@@ -90,7 +90,7 @@ describe('AudiobookDetailsModal Explicit checkbox', () => {
   });
 
   it.each([
-    ['Plex mode (or still loading)', () => { state.isABS = false; }, {}],
+    ['the setting off (or Plex mode, or still loading)', () => { state.enabled = false; }, {}],
     ['a denied request', () => {}, { requestStatus: 'denied' }],
     ['a book in the library', () => {}, { isAvailable: true }],
     ['a request in progress', () => {}, { requestStatus: 'downloading' }],
@@ -103,8 +103,8 @@ describe('AudiobookDetailsModal Explicit checkbox', () => {
     expect(box()).toBeNull();
   });
 
-  it('hidden in Plex mode: Request sends explicit false', async () => {
-    state.isABS = false;
+  it('hidden with the setting off: Request sends explicit false', async () => {
+    state.enabled = false;
     await open();
 
     fireEvent.click(screen.getByRole('button', { name: 'Request Audiobook' }));

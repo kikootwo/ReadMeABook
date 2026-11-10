@@ -15,7 +15,7 @@ import { authenticatedFetcher, fetchWithAuth } from '@/lib/utils/api';
 import { useToast } from '@/components/ui/Toast';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { BlockedReleasesChip } from './BlockedReleasesChip';
-import { useIsAudiobookshelf } from '@/lib/hooks/useExplicitMark';
+import { useExplicitMarkEnabled } from '@/lib/hooks/useExplicitMark';
 
 interface RecentRequest {
   requestId: string;
@@ -184,7 +184,7 @@ function getInitialParams(): {
 
 export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
   const toast = useToast();
-  const isABS = useIsAudiobookshelf(); // the Explicit pill and menu item (#542)
+  const explicitMarkOn = useExplicitMarkEnabled(); // the Explicit pill and menu item (#542)
 
   // Get initial filter state from URL (only evaluated once due to lazy init)
   const [initialParams] = useState(getInitialParams);
@@ -744,7 +744,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                               Custom Search
                             </span>
                           )}
-                          {isABS && request.explicit && request.type !== 'ebook' && (
+                          {explicitMarkOn && request.explicit && request.type !== 'ebook' && (
                             <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
                               Explicit
                             </span>
@@ -800,7 +800,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                           customSearchTerms: request.customSearchTerms,
                           explicit: request.explicit,
                         }}
-                        showExplicit={isABS}
+                        showExplicit={explicitMarkOn}
                         onDelete={handleDeleteClick}
                         onManualSearch={handleManualSearch}
                         onCancel={handleCancel}

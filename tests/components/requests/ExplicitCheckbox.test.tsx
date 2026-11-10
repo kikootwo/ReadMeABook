@@ -14,12 +14,12 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ isABS: true, role: 'user' }));
+const state = vi.hoisted(() => ({ enabled: true, role: 'user' }));
 const setExplicitMock = vi.hoisted(() => vi.fn());
 const toastMock = vi.hoisted(() => ({ warning: vi.fn(), error: vi.fn(), success: vi.fn() }));
 
 vi.mock('@/lib/hooks/useExplicitMark', () => ({
-  useIsAudiobookshelf: () => state.isABS,
+  useExplicitMarkEnabled: () => state.enabled,
   useSetExplicit: () => ({ setExplicit: setExplicitMock, isLoading: false }),
 }));
 vi.mock('@/components/ui/Toast', () => ({ useToast: () => toastMock }));
@@ -36,7 +36,7 @@ const box = () => screen.getByRole('checkbox', { name: /Explicit/ });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  state.isABS = true;
+  state.enabled = true;
   state.role = 'user';
   setExplicitMock.mockResolvedValue({ explicit: true });
 });
@@ -152,7 +152,7 @@ describe('RequestCard Explicit control', () => {
   });
 
   it.each([
-    ['Plex mode (or still loading)', () => { state.isABS = false; }, {}],
+    ['the setting off (or Plex mode, or still loading)', () => { state.enabled = false; }, {}],
     ['a denied request', () => {}, { status: 'denied' }],
     ['an ebook request', () => {}, { type: 'ebook' }],
   ])('hidden for %s', (_label, arrange, over) => {

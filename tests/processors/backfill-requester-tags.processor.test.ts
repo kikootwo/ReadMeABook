@@ -4,7 +4,7 @@
  *
  * Plex mode and tagging off skip; every listed eligible item is tagged once and a second run writes
  * nothing; 3 failures in a row stop it; turning tagging off stops it; ABS failures never throw; the
- * result counts. Real: the processor, requester-tags. Mocked: prisma (in-memory holder), config,
+ * result counts; the Explicit flag only while its setting is on (#542). Real: the processor, requester-tags. Mocked: prisma (in-memory holder), config,
  * the library service, writeABSItem (a fake ABS tag and Explicit store, #542).
  */
 
@@ -137,6 +137,7 @@ describe('backfill_requester_tags (#232)', () => {
   });
 
   it('marks the items of marked requests explicit, whatever the tag rules say (#542); a second run writes nothing', async () => {
+    abs.config['audiobookshelf.explicit_mark_enabled'] = 'true';
     item(1, 'u-alice', { explicit: true });
     item(2, 'u-pat', { explicit: true }); // not taggable, still marked
     item(3, 'u-alice');
@@ -150,6 +151,15 @@ describe('backfill_requester_tags (#232)', () => {
     abs.writes = [];
     expect(await runJob()).toMatchObject({ tagged: 0, markedExplicit: 0 });
     expect(abs.writes).toEqual([]);
+  });
+
+  it('the Explicit mark setting off (absent): marked items get their tag, never the flag (#542)', async () => {
+    item(1, 'u-alice', { explicit: true });
+    item(2, 'u-pat', { explicit: true });
+
+    expect(await runJob()).toMatchObject({ tagged: 1, markedExplicit: 0, explicitHeldBack: 0 });
+    expect([...abs.explicit]).toEqual([]);
+    expect(abs.writes).toEqual(['item-1']);
   });
 
   it('stops after 3 failures in a row and never throws', async () => {

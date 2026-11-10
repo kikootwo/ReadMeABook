@@ -65,7 +65,7 @@ async function scan(listedItems: LibraryItem[] = []) {
 }
 async function backfill(listedItems: LibraryItem[]) {
   const { applyItemMarks } = await import('@/lib/services/audiobookshelf/requester-tags');
-  return applyItemMarks({ deliveredBookIds: [], listedItems, logger, tagging: true, mode: 'backfill' });
+  return applyItemMarks({ deliveredBookIds: [], listedItems, logger, tagging: true, explicit: true, mode: 'backfill' });
 }
 
 describe('requester tag eligibility by path and step (#232)', () => {
@@ -239,7 +239,7 @@ describe('requester tag eligibility by path and step (#232)', () => {
       request('r-bob', 'b2', 'u-bob', 'available');
       const { applyItemMarks } = await import('@/lib/services/audiobookshelf/requester-tags');
 
-      const result = await applyItemMarks({ deliveredBookIds: ['b9'], listedItems: [listed('item-b1')], logger, tagging: true, mode: 'backfill' });
+      const result = await applyItemMarks({ deliveredBookIds: ['b9'], listedItems: [listed('item-b1')], logger, tagging: true, explicit: true, mode: 'backfill' });
 
       const reads = prismaMock.request.findMany.mock.calls.map((c) => c[0]);
       expect(reads).toHaveLength(1);
@@ -257,7 +257,7 @@ describe('requester tag eligibility by path and step (#232)', () => {
       });
       const { applyItemMarks } = await import('@/lib/services/audiobookshelf/requester-tags');
 
-      const result = await applyItemMarks({ deliveredBookIds: ['b0'], listedItems: ids.map((id) => listed(id)), logger, tagging: true, mode: 'backfill' });
+      const result = await applyItemMarks({ deliveredBookIds: ['b0'], listedItems: ids.map((id) => listed(id)), logger, tagging: true, explicit: true, mode: 'backfill' });
 
       type Clause = { audiobookId?: { in: string[] }; audiobook?: { absItemId: { in: string[] } } };
       const ors = prismaMock.request.findMany.mock.calls.map((c) => c[0].where.OR as Clause[]);

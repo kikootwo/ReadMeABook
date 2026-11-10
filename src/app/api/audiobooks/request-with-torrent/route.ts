@@ -22,6 +22,7 @@ import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services
 import { hideStoredPick } from '@/lib/services/request-detail-query';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { resolveAutoApprove } from '@/lib/utils/permissions';
+import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -55,7 +56,8 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { audiobook, torrent: pickedTorrent, explicit } = RequestWithTorrentSchema.parse(body);
+      const { audiobook, torrent: pickedTorrent, explicit: explicitSent } = RequestWithTorrentSchema.parse(body);
+      const explicit = explicitSent === true && (await isExplicitMarkOn()); // ignored while the setting is off (#542)
 
       // Only magnet links or Prowlarr download links may be fetched on the user's behalf
       const torrentCheck = await guardTorrentSelection(pickedTorrent);

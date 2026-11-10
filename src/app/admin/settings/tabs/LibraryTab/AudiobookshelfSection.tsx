@@ -9,6 +9,7 @@ import { Settings, ABSLibrary } from '../../lib/types';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
 import { AudibleLanguageFilterOption } from './AudibleLanguageFilterOption';
 import { RequesterTagOption } from './RequesterTagOption';
+import { ExplicitMarkOption } from './ExplicitMarkOption';
 
 interface AudiobookshelfSectionProps {
   settings: Settings;
@@ -203,6 +204,8 @@ export function AudiobookshelfSection({
       </div>
 
       <RequesterTagOption settings={settings} onChange={onChange} />
+
+      <ExplicitMarkOption settings={settings} onChange={onChange} />
 
       {/* Audible Region Selection */}
       <div className="border-t border-gray-200 dark:border-gray-700 pt-6 space-y-2">
