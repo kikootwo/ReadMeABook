@@ -259,9 +259,10 @@ describe('requester tag eligibility by path and step (#232)', () => {
 
       const result = await applyRequesterTags({ deliveredBookIds: ['b0'], listedItems: ids.map((id) => listed(id)), logger, mode: 'backfill' });
 
-      const ors = prismaMock.request.findMany.mock.calls.map((c) => c[0].where.OR as Array<Record<string, any>>);
+      type Clause = { audiobookId?: { in: string[] }; audiobook?: { absItemId: { in: string[] } } };
+      const ors = prismaMock.request.findMany.mock.calls.map((c) => c[0].where.OR as Clause[]);
       expect(ors).toHaveLength(expectedReads);
-      const readIds = ors.map((or) => or.find((c) => c.audiobook)!.audiobook.absItemId.in as string[]);
+      const readIds = ors.map((or) => or.find((c) => c.audiobook)!.audiobook!.absItemId.in);
       readIds.forEach((chunk, i) => expect(chunk).toEqual(ids.slice(i * 1000, (i + 1) * 1000)));
       expect(ors.map((or) => or.filter((c) => c.audiobookId).length)).toEqual([1, ...Array(expectedReads - 1).fill(0)]);
       expect(result).toMatchObject({ considered: count, tagged: count });
