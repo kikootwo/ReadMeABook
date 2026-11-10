@@ -209,7 +209,7 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
     s5.pills = await page.locator('tr span', { hasText: /^Explicit$/ }).count();
     await shot(DIR, 'admin-pill-1280-light');
     await rowB.getByTitle('Actions').click();
-    const item = page.getByRole('button', { name: 'Remove explicit mark' });
+    const item = page.getByRole('menuitem', { name: 'Remove explicit mark' });
     await expect(item).toBeVisible();
     await shot(DIR, 'admin-menu-1280-light');
     await item.click();
@@ -264,12 +264,12 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
     const rowC = page.locator('tr', { has: page.getByText(C.title) });
     await expect(rowC).toBeVisible({ timeout: 30_000 });
     await rowC.getByTitle('Actions').click();
-    await page.getByRole('button', { name: 'Remove explicit mark' }).click();
+    await page.getByRole('menuitem', { name: 'Remove explicit mark' }).click();
     // C is available, so the clear answers with the "still marks this book explicit" message
     await expect(page.getByText(/^Mark removed\. Audiobookshelf still marks this book explicit/)).toBeVisible({ timeout: 15_000 });
     await rowC.getByTitle('Actions').click();
     const putP = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === `/api/requests/${cReq}/explicit`);
-    await page.getByRole('button', { name: 'Mark explicit' }).click();
+    await page.getByRole('menuitem', { name: 'Mark explicit' }).click();
     s8.adminRemark = await (await putP).json();
     await expect(page.getByText(/^Saved\. Audiobookshelf wasn't updated:/)).toBeVisible({ timeout: 15_000 });
     await shot(DIR, 'failure-toast-1280-light');
