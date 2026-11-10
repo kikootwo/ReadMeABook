@@ -8,15 +8,23 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 ## Key Details
 - **Route:** `src/app/api/library/route.ts`, `requireAuth` (all roles; refuses deleted/pending accounts). **Not** on `API_TOKEN_ALLOWED_ENDPOINTS`.
 - **Engine:** `src/lib/library-view/` (kept apart from `src/lib/services/library/`, the backend adapters):
-  - `service.ts` (full + live pipelines), `params.ts` (strict query parsing), `cursor.ts` (opaque keyset cursor), `loader.ts` (Prisma loads, live query), `snapshot.ts` (Load 1 cache), `merge.ts` (pure merge/derive), `query.ts` (pure filter/facets/sort/page/groups), `enrich.ts` (per-page covers/size/admin path), `serialize.ts` (the one gating choke point), `asin-rule.ts` (the ASIN rule), `types.ts` (exported response types), `constants.ts`.
-- **Pipeline (full mode):** Load 1 (snapshot cache) + Load 2 (fresh) → merge → derive → filter/facet/sort/page → page enrichment → serialize per viewer.
+  - `service.ts` (full + live pipelines), `params.ts` (strict query parsing), `cursor.ts` (opaque keyset cursor), `loader.ts` (Prisma loads, live query), `snapshot.ts` (Load 1 cache), `memo.ts` (merged entries + query results), `merge.ts` (pure merge/derive), `query.ts` (pure filter/facets/sort/page/groups), `enrich.ts` (per-page covers/size/admin path), `serialize.ts` (the one gating choke point), `asin-rule.ts` (the ASIN rule), `types.ts` (exported response types), `constants.ts`.
+- **Pipeline (full mode):** Load 1 (row snapshot) + requests version → merged entries and query result (memo) → page → page durations and enrichment → serialize per viewer.
 - **Active library id:** ABS `audiobookshelf.library_id`, Plex `plex_audiobook_library_id` (bookdate/library pattern). Never `audiobookshelf.ebook_library_id`. None configured → 200 with RMAB entries only, `libraryConfigured:false`.
 
 ## Loads
 - **Load 1 (`plex_library`, active id only):** id, plexGuid, title, author, narrator, duration, year, asin, addedAt, createdAt, cachedLibraryCoverPath. Never `file_path` (a real ABS folder since #495), `thumb_url` (Plex token), `summary`.
 - **Load 2 (`requests`):** `where { type:'audiobook', deletedAt:null, status:{ not:'cancelled' } }` (route test asserts it). Includes requests of soft-deleted accounts (#503). Explicit select; never `file_format`, `ebook_auto_retry_count`, `custom_search_terms`, `placed_ebook_files`, `approval_bypassed_by`, `cancelled_at`, `auto_rerequest_count`. `libraryAsin`/`absItemId` are selected only for the cover rule and never serialized.
-- **Load 1 snapshot (`snapshot.ts`):** one module-level slot holding the prepared rows (link/ASIN indexes, frozen scan-only entries). Key `backend|libraryId|count:max(updated_at)` (`libraryRowsVersion`, read before the rows load, so a write during the load forces a rebuild next call). Safety TTL `SNAPSHOT_MAX_AGE_MS` (10 min). Concurrent misses share one build; a stale build finishing late never takes the slot; a failed build is not cached. Valid because every `plex_library` write goes through Prisma `@updatedAt` (no raw SQL writes). Load 2 and enrichment are never cached.
-- **Durations** of request-only books from `audible_cache` by ASIN (duration sort).
+- **Versions (`loader.ts`):** `count:sum(hashtextextended(row(<columns>)::text, 0))` over committed rows (one raw SQL aggregate each, library id bound as a parameter).
+  - `libraryRowsVersion(libraryId)`: exactly the `LIBRARY_ROW_SELECT` columns (`LIBRARY_ROW_COLUMNS`), never `updated_at`/`last_scanned_at`.
+  - `libraryRequestsVersion()`: every `LIBRARY_REQUEST_SELECT` column of the qualifying requests joined to `users` and `audiobooks` (`LIBRARY_REQUEST_COLUMNS`). A test pins both column maps to the selects.
+  - Moves on any insert, delete or change of a selected value, whatever `updated_at` says (late commits, same-millisecond writes, raw SQL). Misses a write only if two different contents give the same count and the same 64-bit hash sum (chance about 2^-64). Stays put for a write that changes nothing selected: the recently-added check stamping its 10 newest rows (`last_scanned_at`, `updated_at`), a scan rewriting a row unchanged.
+- **Load 1 snapshot (`snapshot.ts`):** one slot (prepared rows: link/ASIN indexes, frozen scan-only entries) for `backend|libraryId` plus its version, read before the rows load.
+  - Version moved: callers keep getting the current snapshot while **one rebuild per library** runs (no stampede). **Staleness bound: a viewer can see library rows up to one rebuild old.**
+  - A write during a rebuild moves the version again; the next call starts the rebuild that sees it.
+  - Only a library with no snapshot yet (first call, library switch) waits for its build; concurrent waits share it. A failed rebuild keeps the old snapshot (warn log) and the next call retries; a failed cold build is not cached. No TTL (the key is exact).
+- **Merged-entries memo (`memo.ts`):** Load 2 + merge run once per (snapshot object, requests version); a request change moves the version, so the very next call merges again (no stale request data). Filtered/sorted results (`computeQuery`) memoized per query key (`queryKey`), LRU `QUERY_MEMO_SIZE` (16). Nothing in it depends on the viewer; gating stays in `enrich.ts`/`serialize.ts`.
+- **Durations** of request-only books from `audible_cache` by ASIN: all of them once per merged copy for `sort=duration` (not with `group=author`); otherwise only the returned page's, each looked up once per copy. A later `audible_cache` change shows after the next request or row change.
 - The engine drops any non-`audiobook`, cancelled or deleted request again, so ebook rows never change a count.
 
 ## Merge rule (`merge.ts`, `asin-rule.ts`)
@@ -30,11 +38,11 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 | Case | `findPlexMatch` | Library rule |
 |---|---|---|
 | `asin` field equal, same case | match | match |
-| `asin` field equal, case differs | no match (DB prefilter is case-sensitive) | **match** (the one documented divergence) |
+| `asin` field equal, case differs | no match (DB prefilter is case-sensitive) | **match** (divergence 1: case) |
 | guid contains the ASIN, same case | match | match |
 | guid contains the ASIN, case differs | no match | **match** |
-| value not ASIN-shaped (not 10 alphanumerics) in guid | contains-match | no guid match |
-| row in another library id | match | ignored (active library only) |
+| value not ASIN-shaped (not 10 alphanumerics) in guid | contains-match | no guid match (divergence 2) |
+| row in another library id | match | ignored, active library only (divergence 3) |
 
 ## Ids, status, source
 - `req_<audiobookId>` whenever the book has a qualifying request; `lib_<plexLibraryId>` for scan-only books. Stable for life; changes only when the request goes away (cancel/delete while in the library → `lib_`).
@@ -61,7 +69,7 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 | `requestedBy` | csv of uuids, max 50; ids outside the requester universe dropped silently, never echoed; all dropped → no match | all |
 | `hideAvailable` | `true`/`false` | `false` |
 | `sort` / `order` | `added,title,author,year,duration,status` / `asc,desc` | `added`; natural order: added/year/duration desc, title/author/status asc |
-| `group` | `none,author` (`author` forces author asc, title asc) | `none` |
+| `group` | `none,author` (`author` forces author asc, title asc; `groups` covers the page's authors) | `none` |
 | `cursor` | opaque; malformed → 400 `BadCursor`, other sort/order/group/filters → 400 `StaleCursor` | — |
 | `limit` | 1-120 | 60 |
 | `live` | `1` → live mode | — |
@@ -71,7 +79,9 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 
 ## Response
 - Full: `LibraryResponse { items, nextCursor, matched, stats, facets{status,source,requestedBy}, groups|null, viewer{isAdmin, canFetchEbook?}, backend, libraryConfigured }`; `LibraryItem` in `src/lib/library-view/types.ts`.
-- Live (`?live=1`): `{ items:[{ id:'req_<audiobookId>', status, progress, updatedAt }], refreshMs }`. Reads only live audiobook requests (index on `status`), no library rows, no merge. One item per book (latest request). `refreshMs` 5000 while any `searching/downloading/processing`, 30000 otherwise, 0 when empty.
+- `groups` (`group=author` only): one `{ key, label, count }` per author on **this page**, in page order; `count` and `label` are over every match, so a group split across pages has the same values on each. The client merges by `key`.
+- Live (`?live=1`): `{ items:[{ id:'req_<audiobookId>', status, progress, updatedAt }], refreshMs }`. Reads live audiobook requests (index on `status`), then every qualifying request of those books (`loadBookRequests`, index on `audiobook_id`); no library rows, no merge. A book is listed only when its primary request (full mode's choice: newest `created_at`, ties by larger id) is the live one, so live and full report the same request. `refreshMs` 5000 while any `searching/downloading/processing`, 30000 otherwise, 0 when empty.
+- **Live contract for the page:** live never overrides a card the list shows `inLibrary` (live reads no library rows, so a book just added to the library can still have a live request for a moment); an id that is in no loaded page (a book folded into another book's row, or not loaded yet) is ignored, never a reason to revalidate page 1 on every poll.
 - **Live set** (`request-statuses.ts`): `LIVE_ALWAYS_STATUSES` pending/searching/downloading/processing; `LIVE_RECENT_STATUSES` downloaded/awaiting_import while `updatedAt` is within `LIVE_RECENT_WINDOW_MS` (15 min). Never awaiting_search/approval/release.
 
 ## Gating (serializer omits keys, never nulls them)
@@ -93,11 +103,12 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 
 ## Shared constants (`src/lib/constants/request-statuses.ts`)
 - `SEARCHABLE_STATUSES` (manual-search route, admin dropdown), `EBOOK_FETCHABLE_STATUSES` (fetch-ebook route, admin dropdown), live sets + window.
-- `ebookSourcesEnabled()` (`src/lib/services/ebook-sources.ts`): one rule for ebook-status route and find-missing-ebooks (legacy `ebook_sidecar_enabled` fallback).
+- `ebookSourcesEnabled()` (`src/lib/services/ebook-sources.ts`): one rule for `viewer.canFetchEbook`, the ebook-status route, the admin fetch-ebook route (`requests/[id]/fetch-ebook`) and find-missing-ebooks (legacy `ebook_sidecar_enabled` fallback). Reads through the config service, which answers null on a database error, so those routes then say "no source" instead of 500.
 
 ## Known limits
 - Format is never shown (`audiobooks.file_format` is overwritten by the ebook organize); no library path; ASIN drift (#284) can show a book twice; series only on RMAB books; one active library.
-- Load 1 and Load 2 are separate reads (no shared transaction): a scan landing between them can show a just-delivered book once as request-only; the next call corrects it.
-- Cold full call at 30k rows pays the row load and prepare (~110 ms engine, plus the Prisma read); warm calls skip both.
+- Load 1 and Load 2 are separate reads (no shared transaction): a scan landing between them, or a library change still being rebuilt, can show a just-delivered book as request-only (status `available`) until the rebuild lands.
+- Only the first full call for a library (process start, library switch) waits for the row load and prepare: 0.7-1.0 s at 10k rows on 2 CPUs (`177-library-perf`). Every later row change is rebuilt in the background while callers get the previous snapshot. A request change makes the next call reload the requests and merge again (the perf window ticks request progress every 5 s, so its full-mode figures include these re-merges).
+- No rate limit: a signed-in client looping on distinct queries still costs one filter/sort pass over every entry per new query key.
 
 ## Related: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md), [backend/database.md](../backend/database.md), [integrations/ebook-sidecar.md](../integrations/ebook-sidecar.md)
