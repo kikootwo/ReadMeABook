@@ -5,6 +5,7 @@
 
 import { expect, type Browser } from '@playwright/test';
 import { Abs, Rmab, snap, urls } from '../../lib/harness';
+import { addressFor } from './232-tag-helpers';
 
 const PASSWORD = 'e2e-542-explicit-pass';
 
@@ -14,9 +15,6 @@ export interface UserSession {
   rmab: Rmab;
   storage: { cookies: never[]; origins: { origin: string; localStorage: { name: string; value: string }[] }[] };
 }
-
-/** A documentation-range address (TEST-NET-2) per name: the register route keys its limit on a valid client address. */
-const addressFor = (name: string) => `198.51.100.${([...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 254) + 1}`;
 
 /**
  * Register a local user (registration on, no approval) with auto-approve on, and keep its tokens as a
