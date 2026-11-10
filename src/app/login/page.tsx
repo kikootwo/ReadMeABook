@@ -318,7 +318,8 @@ function LoginContent() {
       }
 
       if (!response.ok) {
-        throw new Error(data.error || data.message || 'Login failed');
+        // Some answers put a code name in `error` and the readable text in `message`
+        throw new Error(data.message || data.error || 'Login failed');
       }
 
       // Store tokens
@@ -370,7 +371,7 @@ function LoginContent() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Registration failed');
+        throw new Error(data.message || data.error || 'Registration failed');
       }
 
       // Check if pending approval

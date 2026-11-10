@@ -103,6 +103,7 @@ interface BookCover {
 **Login Timeout:** 2 min polling timeout
 **Plex Unavailable:** "Plex services currently unavailable."
 **Covers Fail:** Silent fallback to placeholder gradient elements
+**Sign-in / sign-up refused:** shows `message || error` from the answer (some routes put a code name like `AuthenticationError` in `error` and the readable text in `message`; limit answers carry only `error`)
 
 ## Animations
 
