@@ -109,6 +109,14 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
   });
 
   describe('who may call it', () => {
+    it('no API token allowlist entry ever matches this path (or the old manual-download path)', async () => {
+      const { isEndpointAllowed } = await import('@/lib/constants/api-tokens');
+      for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+        expect(isEndpointAllowed(method, '/api/admin/requests/req-1/add-torrent')).toBe(false);
+        expect(isEndpointAllowed(method, '/api/requests/req-1/manual-download')).toBe(false);
+      }
+    });
+
     it('no session: 401, nothing looked up', async () => {
       expect((await call(post({ magnet: MAGNET }, { token: null }))).status).toBe(401);
       expect(requestCalls()).toBe(0);

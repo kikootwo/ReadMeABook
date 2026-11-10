@@ -59,14 +59,10 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
   const magnetRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Each opening starts empty, focuses the magnet field, and checks for a torrent client
+  // Opening focuses the magnet field and checks for a torrent client (the menu mounts the dialog per opening)
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    setMagnet('');
-    setFile(null);
-    setError(null);
-    setNoTorrentClient(false);
     magnetRef.current?.focus();
     hasTorrentClient().then((found) => {
       if (active) setNoTorrentClient(found === false);

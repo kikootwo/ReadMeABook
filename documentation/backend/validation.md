@@ -11,6 +11,7 @@ API routes read JSON bodies through `readJsonBody` (`src/lib/utils/request-body.
 | Sign-in | `AUTH_JSON_BODY_LIMIT_BYTES` | 64 KB | POST auth/admin/login, auth/local/login, auth/token/login, auth/register, auth/refresh, auth/plex/switch-profile, admin/users (add local user) |
 | Default | `JSON_BODY_LIMIT_BYTES` | 1 MB | every other API route body |
 | Bulk import | `BULK_IMPORT_JSON_BODY_LIMIT_BYTES` | 32 MB | POST admin/bulk-import/execute |
+| Torrent upload | `TORRENT_UPLOAD_JSON_BODY_LIMIT_BYTES` | 3 MB | POST admin/requests/[id]/add-torrent (base64 .torrent ≤ 2 MiB, [manual-torrent-download.md](../phase3/manual-torrent-download.md)) |
 
 - **Call pattern** (all API body reads; never `request.json()`/`.text()`/`.formData()`/`.arrayBuffer()`/`.body` directly):
 ```ts

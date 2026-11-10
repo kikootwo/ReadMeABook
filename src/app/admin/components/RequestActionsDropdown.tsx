@@ -549,12 +549,9 @@ export function RequestActionsDropdown({
         onSuccess={onSearchTermsUpdated}
       />
 
-      <AddTorrentDialog
-        isOpen={showAddTorrent}
-        onClose={() => setShowAddTorrent(false)}
-        requestId={request.requestId}
-        bookTitle={request.title}
-      />
+      {showAddTorrent && (
+        <AddTorrentDialog isOpen onClose={() => setShowAddTorrent(false)} requestId={request.requestId} bookTitle={request.title} />
+      )}
 
       <ConfirmModal
         isOpen={confirmCancelOpen}

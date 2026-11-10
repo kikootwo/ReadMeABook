@@ -146,6 +146,23 @@ describe('download selection guard on routes', () => {
     });
   });
 
+  it('select-torrent with a torrentFile in its pick queues no file (only admin Add Torrent passes bytes)', async () => {
+    const magnet = `magnet:?xt=urn:btih:${'c'.repeat(40)}`;
+    authRequest.json.mockResolvedValue({ torrent: { ...torrent(magnet), torrentFile: Buffer.from('d4:infoe').toString('base64') } });
+    prismaMock.request.findFirst.mockResolvedValue({
+      id: 'req-1', userId: 'user-1', type: 'audiobook', status: 'failed', audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+    });
+    prismaMock.request.update.mockResolvedValue({ id: 'req-1', audiobook: {} });
+    const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
+    const response = await POST({} as never, params('req-1'));
+
+    expect(response.status).toBe(200);
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
+    const args = jobQueueMock.addDownloadJob.mock.calls[0];
+    expect(args[2]).toMatchObject({ downloadUrl: magnet });
+    expect(args[5]).toBeUndefined(); // the job's file argument: never filled from a client's pick
+  });
+
   it('rebuilds Anna\'s Archive links from the md5 and ignores client-supplied URLs', async () => {
     prismaMock.audiobook.findFirst.mockResolvedValue({ id: 'ab-1', title: 'Title', author: 'Author' });
     prismaMock.request.findFirst.mockResolvedValue(null);
