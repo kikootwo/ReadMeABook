@@ -4,7 +4,8 @@
  *
  * Fetched only when the list said the viewer may see the request (canSeeRequestDetails); other
  * viewers make no call. Polls every 5 s only while the book is in the latest live response (a failed
- * poll is retried quietly meanwhile). Returns a whitelist: the owner payload's fileFormat,
+ * poll is retried quietly meanwhile, never on a 4xx nor in a hidden tab). A 404 sets `removed`.
+ * Returns a whitelist: the owner payload's fileFormat,
  * ebookAutoRetryCount, type, parentRequestId and audiobook file data never leave this hook.
  *
  * `stale`: the open book is on no loaded page and not live, so nothing else follows it. Each time
@@ -19,6 +20,7 @@ import useSWR from 'swr';
 import { STATUS_GROUP_OF } from '@/lib/library-view/constants';
 import type { LibraryItem } from '@/lib/library-view/types';
 import { fetchWithAuth } from '@/lib/utils/api';
+import { LibraryFetchError } from './useLibrary';
 
 export const DETAIL_POLL_MS = 5000;
 
@@ -101,14 +103,15 @@ export function withRequestStatus(item: LibraryItem, history: RequestHistory | n
 }
 
 type HistoryKey = readonly [string, string, number];
+type HistoryData = { requestId: string; epoch: number; history: RequestHistory | null };
 
 /** Its own SWR key: `/api/requests/<id>` belongs to useRequest, which caches the raw payload. */
 const historyKey = (requestId: string, epoch: number): HistoryKey => ['library-request-history', requestId, epoch];
 
-async function fetchHistory([, requestId, epoch]: HistoryKey): Promise<{ requestId: string; epoch: number; history: RequestHistory | null }> {
+async function fetchHistory([, requestId, epoch]: HistoryKey): Promise<HistoryData> {
   const res = await fetchWithAuth(`/api/requests/${requestId}`);
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.message || `HTTP ${res.status}`);
+  if (!res.ok) throw new LibraryFetchError(body?.message || `HTTP ${res.status}`, res.status, body?.error);
   return { requestId, epoch, history: pickRequestHistory(body?.request) };
 }
 
@@ -121,15 +124,21 @@ export function useLibraryRequestDetail(requestId: string | null, live: boolean,
     setWasStale(stale);
     if (stale) setEpoch((e) => e + 1);
   }
-  const { data, error, isLoading, mutate } = useSWR(requestId ? historyKey(requestId, epoch) : null, fetchHistory, {
-    refreshInterval: live ? DETAIL_POLL_MS : 0,
-    revalidateOnFocus: false,
-    keepPreviousData: true,
-    shouldRetryOnError: live,
-    onErrorRetry: (_error, _key, _config, revalidate, { retryCount }) => {
-      setTimeout(() => revalidate({ retryCount }), DETAIL_POLL_MS);
-    },
-  });
+  const { data, error, isLoading, mutate } = useSWR<HistoryData, LibraryFetchError>(
+    requestId ? historyKey(requestId, epoch) : null,
+    fetchHistory,
+    {
+      refreshInterval: live ? DETAIL_POLL_MS : 0,
+      // while live: SWR stops retrying in a hidden tab and revalidates on focus instead
+      revalidateOnFocus: live,
+      keepPreviousData: true,
+      shouldRetryOnError: live,
+      onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
+        if (err.status !== undefined && err.status < 500) return; // a 4xx will not pass on a retry
+        setTimeout(() => revalidate({ retryCount }), DETAIL_POLL_MS);
+      },
+    }
+  );
   // keepPreviousData also keeps another book's copy while this one loads: never show it
   const own = data !== undefined && data.requestId === requestId;
   return {
@@ -137,6 +146,8 @@ export function useLibraryRequestDetail(requestId: string | null, live: boolean,
     /** The history fetched since the book went stale (null otherwise). */
     current: stale && own && data.epoch === epoch ? data.history : null,
     error: error ?? null,
+    /** The request is gone (the route answered 404). */
+    removed: error?.status === 404,
     isLoading: isLoading || (!!requestId && !own && !error),
     loaded: own,
     mutate,

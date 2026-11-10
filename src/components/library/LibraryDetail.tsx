@@ -6,6 +6,7 @@
  * fields are present (admin or requester); other viewers get public fields, no sections and no
  * request detail call. The Path row is admin-only (the key is present only for admins) and shown
  * only with a path. The dot and badge take the status group's colour; the badge keeps its text.
+ * A request removed while the detail is open (its fetch answers 404): one line, no actions.
  */
 
 'use client';
@@ -111,6 +112,12 @@ export function LibraryDetail({ item: listed, viewer, user, live, offPage = fals
           </div>
         </div>
 
+        {detail.removed && (
+          <p role="note" className="rounded-xl bg-gray-100 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+            This request was removed
+          </p>
+        )}
+
         {request?.errorMessage && (
           <div role="note" className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200 break-words">
             {request.errorMessage}
@@ -141,7 +148,7 @@ export function LibraryDetail({ item: listed, viewer, user, live, offPage = fals
           </Section>
         )}
 
-        {hasAnyAction(actions) && (
+        {!detail.removed && hasAnyAction(actions) && (
           <Section title="Actions">
             <LibraryActions
               item={item}

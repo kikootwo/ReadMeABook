@@ -202,6 +202,49 @@ describe('LibraryDetail: what each viewer sees', () => {
       vi.useRealTimers();
     }
   });
+
+  it('a 4xx history poll is not retried while the book is live', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fetchMock.mockImplementation(async (url: string) =>
+        url === '/api/requests/request-1' ? ok({ error: 'Forbidden', message: 'No access' }, 403) : ok({ success: true })
+      );
+      renderDetail(gated(), ADMIN_VIEWER, { live: true });
+      await waitFor(() => expect(detailCalls()).toBe(1));
+      await act(async () => vi.advanceTimersByTime(16_000));
+      expect(detailCalls()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failed history poll is not retried in a hidden tab', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    try {
+      fetchMock.mockImplementation(async (url: string) =>
+        url === '/api/requests/request-1' ? ok({ message: 'Bad gateway' }, 502) : ok({ success: true })
+      );
+      renderDetail(gated(), ADMIN_VIEWER, { live: true });
+      await waitFor(() => expect(detailCalls()).toBe(1));
+      await act(async () => vi.advanceTimersByTime(16_000));
+      expect(detailCalls()).toBe(1);
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState; // back to jsdom's own getter
+      vi.useRealTimers();
+    }
+  });
+
+  it('a request removed while the detail is open: one line, no actions', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === '/api/requests/request-1' ? ok({ error: 'NotFound', message: 'Request not found' }, 404) : ok({ success: true })
+    );
+    renderDetail(gated());
+    expect(await screen.findByText('This request was removed')).toBeInTheDocument();
+    expect(screen.queryByText('Actions')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Search again' })).toBeNull();
+    expect(screen.queryByText('Request not found')).toBeNull(); // no toast, no route message
+  });
 });
 
 describe('LibraryActions', () => {
@@ -232,7 +275,7 @@ describe('LibraryActions', () => {
     await screen.findByText('Ebook fetch failed: No ebook found');
     expect(fetchMock.mock.calls.find((c) => c[0] === '/api/requests/request-1/fetch-ebook')?.[1]).toMatchObject({ method: 'POST' });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/audiobooks/'))).toBe(false);
-    expect(changed).toHaveBeenCalled();
+    expect(changed).toHaveBeenCalledTimes(1);
     unmount();
 
     fetchMock.mockImplementation(async (url: string) =>
