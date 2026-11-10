@@ -8,7 +8,7 @@
  *   2  custom new via the modal (martian): `audiobooks-e2e`, no note; stored with ownedCategory; the grab
  *      creates it at RMAB's path and the torrent carries it; imported (card shot)
  *   3  pre-existing `Books` at /other (artemis): suggested after Test; typing `books` shows the note (shots
- *      1280 light, 375 dark); stored `Books`, ownedCategory still the earlier `audiobooks-e2e` (so not ReadMeABook's own); card suffix (shots); the grab sends no
+ *      1280 light, 375 dark); stored `Books`, no ownedCategory; card suffix (shots); the grab sends no
  *      create/edit for it, adds category=Books autoTMM=false savepath=/downloads; `Books` still /other
  *   4  long not-owned name `audiobooks-readarr` on the card at 375 dark (no download)
  *   5  restore `readmeabook`; then the setup wizard's Download Client step with a custom category (shot)
@@ -115,7 +115,7 @@ test('3 pre-existing category is used, not re-pathed, and the note shows', async
   }
   const stored = storedClient(QBIT);
   c.save('stored-client.json', stored);
-  c.check(`stored the client's spelling Books, not ReadMeABook's own (${stored?.category}/${stored?.ownedCategory})`, stored?.category === 'Books' && stored?.ownedCategory === 'audiobooks-e2e', 'control');
+  c.check(`stored the client's spelling Books, no ownedCategory (${stored?.category}/${stored?.ownedCategory})`, stored?.category === 'Books' && stored?.ownedCategory === undefined, 'control');
 
   for (const view of [VIEWS.light, VIEWS.dark]) {
     const { page, close } = await adminPage(browser, view);
@@ -149,7 +149,7 @@ test('4 a long existing name keeps its suffix on a phone', async ({ browser }) =
   const rmab = await Rmab.loginAdmin();
   const put = await putCategory(rmab, QBIT, 'audiobooks-readarr');
   c.save('put.json', put);
-  c.check(`PUT 200, not ReadMeABook's own (${put.status}, ${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'audiobooks-readarr' && put.stored?.ownedCategory === 'audiobooks-e2e', 'control');
+  c.check(`PUT 200, stored without ownedCategory (${put.status})`, put.status === 200 && put.stored?.ownedCategory === undefined, 'control');
   const { page, close } = await adminPage(browser, VIEWS.dark);
   await openDownloadSettings(page);
   const suffix = clientCard(page, CARD).getByText('(existing, left as is)');
@@ -172,7 +172,7 @@ test('5 restore, then the setup wizard step with a custom category', async ({ br
   const c = new CaseRun('5-wizard', DIR);
   const rmab = await Rmab.loginAdmin();
   const put = await putCategory(rmab, QBIT, 'readmeabook');
-  c.check(`restored readmeabook (${put.status}, ${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'readmeabook', 'control');
+  c.check(`restored readmeabook (${put.status}, ${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'readmeabook' && put.stored?.ownedCategory === undefined, 'control');
 
   // The wizard only renders while setup is incomplete; the earlier steps need live services, so the
   // page's own step state is set to the Download Client step. Restored in finally.

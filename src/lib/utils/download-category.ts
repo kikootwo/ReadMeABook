@@ -51,6 +51,9 @@ export function normalizeCategory(type: string | undefined, raw?: string | null)
 export function categoryInputError(type: string | undefined, raw?: string | null): string | null {
   const name = normalizeCategory(type, raw);
   if (name === '*') return 'Choose a category name';
+  if (/[/\\]/.test(name) || [...name].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127)) {
+    return "Category names can't contain slashes or control characters";
+  }
   if (type === 'deluge' && !DELUGE_LABEL.test(name)) {
     return 'Deluge labels can only use letters, numbers, dots, dashes and underscores';
   }
@@ -89,8 +92,10 @@ export interface CategoryChoice {
 }
 
 /**
- * Decide the stored category and ownership on save. Lists the client only for a new custom
- * name on a path client; a list failure throws (nothing may be saved as owned on a guess).
+ * Decide the stored category and ownership on save. `ownedCategory` is only ever the category
+ * ReadMeABook created and uses now: moving off it forgets it, so a return trip lists the client
+ * again. Lists the client only for a new custom name on a path client; a list failure throws
+ * (nothing may be saved as owned on a guess).
  */
 export async function resolveCategoryChoice(
   input: { type: string; category?: string | null; previous?: { category?: string; ownedCategory?: string } },
@@ -101,15 +106,12 @@ export async function resolveCategoryChoice(
   if (inputError) throw new CategoryChoiceError(inputError);
 
   const name = normalizeCategory(type, input.category);
-  const kept = previous?.ownedCategory;
   if (!managesCategoryPath(type) || sameCategory(name, DEFAULT_DOWNLOAD_CATEGORY)) {
-    return { category: sameCategory(name, DEFAULT_DOWNLOAD_CATEGORY) ? DEFAULT_DOWNLOAD_CATEGORY : name, ownedCategory: kept, existing: false };
+    return { category: sameCategory(name, DEFAULT_DOWNLOAD_CATEGORY) ? DEFAULT_DOWNLOAD_CATEGORY : name, existing: false };
   }
   if (previous?.category && sameCategory(name, previous.category)) {
-    return { category: previous.category, ownedCategory: kept, existing: !ownsCategory(previous.category, kept) };
-  }
-  if (kept && sameCategory(name, kept)) {
-    return { category: kept, ownedCategory: kept, existing: false };
+    const owned = sameCategory(previous.category, previous.ownedCategory) ? previous.ownedCategory : undefined;
+    return { category: previous.category, ownedCategory: owned, existing: !ownsCategory(previous.category, owned) };
   }
 
   let names: string[];
@@ -120,6 +122,6 @@ export async function resolveCategoryChoice(
     throw new CategoryChoiceError(`Couldn't read ${getClientDisplayName(type)}'s categories: ${reason}`);
   }
   const found = findCategory(names, name);
-  if (found) return { category: normalizeCategory(type, found), ownedCategory: kept, existing: true };
+  if (found) return { category: normalizeCategory(type, found), existing: true };
   return { category: name, ownedCategory: name, existing: false };
 }

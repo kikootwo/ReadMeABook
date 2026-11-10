@@ -45,6 +45,7 @@ vi.mock('@/lib/integrations/qbittorrent.service', () => ({
     async testConnection() { return { success: true }; }
     async getCategories() { return fakeList(this.url); }
   },
+  invalidateQBittorrentService: () => undefined,
 }));
 vi.mock('@/lib/integrations/sabnzbd.service', () => ({
   SABnzbdService: class {
@@ -166,6 +167,44 @@ describe('download client category routes', () => {
       store.values.download_clients = JSON.stringify([saved]);
       await put({ name: 'x', ownedCategory: 'Books' });
       expect(stored()[0]).not.toHaveProperty('ownedCategory');
+    });
+
+    it('moving off ReadMeABook\'s own category forgets it; going back lists the client again', async () => {
+      store.values.download_clients = JSON.stringify([{ ...saved, category: 'audiobooks', ownedCategory: 'audiobooks' }]);
+      expect((await put({ category: 'readmeabook' })).status).toBe(200);
+      expect(stored()[0]).toMatchObject({ category: 'readmeabook' });
+      expect(stored()[0]).not.toHaveProperty('ownedCategory');
+
+      fake.lists['http://qbit:8080'] = ['audiobooks']; // another app uses it now
+      expect((await put({ category: 'audiobooks' })).status).toBe(200);
+      expect(fake.listed).toEqual(['http://qbit:8080']);
+      expect(stored()[0]).toMatchObject({ category: 'audiobooks' });
+      expect(stored()[0]).not.toHaveProperty('ownedCategory');
+    });
+
+    it('a name with a slash answers 400 and saves nothing', async () => {
+      store.values.download_clients = JSON.stringify([saved]);
+      const res = await put({ category: 'audio/books' });
+      expect(res.status).toBe(400);
+      expect(store.setMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST and the legacy route never take ownership from the body', () => {
+    it('POST ignores a sent ownedCategory', async () => {
+      const { POST } = await import('@/app/api/admin/settings/download-clients/route');
+      expect((await POST(req({ ...qbit, category: 'books', ownedCategory: 'Books' }))).status).toBe(200);
+      expect(stored()[0].category).toBe('Books');
+      expect(stored()[0]).not.toHaveProperty('ownedCategory');
+    });
+
+    it('the legacy route keeps the saved category and ownedCategory and ignores the body\'s', async () => {
+      store.values.download_clients = JSON.stringify([{ id: 'c1', ...qbit, enabled: true, category: 'audiobooks', ownedCategory: 'audiobooks' }]);
+      const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+      const res = await PUT(req({ ...qbit, category: 'Books', ownedCategory: 'Books' }));
+      expect(res.status).toBe(200);
+      expect(stored()[0]).toMatchObject({ id: 'c1', category: 'audiobooks', ownedCategory: 'audiobooks' });
+      expect(fake.listed).toEqual([]);
     });
   });
 

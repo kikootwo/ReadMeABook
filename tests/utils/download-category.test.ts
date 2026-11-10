@@ -24,14 +24,14 @@ const failing = () => vi.fn(async () => { throw new Error('connect ECONNREFUSED'
 describe('resolveCategoryChoice', () => {
   it('empty means readmeabook, without reading the client', async () => {
     const list = listing(['Books']);
-    expect(await resolveCategoryChoice({ type: 'qbittorrent', category: '  ' }, list)).toEqual({ category: 'readmeabook', ownedCategory: undefined, existing: false });
+    expect(await resolveCategoryChoice({ type: 'qbittorrent', category: '  ' }, list)).toEqual({ category: 'readmeabook', existing: false });
     expect(list).not.toHaveBeenCalled();
   });
 
-  it('the default in any case is readmeabook and keeps the saved ownedCategory, without a list call', async () => {
+  it('the default in any case is readmeabook and forgets the saved ownedCategory, without a list call', async () => {
     const list = listing([]);
     const choice = await resolveCategoryChoice({ type: 'qbittorrent', category: 'ReadMeABook', previous: { category: 'audiobooks', ownedCategory: 'audiobooks' } }, list);
-    expect(choice).toEqual({ category: 'readmeabook', ownedCategory: 'audiobooks', existing: false });
+    expect(choice).toEqual({ category: 'readmeabook', existing: false });
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -55,10 +55,19 @@ describe('resolveCategoryChoice', () => {
     expect(list).not.toHaveBeenCalled();
   });
 
-  it('switching back to the saved ownedCategory is owned again, without a list call', async () => {
+  it('a return trip to a name ReadMeABook used before lists the client: present means existing', async () => {
     const list = listing(['audiobooks']);
     const choice = await resolveCategoryChoice({ type: 'nzbget', category: 'AudioBooks', previous: { category: 'readmeabook', ownedCategory: 'audiobooks' } }, list);
-    expect(choice).toEqual({ category: 'audiobooks', ownedCategory: 'audiobooks', existing: false });
+    expect(choice).toEqual({ category: 'audiobooks', existing: true });
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unchanged name keeps ownedCategory only when it is that name', async () => {
+    const list = listing([]);
+    expect(await resolveCategoryChoice({ type: 'qbittorrent', category: 'Audiobooks', previous: { category: 'audiobooks', ownedCategory: 'audiobooks' } }, list))
+      .toEqual({ category: 'audiobooks', ownedCategory: 'audiobooks', existing: false });
+    expect(await resolveCategoryChoice({ type: 'qbittorrent', category: 'Books', previous: { category: 'Books', ownedCategory: 'audiobooks' } }, list))
+      .toEqual({ category: 'Books', existing: true });
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -70,7 +79,7 @@ describe('resolveCategoryChoice', () => {
 
   it('a new name present in the client (any case) is stored in the client\'s spelling and not owned', async () => {
     const choice = await resolveCategoryChoice({ type: 'qbittorrent', category: 'books', previous: { category: 'readmeabook', ownedCategory: 'old' } }, listing(['Books']));
-    expect(choice).toEqual({ category: 'Books', ownedCategory: 'old', existing: true });
+    expect(choice).toEqual({ category: 'Books', existing: true });
   });
 
   it('SABnzbd names are stored lower-case', async () => {
@@ -122,6 +131,26 @@ describe('ownership helpers', () => {
     expect(categoryInputError('deluge', 'Audio-Books_1.0')).toBeNull();
     expect(categoryInputError('deluge', 'audio books')).toMatch(/Deluge labels/);
     expect(categoryInputError('qbittorrent', 'audio books')).toBeNull();
+  });
+
+  it('categoryInputError refuses a path separator or a control character on every client', () => {
+    for (const type of ['qbittorrent', 'sabnzbd', 'nzbget', 'deluge', 'transmission']) {
+      for (const name of ['a/b', 'a' + String.fromCharCode(92) + 'b', 'tab' + String.fromCharCode(9) + 'here', 'nul' + String.fromCharCode(0), 'del' + String.fromCharCode(127)]) {
+        expect(categoryInputError(type, name), `${type} ${JSON.stringify(name)}`).toMatch(/slashes or control characters/);
+      }
+    }
+    expect(categoryInputError('qbittorrent', '.hidden')).toBeNull();
+  });
+
+  it('a name with a slash is a field error on save, before any list call', async () => {
+    const list = listing([]);
+    await expect(resolveCategoryChoice({ type: 'qbittorrent', category: 'audio//books' }, list)).rejects.toBeInstanceOf(CategoryChoiceError);
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('a dot-prefixed name is a normal new name', async () => {
+    expect(await resolveCategoryChoice({ type: 'qbittorrent', category: '.audiobooks' }, listing(['Books'])))
+      .toEqual({ category: '.audiobooks', ownedCategory: '.audiobooks', existing: false });
   });
 });
 
