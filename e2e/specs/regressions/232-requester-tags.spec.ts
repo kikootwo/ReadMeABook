@@ -264,7 +264,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const s6Backfill = await itemTags(abs, carolItem.id);
   writeEvidence(`${DIR}/step6-unapproved.json`, { carolReq, carolWaiting, deny, carolDenied, itemId: carolItem.id, delivered: s6Delivered, fullScan: s6Scan, backfill3, afterBackfill: s6Backfill });
 
-  // 7. A book nobody requested, imported by the admin by ASIN: the import's own admin request is never tagged
+  // 7. A made-up book nobody requested (book row seeded), imported by the admin by book id: the import's own admin request is never tagged
   const unrequested = await importUnrequested(admin, madeUpBook(madeUpAsin('A7'), `Adminwords${RUN}`));
   const owner = psql(`select concat_ws('|', u.role, (select count(*) from download_history d where d.request_id = r.id)) from requests r join users u on u.id = r.user_id where r.id = ${sqlStr(unrequested.requestId)}`);
   const adminItem = await absItemFor(abs, unrequested.filePath);
