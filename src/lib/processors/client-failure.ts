@@ -27,7 +27,7 @@ const DETAIL_MAX = 200;
  * full disk, permissions, missing data or an unmounted path, files that could not be moved.
  */
 const NOT_RELEASE_FAULT_TEXT = [
-  'no space left', 'disk is full', 'disk full', 'not enough space',
+  'no space left', 'disk is full', 'disk full', 'not enough space', 'unpack: space' /* NZBGet */,
   'permission denied', 'access is denied', 'read-only file system',
   'missingfiles', 'no data found', 'missing or invalid torrent data', 'no such file or directory',
   'cannot find the path', 'cannot find the file', 'input/output error',

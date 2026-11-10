@@ -236,6 +236,29 @@ describe('JobQueueService', () => {
     );
   });
 
+  it('puts the chain count in search, download and monitor payloads only when set, and a fixed Bull id on request (#332)', async () => {
+    prismaMock.job.create.mockResolvedValue({ id: 'job-c' });
+    queueMock.add.mockResolvedValue({ id: 'bull-c' });
+    prismaMock.job.update.mockResolvedValue({});
+    const book = { id: 'ab-1', title: 'Title', author: 'Author' };
+
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    const service = new JobQueueService();
+    await service.addSearchJob('req-1', book, { clientFailures: 1, jobId: 'next-release-dh-1' });
+    await service.addSearchJob('req-1', book);
+    await service.addDownloadJob('req-1', book, { hash: 'h' } as any, [], { clientFailures: 0 });
+    await service.addDownloadJob('req-1', book, { hash: 'h' } as any);
+    await service.addMonitorJob('req-1', 'dh-1', 'c-1', 'qbittorrent', 3, undefined, undefined, undefined, undefined, { clientFailures: 2 });
+    await service.addMonitorJob('req-1', 'dh-1', 'c-1', 'qbittorrent', 3);
+
+    const calls = queueMock.add.mock.calls;
+    expect(calls.map(([, payload]) => payload.clientFailures)).toEqual([1, undefined, 0, undefined, 2, undefined]);
+    expect(calls.map(([, payload]) => 'clientFailures' in payload)).toEqual([true, false, true, false, true, false]);
+    // Bull ignores an add whose jobId already exists: a second run of the same failure queues nothing new
+    expect(calls[0][2]).toEqual(expect.objectContaining({ priority: 10, jobId: 'next-release-dh-1' }));
+    expect(calls[1][2]).not.toHaveProperty('jobId');
+  });
+
   it('adds organize jobs with target path payload', async () => {
     prismaMock.job.create.mockResolvedValue({ id: 'job-4' });
     queueMock.add.mockResolvedValue({ id: 'bull-4' });

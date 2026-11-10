@@ -23,7 +23,8 @@ const CANCELLED_DURING_SEARCH = 'Request cancelled or deleted during the search,
 /**
  * A search for the next release after a download-client failure (#332) that found nothing
  * usable ends the request `failed` with one notification, unless an indexer search failed
- * (#522: then `awaiting_search` as usual). Returns the job result, or null to carry on.
+ * (#522: then `awaiting_search` as usual). `reason` has no "Will retry" suffix: nothing retries.
+ * Returns the job result, or null to carry on.
  */
 async function failChainIfNothingLeft(
   payload: SearchIndexersPayload,
@@ -162,7 +163,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
         ? `No usable releases — ${preBlocklistCount} candidates tried, all blocked`
         : noResultsMessage('No torrents/nzbs found', searchStats);
 
-      const ended = await failChainIfNothingLeft(payload, errorMessage, searchStats, logger);
+      const ended = await failChainIfNothingLeft(payload, allBlocked ? errorMessage : 'No torrents/nzbs found', searchStats, logger);
       if (ended) return ended;
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
@@ -272,7 +273,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     if (filteredResults.length === 0) {
       const noMatchMessage = noResultsMessage('No quality matches found', searchStats);
-      const ended = await failChainIfNothingLeft(payload, noMatchMessage, searchStats, logger);
+      const ended = await failChainIfNothingLeft(payload, 'No quality matches found', searchStats, logger);
       if (ended) return ended;
 
       // No quality results found - queue for re-search instead of failing
