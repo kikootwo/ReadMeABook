@@ -18,12 +18,11 @@ async function handle(req: AuthenticatedRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized', message: 'User not authenticated' }, { status: 401 });
   }
 
-  const parsed = parseLibraryParams(req.nextUrl.searchParams);
-  if (!parsed.ok) {
-    return NextResponse.json({ error: parsed.error, message: parsed.message }, { status: 400 });
-  }
-
   try {
+    const parsed = parseLibraryParams(req.nextUrl.searchParams);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error, message: parsed.message }, { status: 400 });
+    }
     if (parsed.params.live) {
       return NextResponse.json(await getLibraryLive());
     }
