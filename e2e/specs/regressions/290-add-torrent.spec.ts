@@ -217,7 +217,8 @@ test('3 an admin uploads a .torrent; a pre-existing custom category is left as i
   const jobsBefore = jobCount(id);
   await page.getByTestId('add-torrent-file').setInputFiles({ name: 'broken.torrent', mimeType: 'application/x-bittorrent', buffer: Buffer.from('d4:infoi1ee') });
   await dialogAdd(page).click();
-  await expect(page.getByRole('alert')).toHaveText('Not a valid .torrent file', { timeout: 15_000 });
+  // The dialog's own alert (Next's route announcer is an empty role=alert too)
+  await expect(page.locator('p[role="alert"]')).toHaveText('Not a valid .torrent file', { timeout: 15_000 });
   c.check(`bad file: no job, still awaiting_search (${jobCount(id)}, ${requestStatus(id)})`, jobCount(id) === jobsBefore && requestStatus(id) === 'awaiting_search');
   await settle(page);
   await snap(page, `${DIR}/shots`, 'dialog-error-bad-file-1280-light');
