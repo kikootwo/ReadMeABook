@@ -30,6 +30,7 @@ import {
 import { fetchAndLoad } from './lib/fetch-image.mjs';
 import { startExecBridge } from './lib/exec-bridge.mjs';
 import { stopFlow } from './lib/stop-flow.mjs';
+import { phaseResult, readReport } from './lib/phase-result.mjs';
 
 const RELEASE_REPO = 'ghcr.io/kikootwo/readmeabook';
 const UNIT_TIMEOUT_MS = 30 * 60_000;
@@ -231,7 +232,11 @@ async function stackOrPreview(opts) {
         up(ctx, image);
         const phase = opts.command === 'preview' ? 'preview' : `stack${tag}`;
         const result = await playwright(ctx, group, phase);
-        ctx.summary.specResults[group.join(',')] = result === 0 ? 'pass' : 'fail';
+        const report = readReport(path.join(evidence, `results-${phase}.json`));
+        if (result === 0 && !report) ctx.warn(`no results-${phase}.json: skipped specs cannot be told apart from passes`);
+        const outcome = phaseResult(result, report);
+        ctx.summary.specResults[group.join(',')] = outcome.result;
+        if (outcome.skipped.length) (ctx.summary.skippedSpecs ??= []).push(...outcome.skipped);
         if (groups.length > 1) ctx.priorLogs.push(saveLogs(ctx, `compose${tag}.log`));
         status = Math.max(status, result);
       }
@@ -267,7 +272,9 @@ async function stackOrPreview(opts) {
     if (interrupted) status = 130;
     Object.assign(ctx.summary, { status, finishedAt: new Date().toISOString(), dfAfterGB: df.total.toFixed(1), removedImages: opts.command === 'preview' ? [] : [...ctx.created, ...ctx.pulled] });
     fs.writeFileSync(path.join(evidence, 'summary.json'), `${JSON.stringify(ctx.summary, null, 2)}\n`);
-    log(`${status === 0 ? 'PASS' : 'FAIL'} (exit ${status}) — evidence: ${evidence}`);
+    const skipped = ctx.summary.skippedSpecs ?? [];
+    const headline = status !== 0 ? 'FAIL' : skipped.length ? `SKIPPED (did not run: ${skipped.join(', ')})` : 'PASS';
+    log(`${headline} (exit ${status}) — evidence: ${evidence}`);
     untrap();
   }
   return status;
