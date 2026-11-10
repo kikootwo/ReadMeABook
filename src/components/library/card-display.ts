@@ -6,6 +6,7 @@
 import type { CoverTone } from '@/components/audiobooks/BookCover';
 import { statusLabel } from '@/components/requests/StatusBadge';
 import { STATUS_GROUP_OF } from '@/lib/library-view/constants';
+import { requestPhase } from '@/lib/constants/request-statuses';
 import type { LibraryItem, StatusGroup } from '@/lib/library-view/types';
 
 /**
@@ -111,6 +112,10 @@ export function sizeLabel(bytes: string | null | undefined): string | null {
 }
 
 function percent(item: Pick<LibraryItem, 'status' | 'progress'>): string | null {
+  if (item.status === 'processing') {
+    const merging = requestPhase(item.status, item.progress)?.percent;
+    return merging != null ? `${merging}%` : null;
+  }
   return item.status === 'downloading' && item.progress != null && item.progress > 0
     ? `${Math.round(item.progress)}%`
     : null;
@@ -121,9 +126,14 @@ function sentenceCase(label: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
 }
 
-/** The card's status label (StatusBadge's wording, sentence case); "In your library" for library books. */
+/**
+ * The card's status label (StatusBadge's wording, sentence case); "In your library" for library
+ * books; a processing book says what it is doing (requestPhase, as on My Requests, #216).
+ */
 export function cardLabel(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>): string {
   if (item.inLibrary || item.status === 'available') return 'In your library';
+  const phase = requestPhase(item.status, item.progress);
+  if (phase) return phase.label;
   return sentenceCase(statusLabel(item.status, item.progress ?? undefined));
 }
 
@@ -148,9 +158,10 @@ export function cardAriaLabel(item: LibraryItem): string {
   return `${item.title} by ${item.author}, ${cardLabel(item)}`;
 }
 
-/** Shows the moving bar under the cover. */
-export function showsProgress(item: Pick<LibraryItem, 'inLibrary' | 'status'>): boolean {
-  return !item.inLibrary && item.status === 'downloading';
+/** Shows the moving bar under the cover: downloading, or processing while chapters merge. */
+export function showsProgress(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>): boolean {
+  if (item.inLibrary) return false;
+  return item.status === 'downloading' || requestPhase(item.status, item.progress)?.percent != null;
 }
 
 /** A requester's name in the rail and chips ("name (deleted)" for a removed account). */

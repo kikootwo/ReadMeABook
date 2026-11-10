@@ -89,6 +89,23 @@ describe('card display', () => {
     expect(showsProgress(item({ status: 'processing' }))).toBe(false);
   });
 
+  it('processing says what it is doing: a percent and the bar only while chapters merge (#216)', () => {
+    const merging = item({ status: 'processing', statusGroup: 'on_the_way', progress: 42 });
+    expect(cardPill(merging)).toBe('Merging chapters 42%');
+    expect(cardMeta(merging)).toBe('Merging chapters · 42%');
+    expect(showsProgress(merging)).toBe(true);
+    expect(cardMeta(item({ status: 'processing', statusGroup: 'on_the_way', progress: 0 }))).toBe('Merging chapters · 0%');
+
+    for (const progress of [100, null]) {
+      const organizing = item({ status: 'processing', statusGroup: 'on_the_way', progress });
+      expect(cardPill(organizing)).toBe('Organizing files');
+      expect(cardMeta(organizing)).toBe('Organizing files');
+      expect(showsProgress(organizing)).toBe(false);
+    }
+    // Other statuses keep their wording, whatever progress holds
+    expect(cardMeta(item({ status: 'downloaded', statusGroup: 'on_the_way', progress: 42 }))).toBe('Downloaded');
+  });
+
   it('awaiting release shows the release date when known', () => {
     const now = new Date('2026-11-09T00:00:00Z');
     expect(cardPill(item({ status: 'awaiting_release', releaseDate: '2026-11-12T00:00:00.000Z' }), now)).toBe('Out Nov 12');
