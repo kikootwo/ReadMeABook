@@ -12,10 +12,10 @@
 import React, { useCallback, useRef } from 'react';
 import { ArrowLeftIcon, ExclamationTriangleIcon, MusicalNoteIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon as CheckCircleSolid } from '@heroicons/react/24/solid';
-import { BULK_IMPORT_REFUSAL } from '@/lib/constants/bulk-import';
+import { SAME_BOOK_MARKER } from '@/lib/constants/bulk-import';
 import { ScannedBook, MatchCandidate, ImportOutcome } from './types';
 import {
-  canChangeMatch, effectiveFlags, effectiveMatch, isImportable, isSharedRow, matchLabel, sharedAsins,
+  canChangeMatch, effectiveFlags, effectiveMatch, isSharedRow, matchLabel, sharedAsins, splitForImport,
 } from './row-match';
 import { ChangeMatchDialog } from './ChangeMatchDialog';
 import { ImportResultsView } from './ImportResultsView';
@@ -129,7 +129,7 @@ function BookRow({
           <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono truncate mt-0.5">{book.relativePath}</p>
           {shared && (
             <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300">
-              {BULK_IMPORT_REFUSAL.duplicate}
+              {SAME_BOOK_MARKER}
             </span>
           )}
         </div>
@@ -227,7 +227,8 @@ export function MatchReviewStep({
   onChooseMatch,
   onUndoMatch,
 }: MatchReviewStepProps) {
-  const toImport = books.filter(isImportable);
+  // Rows marked "same book" are held back: not counted, not sent
+  const toImport = splitForImport(books).send;
   const skippedCount = books.filter((b) => b.skipped).length;
   const inLibraryCount = books.filter((b) => effectiveFlags(b).inLibrary).length;
   const noMatchCount = books.filter((b) => effectiveMatch(b) === null).length;

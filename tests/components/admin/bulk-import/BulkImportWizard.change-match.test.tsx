@@ -174,7 +174,7 @@ describe('Bulk Import review: Change match / Find match', () => {
     fireEvent.change(field, { target: { value: 'B0MISS0001' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Search' }));
     await act(async () => {});
-    expect(within(dialog).getByRole('status').textContent).toBe('No book found for B0MISS0001 on audible.com');
+    expect(within(dialog).getByRole('status').textContent).toBe('Nothing came back for B0MISS0001 from audible.com');
 
     fireEvent.change(field, { target: { value: 'b0typd0001' } });
     fireEvent.submit(field.closest('form')!);
@@ -237,16 +237,63 @@ describe('Bulk Import review: Change match / Find match', () => {
     ]);
   });
 
-  it('marks the rows that would import the same book', async () => {
+  describe('two rows for the same book', () => {
+    const MARK = 'Same book as another row: change or skip one';
+    const footer = () => screen.getByText(/to import/).textContent;
+
+    it('marks both rows, says what to do, leaves them out of the count and the import, and lists them as not queued', async () => {
+      await openReview();
+      expect(footer()).toBe('2 books to import (3 skipped)');
+      await pick('Find match for Unknown', 'Free Pick');
+      expect(screen.queryAllByText(MARK)).toHaveLength(0);
+
+      await pick('Change match for Wrong', 'Free Pick');
+
+      expect(within(rowOf('Wrong')).getByText(MARK)).toBeTruthy();
+      expect(within(rowOf('Unknown')).getByText(MARK)).toBeTruthy();
+      expect(within(rowOf('Delivered')).queryByText(MARK)).toBeNull();
+      expect(footer()).toBe('1 book to import (2 skipped)');
+
+      fireEvent.click(screen.getByText('Start Import'));
+      await act(async () => {});
+      expect(executeBody!.imports.map((i) => i.folderPath)).toEqual(['/media/Delivered']);
+      expect(screen.getByText('Import Started')).toBeTruthy();
+      const list = screen.getByRole('list', { name: 'Books not queued' });
+      expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+        'WrongSame book as another row', 'UnknownSame book as another row',
+      ]);
+      expect(screen.getByText('2 books could not be queued.')).toBeTruthy();
+    });
+
+    it('with only marked rows included, Start Import is disabled', async () => {
+      await openReview();
+      await pick('Find match for Unknown', 'Free Pick');
+      await pick('Change match for Wrong', 'Free Pick');
+      fireEvent.click(within(rowOf('Delivered')).getByTitle('Click to skip this book'));
+
+      expect(footer()).toBe('0 books to import (3 skipped)');
+      expect((screen.getByText('Start Import') as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(screen.getByText('Start Import'));
+      await act(async () => {});
+      expect(executeBody).toBeNull();
+    });
+  });
+
+  it('the finished screen does not say Import Started when nothing was queued', async () => {
+    executeAnswer = async (body) => ({
+      success: true,
+      results: body!.imports.map((i) => ({ ...i, success: false, error: 'Already requested' })),
+      summary: { total: body!.imports.length, succeeded: 0, failed: body!.imports.length },
+    });
     await openReview();
-    await pick('Find match for Unknown', 'Free Pick');
-    expect(screen.queryAllByText('Same book as another row')).toHaveLength(0);
 
-    await pick('Change match for Wrong', 'Free Pick');
+    fireEvent.click(screen.getByText('Start Import'));
+    await act(async () => {});
 
-    expect(within(rowOf('Wrong')).getByText('Same book as another row')).toBeTruthy();
-    expect(within(rowOf('Unknown')).getByText('Same book as another row')).toBeTruthy();
-    expect(within(rowOf('Delivered')).queryByText('Same book as another row')).toBeNull();
+    expect(screen.queryByText('Import Started')).toBeNull();
+    expect(screen.getByText('Nothing Queued')).toBeTruthy();
+    expect(screen.getByText('2 books could not be queued.')).toBeTruthy();
+    expect(screen.queryByText(/Files will be organized/)).toBeNull();
   });
 
   it('the finished screen lists each refused row with its reason, matched by position', async () => {
@@ -307,6 +354,17 @@ describe('Bulk Import review: Change match / Find match', () => {
       expect(screen.getByText('Free Pick')).toBeTruthy();
 
       fireEvent.click(screen.getByRole('button', { name: 'Undo change for Wrong' }));
+      fireEvent.click(backdrop());
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the wizard from the finished screen even when a row was changed', async () => {
+      const { onClose } = await openReview();
+      await pick('Change match for Wrong', 'Free Pick');
+      fireEvent.click(screen.getByText('Start Import'));
+      await act(async () => {});
+      expect(screen.getByText('Import Started')).toBeTruthy();
+
       fireEvent.click(backdrop());
       expect(onClose).toHaveBeenCalledTimes(1);
     });

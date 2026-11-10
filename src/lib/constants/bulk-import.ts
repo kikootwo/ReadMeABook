@@ -15,6 +15,9 @@ export const BULK_IMPORT_REFUSAL = {
   requested: 'Already requested',
 } as const;
 
+/** The review row's marker when another included row names the same book (it is held back, not sent). */
+export const SAME_BOOK_MARKER = 'Same book as another row: change or skip one';
+
 /** Longest search text GET /api/admin/bulk-import/match accepts. */
 export const MATCH_QUERY_MAX_LENGTH = 200;
 

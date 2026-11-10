@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createPrismaMock } from '../helpers/prisma';
+import { plexLibraryWhere } from '../helpers/plex-library-where';
 
 type Row = Record<string, unknown>;
 
@@ -74,7 +75,7 @@ describe('bulk import execute: the same checks on every row', () => {
     prismaMock.audiobook.findFirst.mockImplementation(async ({ where }: { where: { audibleAsin: string } }) => books.get(where.audibleAsin) ?? null);
     prismaMock.audibleCache.findUnique.mockResolvedValue(null);
     audibleMock.getAudiobookDetails.mockResolvedValue(null);
-    prismaMock.plexLibrary.findMany.mockImplementation(async () => library);
+    prismaMock.plexLibrary.findMany.mockImplementation(async ({ where }: { where: Parameters<typeof plexLibraryWhere>[1] }) => plexLibraryWhere(library, where));
     prismaMock.request.findMany.mockImplementation(async ({ where }: { where: { audiobook: { audibleAsin: { in: string[] } }; status: { in: string[] } } }) =>
       requests
         .filter((r) => where.audiobook.audibleAsin.in.includes(r.asin as string) && where.status.in.includes(r.status as string))
@@ -192,6 +193,64 @@ describe('bulk import execute: the same checks on every row', () => {
 
     expect(res.body.results[0]).toMatchObject({ success: false, error: 'Already requested' });
     nothingWritten();
+  });
+
+  it('refuses a row when a request on another audiobooks row for the same ASIN turned active before the write', async () => {
+    // The book is new here (resolved from the cache, so a new audiobooks row is created); meanwhile
+    // another user requested it on their own audiobooks row, after the first check ran
+    prismaMock.audibleCache.findUnique.mockResolvedValue({ asin: 'B0CACHE001', title: 'Cached Title', author: 'Cached Author' });
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+    requests = [{ id: 'req-9', userId: 'user-2', asin: 'B0CACHE001', status: 'pending' }];
+
+    const res = await post([item('B0CACHE001')]);
+
+    expect(res.body.results[0]).toMatchObject({ success: false, error: 'Already requested' });
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+    expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
+  });
+
+  describe('folder refusals (before any lookup)', () => {
+    it.each([
+      ['a path that climbs out of a root', '/downloads/../etc', 'Path outside allowed directories'],
+      ['a folder whose name starts like a root', '/downloads2/Author/Book', 'Path outside allowed directories'],
+      ['a path under no root', '/srv/Author/Book', 'Path outside allowed directories'],
+    ])('refuses %s', async (_label, folder, error) => {
+      const res = await post([item('B0BOOK0001', folder)]);
+
+      expect(res.body.results[0]).toMatchObject({ success: false, error });
+      expect(lookups()).toBe(0);
+      nothingWritten();
+    });
+
+    it('refuses a folder that does not exist', async () => {
+      fsMock.stat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      const res = await post([item('B0BOOK0001')]);
+
+      expect(res.body.results[0]).toMatchObject({ success: false, error: 'Directory not found' });
+      expect(lookups()).toBe(0);
+      nothingWritten();
+    });
+
+    it('refuses a path that is a file', async () => {
+      fsMock.stat.mockResolvedValue({ isDirectory: () => false });
+
+      const res = await post([item('B0BOOK0001')]);
+
+      expect(res.body.results[0]).toMatchObject({ success: false, error: 'Not a directory' });
+      nothingWritten();
+    });
+
+    it('refuses a row without files whose folder holds no audio', async () => {
+      fsMock.readdir.mockResolvedValue([{ name: 'cover.jpg', isFile: () => true }, { name: 'CD1', isFile: () => false }]);
+
+      const res = await post([{ folderPath: '/downloads/Author/Book', asin: 'B0BOOK0001' }]);
+
+      expect(res.body.results[0]).toMatchObject({ success: false, error: 'No audio files' });
+      expect(lookups()).toBe(0);
+      nothingWritten();
+    });
   });
 
   it('creates the audiobook row from the Audible cache when the database has none', async () => {

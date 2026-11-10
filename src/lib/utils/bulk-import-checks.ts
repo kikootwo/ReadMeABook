@@ -20,8 +20,9 @@ export interface ImportBlock {
 }
 
 /**
- * Library and request flags for each ASIN, in two queries (one per table). In Library follows
- * findPlexMatch: plex_library.asin equal (ignoring case) or the ASIN inside plex_guid.
+ * Library and request flags for each ASIN, in two queries (one per table). In Library:
+ * plex_library.asin equal ignoring case (in the query, not only in the JS check: Postgres `in` is
+ * case-sensitive), or the ASIN inside plex_guid (as findPlexMatch).
  */
 export async function getImportBlocks(asins: string[]): Promise<Map<string, ImportBlock>> {
   const unique = [...new Set(asins.filter(Boolean))];
@@ -30,7 +31,12 @@ export async function getImportBlocks(asins: string[]): Promise<Map<string, Impo
 
   const [libraryRows, requestRows] = await Promise.all([
     prisma.plexLibrary.findMany({
-      where: { OR: [{ asin: { in: unique } }, ...unique.map((asin) => ({ plexGuid: { contains: asin } }))] },
+      where: {
+        OR: [
+          ...unique.map((asin) => ({ asin: { equals: asin, mode: 'insensitive' as const } })),
+          ...unique.map((asin) => ({ plexGuid: { contains: asin } })),
+        ],
+      },
       select: { asin: true, plexGuid: true },
     }),
     prisma.request.findMany({

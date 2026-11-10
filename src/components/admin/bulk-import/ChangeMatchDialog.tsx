@@ -4,7 +4,8 @@
  *
  * Rendered inside the wizard panel (absolute overlay), so it stacks above the review list and
  * the wizard's backdrop never sees its clicks. One field takes a title, author or ASIN; results
- * the import would refuse (In Library, Requested) show but can't be picked.
+ * the import would refuse (In Library, Requested) show but can't be picked. The Audible service
+ * answers an outage with no results, so an empty answer is worded to be true either way.
  */
 
 'use client';
@@ -13,8 +14,17 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { MagnifyingGlassIcon, MusicalNoteIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { focusables } from '@/components/library/LibraryDialog';
+import { formatDuration } from '@/components/library/card-display';
+import { MATCH_QUERY_MAX_LENGTH } from '@/lib/constants/bulk-import';
 import type { MatchCandidate, ScannedBook } from './types';
-import { effectiveMatch, formatDuration, matchLabel } from './row-match';
+import { effectiveMatch, matchLabel } from './row-match';
+
+/** Below Tailwind's `sm`: a phone, where the on-screen keyboard would cover the results. */
+const PHONE_QUERY = '(max-width: 639px)';
+const isPhone = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
+
+/** The search text as the match route takes it: trimmed, at most MATCH_QUERY_MAX_LENGTH. */
+const fitQuery = (text: string) => text.trim().slice(0, MATCH_QUERY_MAX_LENGTH).trim();
 
 interface ChangeMatchDialogProps {
   book: ScannedBook;
@@ -39,7 +49,7 @@ export function statusText(state: SearchState): string {
       return state.message;
     case 'done':
       if (state.results.length > 0) return `${state.results.length} result${state.results.length === 1 ? '' : 's'}`;
-      return state.asin ? `No book found for ${state.asin} on ${state.store}` : 'No results';
+      return state.asin ? `Nothing came back for ${state.asin} from ${state.store}` : 'No results';
     default:
       return '';
   }
@@ -51,10 +61,12 @@ async function searchMatches(q: string, signal: AbortSignal): Promise<SearchStat
     const res = await fetchWithAuth(`/api/admin/bulk-import/match?q=${encodeURIComponent(q)}`, { signal });
     const data = await res.json().catch(() => ({}));
     if (signal.aborted) return null;
-    if (!res.ok) return { phase: 'error', message: data.error || 'Search failed' };
+    if (!res.ok) {
+      return { phase: 'error', message: res.status === 400 ? data.error || 'Search failed' : "Couldn't reach Audible. Try again." };
+    }
     return { phase: 'done', results: data.results ?? [], asin: data.asin ?? null, store: data.store ?? 'audible.com' };
   } catch {
-    return signal.aborted ? null : { phase: 'error', message: 'Search failed' };
+    return signal.aborted ? null : { phase: 'error', message: 'Search failed. Try again.' };
   }
 }
 
@@ -65,9 +77,11 @@ export function ChangeMatchDialog({ book, onChoose, onClose, restoreFocus }: Cha
   const abortRef = useRef<AbortController | null>(null);
   const onCloseRef = useRef(onClose);
   const restoreFocusRef = useRef(restoreFocus);
-  const [query, setQuery] = useState(book.searchTerm);
+  /** A press that started on the dimmed overlay (a drag out of the field must not close). */
+  const pressedOverlayRef = useRef(false);
+  const [query, setQuery] = useState(() => fitQuery(book.searchTerm));
   // A row with a book searches its scan term on open; a No Match row waits for the admin
-  const [openQuery] = useState(() => (effectiveMatch(book) ? book.searchTerm.trim() : ''));
+  const [openQuery] = useState(() => (effectiveMatch(book) ? fitQuery(book.searchTerm) : ''));
   const [state, setState] = useState<SearchState>(() => (openQuery ? { phase: 'loading' } : { phase: 'idle' }));
   const label = matchLabel(book);
 
@@ -76,13 +90,20 @@ export function ChangeMatchDialog({ book, onChoose, onClose, restoreFocus }: Cha
     restoreFocusRef.current = restoreFocus;
   }, [onClose, restoreFocus]);
 
-  /** One search in flight: a new one aborts the last; the state is set when the answer arrives. */
+  /**
+   * One search in flight: a new one aborts the last; the state is set when the answer arrives. On
+   * a phone the field lets go of focus once results show, so the keyboard drops and they are seen.
+   */
   const startSearch = useCallback((q: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     void searchMatches(q, controller.signal).then((next) => {
-      if (next) setState(next);
+      if (!next) return;
+      setState(next);
+      if (next.phase === 'done' && next.results.length > 0 && document.activeElement === inputRef.current && isPhone()) {
+        panelRef.current?.focus();
+      }
     });
   }, []);
 
@@ -136,9 +157,13 @@ export function ChangeMatchDialog({ book, onChoose, onClose, restoreFocus }: Cha
   return (
     <div
       className="absolute inset-0 z-10 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6"
+      onMouseDown={(e) => {
+        pressedOverlayRef.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
         e.stopPropagation();
-        onClose();
+        if (pressedOverlayRef.current && e.target === e.currentTarget) onClose();
+        pressedOverlayRef.current = false;
       }}
     >
       <div
@@ -146,7 +171,8 @@ export function ChangeMatchDialog({ book, onChoose, onClose, restoreFocus }: Cha
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full sm:max-w-lg max-h-full flex flex-col bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700/50"
+        tabIndex={-1}
+        className="w-full sm:max-w-lg max-h-full flex flex-col focus:outline-none bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700/50"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700/50">
@@ -179,13 +205,14 @@ export function ChangeMatchDialog({ book, onChoose, onClose, restoreFocus }: Cha
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            maxLength={MATCH_QUERY_MAX_LENGTH}
             placeholder="Title, author or ASIN"
             aria-label="Title, author or ASIN"
             className="flex-1 min-w-0 px-3 py-2 text-base sm:text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
             type="submit"
-            disabled={!query.trim() || state.phase === 'loading'}
+            disabled={!query.trim()}
             className="flex items-center gap-1.5 px-3 min-h-[44px] sm:min-h-0 sm:py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white"
           >
             <MagnifyingGlassIcon className="w-4 h-4" />

@@ -6,6 +6,7 @@
  * the review screen counts, shows or sends reads the effective match.
  */
 
+import { sameAsin } from '@/lib/utils/asin';
 import type { AudibleMatch, MatchCandidate, ScannedBook } from './types';
 
 /** The picked book, else the scan's match. */
@@ -35,14 +36,18 @@ export function matchLabel(book: ScannedBook): 'Change match' | 'Find match' {
   return effectiveMatch(book) ? 'Change match' : 'Find match';
 }
 
-/** A candidate picked for the row. The scan's own book counts as no change. Either way the row is included. */
+/**
+ * A candidate picked for the row; either way the row is included. The scan's own book counts as no
+ * change, unless the scan flagged it (In Library / Requested) and the dialog found it free since:
+ * then it is kept as a pick, so the row loses the stale flag and can still be skipped or undone.
+ */
 export function applyChosen(book: ScannedBook, candidate: MatchCandidate): ScannedBook {
   const match: AudibleMatch = {
     asin: candidate.asin, title: candidate.title, author: candidate.author, narrator: candidate.narrator,
     coverArtUrl: candidate.coverArtUrl, durationMinutes: candidate.durationMinutes,
   };
-  const sameAsScan = !!book.match && book.match.asin.toUpperCase() === match.asin.toUpperCase();
-  return { ...book, chosen: sameAsScan ? undefined : { match }, skipped: false };
+  const noChange = sameAsin(book.match?.asin, match.asin) && !book.inLibrary && !book.hasActiveRequest;
+  return { ...book, chosen: noChange ? undefined : { match }, skipped: false };
 }
 
 /** Back to the scan's match and its default skip. */
@@ -76,10 +81,15 @@ export function isSharedRow(book: ScannedBook, shared: Set<string>): boolean {
   return isImportable(book) && shared.has(effectiveMatch(book)!.asin.toUpperCase());
 }
 
-/** "8h 5m" / "45m"; empty when unknown. */
-export function formatDuration(minutes?: number): string {
-  if (!minutes || minutes <= 0) return '';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+/**
+ * Included rows split for Start Import: `send` names a book no other included row names; `held`
+ * shares one (never sent, counted or imported; the server refuses repeats as a backstop).
+ */
+export function splitForImport(books: ScannedBook[]): { send: ScannedBook[]; held: ScannedBook[] } {
+  const shared = sharedAsins(books);
+  const included = books.filter(isImportable);
+  return {
+    send: included.filter((b) => !isSharedRow(b, shared)),
+    held: included.filter((b) => isSharedRow(b, shared)),
+  };
 }

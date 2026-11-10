@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyChosen, canChangeMatch, defaultSkipped, effectiveFlags, effectiveMatch, isImportable, matchLabel,
-  sharedAsins, isSharedRow, toImportItem, undoChosen, formatDuration,
+  sharedAsins, isSharedRow, splitForImport, toImportItem, undoChosen,
 } from '@/components/admin/bulk-import/row-match';
 import type { MatchCandidate, ScannedBook } from '@/components/admin/bulk-import/types';
 
@@ -82,6 +82,28 @@ describe('applyChosen and undoChosen', () => {
     expect(after.chosen).toBeUndefined();
     expect(effectiveMatch(after)).toEqual(SCAN);
   });
+
+  it('picking the scan\'s own book on a row with a stale Requested flag leaves a row that can be skipped and undone', () => {
+    const after = applyChosen(row({ hasActiveRequest: true }), candidate('B0SCAN0001'));
+    expect(effectiveFlags(after)).toEqual({ inLibrary: false, hasActiveRequest: false });
+    expect(after.chosen?.match.asin).toBe('B0SCAN0001');
+    expect(after.skipped).toBe(false);
+    expect(undoChosen(after).skipped).toBe(true);
+  });
+});
+
+describe('splitForImport', () => {
+  it('sends included rows that name their own book; rows sharing a book are held back', () => {
+    const a = row({ index: 0 });
+    const b = applyChosen(row({ index: 1, match: null }), candidate('B0SCAN0001'));
+    const c = row({ index: 2, match: { ...SCAN, asin: 'B0OTHER001' } });
+    const skipped = row({ index: 3, skipped: true });
+
+    const { send, held } = splitForImport([a, b, c, skipped]);
+
+    expect(send.map((x) => x.index)).toEqual([2]);
+    expect(held.map((x) => x.index)).toEqual([0, 1]);
+  });
 });
 
 describe('toImportItem', () => {
@@ -102,11 +124,5 @@ describe('sharedAsins', () => {
 
     expect([...shared]).toEqual(['B0SCAN0001']);
     expect([a, b, c, skipped].map((x) => isSharedRow(x, shared))).toEqual([true, true, false, false]);
-  });
-});
-
-describe('formatDuration', () => {
-  it.each([[undefined, ''], [0, ''], [45, '45m'], [485, '8h 5m']])('%s -> "%s"', (minutes, text) => {
-    expect(formatDuration(minutes)).toBe(text);
   });
 });

@@ -20,7 +20,8 @@ import { MatchReviewStep } from './bulk-import/MatchReviewStep';
 import {
   WizardStep, ScannedBook, ScanProgressEvent, MatchingProgressEvent, MatchCandidate, ImportOutcome,
 } from './bulk-import/types';
-import { applyChosen, defaultSkipped, isImportable, toImportItem, undoChosen } from './bulk-import/row-match';
+import { applyChosen, defaultSkipped, splitForImport, toImportItem, undoChosen } from './bulk-import/row-match';
+import { BULK_IMPORT_REFUSAL } from '@/lib/constants/bulk-import';
 import { fetchWithAuth } from '@/lib/utils/api';
 
 interface BulkImportWizardProps {
@@ -201,7 +202,9 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
   }, []);
 
   const handleStartImport = useCallback(async () => {
-    const booksToImport = scannedBooks.filter(isImportable);
+    // Included rows naming the same book are held back (the server would refuse them all)
+    const { send: booksToImport, held } = splitForImport(scannedBooks);
+    const heldBack = held.map((b) => ({ path: b.relativePath, reason: BULK_IMPORT_REFUSAL.duplicate }));
 
     if (booksToImport.length === 0) return;
 
@@ -221,7 +224,7 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
         throw new Error(data.message || data.error || 'Import failed');
       }
 
-      setImportResults({ ...data, sentPaths: booksToImport.map((b) => b.relativePath) });
+      setImportResults({ ...data, sentPaths: booksToImport.map((b) => b.relativePath), heldBack });
     } catch (error) {
       setImportResults({
         success: false,
@@ -243,8 +246,8 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
   if (!isOpen) return null;
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
-  // Keep the review's hand edits: no backdrop close while the dialog is open or a row is changed
-  const guardBackdrop = matchDialogFor !== null || scannedBooks.some((b) => b.chosen);
+  // Keep the review's hand edits: no backdrop close while the dialog is open or a row is changed (until the import ran)
+  const guardBackdrop = !importResults && (matchDialogFor !== null || scannedBooks.some((b) => b.chosen));
 
   const modalContent = (
     <div

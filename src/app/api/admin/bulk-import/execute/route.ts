@@ -191,6 +191,13 @@ export async function POST(request: NextRequest) {
             const audiobookId = book.audiobookId
               ?? (await prisma.audiobook.create({ data: { ...book.newRecord!, status: 'pending' } })).id;
 
+            // Just before the write: an active request on ANY audiobooks row with this ASIN
+            // (audible_asin is not unique, so another user's request may sit on another row)
+            if ((await getImportBlock(asin)).hasActiveRequest) {
+              results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.requested });
+              continue;
+            }
+
             // Check for existing request and recycle or create
             const existingRequest = await prisma.request.findFirst({
               where: {
@@ -204,7 +211,7 @@ export async function POST(request: NextRequest) {
             let requestId: string;
 
             if (existingRequest) {
-              // Requested since the check above
+              // Requested since the check above (this row's newest request)
               if (isBlockingStatus(existingRequest.status)) {
                 results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.requested });
                 continue;

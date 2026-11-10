@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'path';
 import { createPrismaMock } from '../../helpers/prisma';
+import { plexLibraryWhere } from '../../helpers/plex-library-where';
 import { IMPORT_BLOCKING_STATUSES } from '@/lib/constants/request-statuses';
 
 const prismaMock = createPrismaMock();
@@ -30,10 +31,13 @@ describe('getImportBlocks', () => {
   });
 
   it('reads both tables once for many ASINs, with the scan\'s status list and any user', async () => {
-    prismaMock.plexLibrary.findMany.mockResolvedValue([
+    // The mock answers like Postgres: a row in another case comes back only if the query ignores case
+    const library = [
       { asin: 'b0aaaaaaa1', plexGuid: 'abs-1' },
       { asin: null, plexGuid: 'com.plexapp.agents.audible://B0BBBBBBB2?lang=en' },
-    ]);
+      { asin: 'B0ZZZZZZZ9', plexGuid: 'abs-9' },
+    ];
+    prismaMock.plexLibrary.findMany.mockImplementation(async ({ where }: { where: Parameters<typeof plexLibraryWhere>[1] }) => plexLibraryWhere(library, where));
     prismaMock.request.findMany.mockResolvedValue([{ audiobook: { audibleAsin: 'B0CCCCCCC3' } }]);
 
     const blocks = await getImportBlocks(['B0AAAAAAA1', 'B0BBBBBBB2', 'B0CCCCCCC3', 'B0DDDDDDD4', 'B0AAAAAAA1']);

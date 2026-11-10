@@ -74,6 +74,8 @@ export interface ImportOutcome {
   summary?: { total: number; succeeded: number; failed: number };
   /** The sent rows' paths relative to the scan root, by index (two tag groups in one folder share a folder path). */
   sentPaths?: string[];
+  /** Included rows held back on the review screen (same book as another row): never sent. */
+  heldBack?: { path: string; reason: string }[];
 }
 
 /** Progress event from the SSE scan stream. */
