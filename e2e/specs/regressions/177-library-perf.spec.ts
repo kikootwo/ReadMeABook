@@ -14,6 +14,11 @@
  * Budgets (soft): full p95 < 300 ms, live p95 < 50 ms, lag p99 < 100 ms, health p95 <= idle p95 +
  * 25 ms, no failed call. Calibration only (no budget): the cold first load, the same window at 30k
  * rows, and a closed-loop stress case at 10k. Evidence: `177-perf/result.json`.
+ *
+ * The run proves its own conditions (`177-perf-gate.ts`): it fails before any load unless the rmab
+ * cgroup allows exactly 2 CPUs; after the load it fails with `RUN VOID: host not quiet` when its own
+ * idle and stress figures show a busy host (the budgets are then not judged), and with `RUN INVALID`
+ * when a sample count, a background write, a row count or a call is missing.
  */
 
 import { test, expect } from '@playwright/test';
@@ -22,13 +27,13 @@ import { psql, sqlStr } from './242-helpers';
 import { disableSchedules, waitStartupSettled } from './284-helpers';
 import { activeLibraryId, percentile, registerUser, timedGet } from './177-library-helpers';
 import { every, loop, probe, psqlAsync, record, sampled, seedLibrary, seedRequests, sleep, stats, type Sampled } from './177-perf-helpers';
+import { BUDGET, CPU_CAP_PROBE, cpusFromProbe, judgePerfRun, type PerfResult } from './177-perf-gate';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 
 const WINDOW_MS = 60_000;
 const STRESS_MS = 30_000;
 const LAG_PROBE = '/file.svg';
-const BUDGET = { fullP95: 300, liveP95: 50, lagP99: 100, healthMarginMs: 25 };
 
 interface Viewer { name: string; token: string }
 
@@ -142,11 +147,16 @@ test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 3
   const admin = await Rmab.loginAdmin();
   const disabled: string[] = [];
   try {
+    // the budgets assume a 2-CPU rmab container (--overrides cpu-cap): check it before any load
+    const cpuMax = stackExecSync('rmab', ['sh', '-c', CPU_CAP_PROBE]).trim();
+    const cpus = cpusFromProbe(cpuMax);
+    if (cpus !== 2) writeEvidence('177-perf/result.json', { cpuMax, cpus, outcome: 'no cap' });
+    expect(cpus, `rmab CPU cap from "${cpuMax}": run with --overrides cpu-cap`).toBe(2);
+
     await disableSchedules(admin, disabled);
     await waitStartupSettled();
 
     const libraryId = activeLibraryId();
-    const cpus = stackExecSync('rmab', ['sh', '-c', 'cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo unknown']).trim();
     const users: { id: string; rmab: Rmab }[] = [];
     for (let i = 0; i < 4; i++) users.push(await registerUser(admin, `perf177u${i}`, `e2e-perf177-pass-${i}`));
     const viewers: Viewer[] = [{ name: 'admin', token: admin.token }, ...users.map((u, i) => ({ name: `user${i}`, token: u.rmab.token }))];
@@ -159,7 +169,7 @@ test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 3
     const seeded = rowCount();
     const guidWindows = Number(psql(`select count(*) from plex_library where plex_library_id = ${sqlStr(libraryId)} and plex_guid ~ '[A-Za-z0-9]{10}'`));
 
-    const result: Record<string, unknown> = { cpuMax: cpus, budget: BUDGET, windowMs: WINDOW_MS, guidRowsWithAsinWindows: guidWindows };
+    const result: Record<string, unknown> = { cpuMax, cpus, budget: BUDGET, windowMs: WINDOW_MS, guidRowsWithAsinWindows: guidWindows };
 
     // 10k: cold first load (calibration), idle baseline, the budgeted window, then the stress case
     const cold = await timedGet(admin.token, '/api/library?limit=60');
@@ -196,15 +206,15 @@ test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 3
       newRowsVisibleAfterMs: visibleMs,
       ...summarize(idle30, window30),
     };
+    const judgement = judgePerfRun(result as PerfResult);
+    result.judgement = judgement;
     writeEvidence('177-perf/result.json', result);
 
-    const r = result.rows10000 as ReturnType<typeof summarize> & { counts: { libraryRows: number; afterWindow: number; total: number } };
-    expect.soft(r.counts.libraryRows, '10k rows seeded').toBe(10_000);
-    expect.soft(r.counts.afterWindow, 'the window inserted one library row').toBe(10_001);
-    expect.soft(r.counts.total, 'entries: library rows + 1000 request-only books').toBe(11_000);
-    expect.soft(guidWindows, 'guid index populated by real id shapes').toBeGreaterThan(9_000);
-    expect.soft(r.errors, 'no failed call in the window').toEqual([]);
-    expect.soft(r.writes.filter((w) => w.includes('FAILED')), 'background writes ran').toEqual([]);
+    // a busy host voids the run: it is neither a pass nor a budget miss, so the budgets are not judged
+    expect(judgement.notQuiet, `RUN VOID: host not quiet: ${judgement.notQuiet.join('; ')}`).toEqual([]);
+    expect(judgement.incomplete, `RUN INVALID: ${judgement.incomplete.join('; ')}`).toEqual([]);
+
+    const r = result.rows10000 as ReturnType<typeof summarize>;
     expect.soft(r.loaded.full.p95, 'full p95 under the design load (ms)').toBeLessThan(BUDGET.fullP95);
     expect.soft(r.loaded.live.p95, 'live p95 under the design load (ms)').toBeLessThan(BUDGET.liveP95);
     expect.soft(r.lagP99Ms, 'event-loop lag p99, static probe (ms)').toBeLessThan(BUDGET.lagP99);
