@@ -48,6 +48,14 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 
 **GET /api/admin/users**
 - User ID, Plex ID, username, email, role, avatar, created/updated dates, last login, request count, autoApproveRequests
+- `localLoginEnabled`: `isLocalLoginEnabled()` (shows the Add User button)
+
+**POST /api/admin/users** (#77)
+- Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403)
+- Body `{ username, password }` (`AUTH_JSON_BODY_LIMIT_BYTES`, zod strings; other keys ignored)
+- Creates a local user via `createLocalAccount`: role `user`, `isSetupAdmin` false, `registrationStatus` approved, `lastLoginAt` null, whatever `auth.registration_enabled` / `auth.require_admin_approval` say
+- 201 `{ user: { id, plexUsername, role, authProvider } }`; password never logged or returned
+- Errors (`{ error, message }`): 403 local login off (`Local login is not enabled, so local users cannot be added`); 400 rule message (username min 3, password required / min 8 unless `ALLOW_WEAK_PASSWORD`) or `Username and password are required` (missing, non-string, bad JSON); 409 `That username is already taken`; 500 `Failed to add user`
 
 **PUT /api/admin/users/[id]**
 - Update user role (user/admin), autoApproveRequests (true/false/null)
@@ -112,12 +120,13 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 
 - `/admin/jobs` - Scheduled jobs management (trigger, edit schedule, enable/disable)
 - `/admin/settings` - System settings (Plex, Prowlarr, paths)
-- `/admin/users` - User management (view users, change roles)
+- `/admin/users` - User management (view users, add local users, change roles)
 - `/admin/logs` - System logs (view job history, errors, filter by status/type)
 
 ## User Management Features
 
 - List all users with avatar, email, role, request count, last login, autoApproveRequests
+- Add User (#77, `src/components/admin/users/AddUserDialog.tsx`): header button only when `localLoginEnabled`; dialog (page dialog style, bottom sheet on mobile) with Username, Password, Confirm Password, Cancel / Add User. Mismatch checked client-side; server messages inline under the field they name (else at the form bottom), `role="alert"`, focus moves to the first field with an error (else Username). Success: dialog closes, toast `User "<username>" added`, list refetched. Escape/Cancel/backdrop ignored while adding; closing returns focus to the Add User button. `role="dialog"` on a div around the form; the backdrop is a sibling (a text selection dragged out of a field never closes it). Header action row wraps (`flex-wrap`), no sideways scroll at 320 px
 - Edit user roles (user/admin)
 - Cannot change own role (security)
 - Delete (`UserActionsCell`, `src/components/admin/users/UserActionsCell.tsx`): shown for local, Plex and OIDC users, never for the setup admin or yourself (current user from `useAuth`). OIDC rows show "OIDC Managed" instead of Edit Role
