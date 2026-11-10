@@ -224,4 +224,18 @@ describe('isLocalLoginEnabled', () => {
     const { isLocalLoginEnabled } = await import('@/lib/services/auth/local-account');
     expect(await isLocalLoginEnabled()).toBe(expected);
   });
+
+  it.each([
+    ['audiobookshelf', undefined, true],
+    ['audiobookshelf', 'true', false],
+    ['plex', undefined, false],
+    [null, undefined, false],
+  ])('a backend mode %s the caller already read (DISABLE_LOCAL_LOGIN=%s) gives %s without reading it again', async (mode, disable, expected) => {
+    config.values = { 'system.backend_mode': mode === 'audiobookshelf' ? 'plex' : 'audiobookshelf' };
+    if (disable !== undefined) process.env.DISABLE_LOCAL_LOGIN = disable;
+    configMock.getBackendMode.mockClear();
+    const { isLocalLoginEnabled } = await import('@/lib/services/auth/local-account');
+    expect(await isLocalLoginEnabled(mode)).toBe(expected);
+    expect(configMock.getBackendMode).not.toHaveBeenCalled();
+  });
 });

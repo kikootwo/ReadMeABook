@@ -96,11 +96,13 @@ export async function createLocalAccount(
 
 /**
  * Local (username/password) sign-in is offered: Audiobookshelf mode with
- * DISABLE_LOCAL_LOGIN not 'true', the conditions /api/auth/providers puts the 'local'
- * login form behind. (That route also hides the form while no local account exists
- * and registration is off; an admin adding one is what changes that.)
+ * DISABLE_LOCAL_LOGIN not 'true'. /api/auth/providers puts the 'local' login form
+ * behind this (and also hides the form while no local account exists and registration
+ * is off; an admin adding one is what changes that).
+ * @param backendMode the stored system.backend_mode, when the caller has already read it
  */
-export async function isLocalLoginEnabled(): Promise<boolean> {
+export async function isLocalLoginEnabled(backendMode?: string | null): Promise<boolean> {
   if (process.env.DISABLE_LOCAL_LOGIN === 'true') return false;
-  return (await getConfigService().getBackendMode()) === 'audiobookshelf';
+  const mode = backendMode === undefined ? await getConfigService().getBackendMode() : backendMode;
+  return mode === 'audiobookshelf';
 }

@@ -292,7 +292,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - Row: `plexId` `local-<username>`, bcrypt (10) hash encrypted into `authToken`, `authProvider` local; `role`/`isSetupAdmin`/`registrationStatus`/`lastLoginAt` from the caller
 - Self-registration state: first user ever (deleted rows count) → admin + setup admin + approved; else user, `pending_approval` when `auth.require_admin_approval`; `lastLoginAt` now. Order: rules → `auth.registration_enabled` (`Registration is disabled`) → create
 - Admin-added state: user, not setup admin, approved, `lastLoginAt` null (Users page: Never), regardless of `auth.registration_enabled` and `auth.require_admin_approval`
-- Local login enabled (`isLocalLoginEnabled`): Audiobookshelf mode and `DISABLE_LOCAL_LOGIN` not `'true'` (the conditions `/api/auth/providers` puts the `local` form behind; it also hides the form while no local account exists and registration is off). Gates POST `/api/admin/users` and the Users page Add User button. API: [admin-dashboard.md](../../admin-dashboard.md)
+- Local login enabled (`isLocalLoginEnabled(backendMode?)`): Audiobookshelf mode and `DISABLE_LOCAL_LOGIN` not `'true'`. The one rule for `/api/auth/providers` (`local` provider and `registrationEnabled`; the route passes the mode it already read, and also hides the form while no local account exists and registration is off), POST `/api/admin/users` and the Users page Add User button. API: [admin-dashboard.md](../../admin-dashboard.md)
 
 ## Deleting Users
 
