@@ -193,6 +193,7 @@ export async function GET(request: NextRequest) {
             asin: request.audiobook.audibleAsin || null,
             libraryAsin: shown.libraryAsin,
             status: request.status,
+            progress: request.progress, // processing: under 100 only while chapters merge (#216)
             type: request.type || 'audiobook', // Include request type for UI display
             userId: request.user.id,
             user: request.user.plexUsername,

@@ -89,7 +89,7 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     path: '/api/requests',
     title: 'List requests',
     description:
-      'Returns all audiobook requests visible to the authenticated user. Admins see all requests, users see their own.',
+      'Returns all audiobook requests visible to the authenticated user. Admins see all requests, users see their own. While a request is `processing`, `progress` is 100, except during the chapter merge, when it runs from 0 to 99.',
     requiresAdmin: false,
   },
   {
@@ -106,7 +106,7 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     path: '/api/requests/:id',
     title: 'Get request by ID',
     description:
-      'Returns a single audiobook request including audiobook details, download history, and recent job state. Users may only fetch requests they own; admins may fetch any.',
+      'Returns a single audiobook request including audiobook details, download history, and recent job state. Users may only fetch requests they own; admins may fetch any. While a request is `processing`, `progress` is 100, except during the chapter merge, when it runs from 0 to 99.',
     requiresAdmin: false,
   },
   {
