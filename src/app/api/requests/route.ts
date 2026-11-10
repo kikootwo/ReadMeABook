@@ -15,6 +15,7 @@ import { readJsonBody } from '@/lib/utils/request-body';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { withLibraryDisplayAll } from '@/lib/services/library/library-display';
+import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -30,6 +31,8 @@ const CreateRequestSchema = z.object({
     releaseDate: z.string().optional(),
     rating: z.number().nullable().optional(),
   }),
+  /** Mark the request Explicit (#542): Audiobookshelf mode flags the book when it arrives; ignored while the setting is off */
+  explicit: z.boolean().optional(),
 });
 
 /**
@@ -49,7 +52,7 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { audiobook } = CreateRequestSchema.parse(body);
+      const { audiobook, explicit } = CreateRequestSchema.parse(body);
 
       const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';
 
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest) {
         narrator: audiobook.narrator,
         description: audiobook.description,
         coverArtUrl: audiobook.coverArtUrl,
-      }, { skipAutoSearch, bypassIgnore: true });
+      }, { skipAutoSearch, bypassIgnore: true, explicit: explicit === true && (await isExplicitMarkOn()) });
 
       if (!result.success) {
         const statusMap: Record<string, { error: string; status: number }> = {

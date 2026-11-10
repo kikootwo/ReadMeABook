@@ -22,13 +22,14 @@ vi.mock('@/components/layout/Header', () => ({
 }));
 
 vi.mock('@/components/requests/RequestCard', () => ({
-  RequestCard: ({ request, showActions }: { request: any; showActions?: boolean }) => (
+  RequestCard: ({ request, showActions, onChanged }: { request: any; showActions?: boolean; onChanged?: () => void }) => (
     <div
       data-testid="request-card"
       data-status={request.status}
       data-show-actions={String(!!showActions)}
     >
       {request.id}
+      {onChanged && <button onClick={onChanged}>changed {request.id}</button>}
     </div>
   ),
 }));
@@ -108,5 +109,21 @@ describe('RequestsPage', () => {
     const waitingCards = screen.getAllByTestId('request-card');
     expect(waitingCards).toHaveLength(1);
     expect(waitingCards[0]).toHaveAttribute('data-status', 'awaiting_search');
+  });
+
+  it("a card's change (an Explicit mark) reloads the whole list, not only the first page (#542)", async () => {
+    setMockAuthState({ user: { id: 'user-1', plexId: 'plex-1', username: 'user', role: 'user' }, isLoading: false });
+    const revalidate = vi.fn();
+    useMyRequestsMock.mockReturnValue({
+      requests: [{ id: 'req-1', status: 'failed', audiobook: { title: 'Fail', author: 'Author' } }],
+      counts: { ...defaultCounts, all: 1, failed: 1 }, hasMore: false,
+      isLoading: false, isLoadingMore: false, isEmpty: false, loadMore: vi.fn(), revalidate,
+    });
+
+    const { default: RequestsPage } = await import('@/app/requests/page');
+    render(<RequestsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'changed req-1' }));
+
+    expect(revalidate).toHaveBeenCalledTimes(1);
   });
 });

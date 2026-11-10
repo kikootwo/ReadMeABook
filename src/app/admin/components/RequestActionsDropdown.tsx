@@ -15,6 +15,7 @@ import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { CANCELLABLE_STATUSES, EBOOK_FETCHABLE_STATUSES, SEARCHABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
+import { ExplicitMenuItem } from './ExplicitMenuItem';
 
 export interface RequestActionsDropdownProps {
   request: {
@@ -27,7 +28,10 @@ export interface RequestActionsDropdownProps {
     torrentUrl?: string | null;
     downloadAttempts?: number;
     customSearchTerms?: string | null;
+    explicit?: boolean; // #542
   };
+  /** Audiobookshelf mode: Mark explicit / Remove explicit mark (#542) */
+  showExplicit?: boolean;
   onDelete: (requestId: string, title: string) => void;
   onManualSearch: (requestId: string) => Promise<void>;
   onCancel: (requestId: string) => Promise<void>;
@@ -52,6 +56,7 @@ export function RequestActionsDropdown({
   ebookSidecarEnabled = false,
   annasArchiveBaseUrl = 'https://annas-archive.gl',
   isLoading = false,
+  showExplicit = false,
 }: RequestActionsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
@@ -398,6 +403,10 @@ export function RequestActionsDropdown({
                 </svg>
                 Interactive Search Ebook
               </button>
+            )}
+
+            {showExplicit && !isEbook && (
+              <ExplicitMenuItem requestId={request.requestId} explicit={request.explicit === true} status={request.status} onDone={() => setIsOpen(false)} />
             )}
 
             {/* Retry Download */}

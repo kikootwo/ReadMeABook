@@ -11,6 +11,7 @@ import { RequestCard } from '@/components/requests/RequestCard';
 import { useMyRequests, RequestFilterGroup, RequestCounts } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils/cn';
+import { ToastProvider } from '@/components/ui/Toast';
 
 // ── Tab configuration ────────────────────────────────────────────────────────
 
@@ -264,7 +265,12 @@ function ShowingBar({ showing, total, hasActive }: { showing: number; total: num
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+// The Explicit checkbox on each card reports through a toast (#542)
 export default function RequestsPage() {
+  return <ToastProvider><MyRequestsContent /></ToastProvider>;
+}
+
+function MyRequestsContent() {
   const { user } = useAuth();
   const [filter, setFilter] = useState<RequestFilterGroup>('all');
 
@@ -276,6 +282,7 @@ export default function RequestsPage() {
     isLoadingMore,
     isEmpty,
     loadMore,
+    revalidate,
   } = useMyRequests(filter);
 
   const countsLoaded = !isLoading || requests.length > 0;
@@ -373,7 +380,8 @@ export default function RequestsPage() {
                 style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
                 className="animate-[fadeInUp_0.25s_ease-out_both]"
               >
-                <RequestCard request={request} showActions={true} />
+                {/* revalidate reloads every loaded page (a filter mutate skips the infinite list) */}
+                <RequestCard request={request} showActions={true} onChanged={() => void revalidate()} />
               </div>
             ))}
           </div>

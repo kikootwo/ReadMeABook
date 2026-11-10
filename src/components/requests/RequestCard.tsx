@@ -16,6 +16,9 @@ import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsM
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { COMPLETED_STATUSES, CANCELLABLE_STATUSES, requestPhase } from '@/lib/constants/request-statuses';
 import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
+import { useAuth } from '@/contexts/AuthContext';
+import { useExplicitMarkEnabled } from '@/lib/hooks/useExplicitMark';
+import { RequestExplicitControl } from './ExplicitCheckbox';
 
 interface RequestCardProps {
   request: {
@@ -31,6 +34,7 @@ interface RequestCardProps {
     completedAt?: string;
     downloadAvailable?: boolean;
     releaseDate?: string | Date | null;
+    explicit?: boolean; // #542
     audiobook: {
       id: string;
       audibleAsin?: string;
@@ -42,9 +46,11 @@ interface RequestCardProps {
     };
   };
   showActions?: boolean;
+  /** After a change saved from the card (the Explicit mark): reload the list it came from */
+  onChanged?: () => void;
 }
 
-export function RequestCard({ request, showActions = true }: RequestCardProps) {
+export function RequestCard({ request, showActions = true, onChanged }: RequestCardProps) {
   const { cancelRequest, isLoading } = useCancelRequest();
   const { squareCovers } = usePreferences();
   const [showError, setShowError] = React.useState(false);
@@ -61,6 +67,9 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const canCancel = (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
+  const { user } = useAuth();
+  // Explicit mark (#542): Audiobookshelf with the setting on, audiobook requests, not on denied ones (never delivered)
+  const showExplicit = useExplicitMarkEnabled() && !isEbook && request.status !== 'denied';
   // Processing says what it is doing; its bar shows only while chapters merge (#216)
   const phase = requestPhase(request.status, request.progress);
   const barPercent = phase ? phase.percent : isActive && request.progress > 0 ? request.progress : null;
@@ -266,7 +275,10 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
 
             {/* Action Buttons */}
             {showActions && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {showExplicit && (
+                  <RequestExplicitControl requestId={request.id} explicit={request.explicit === true} isAdmin={user?.role === 'admin'} onSaved={onChanged} />
+                )}
                 {canCancel && (
                   <Button
                     onClick={() => setConfirmCancelOpen(true)}
@@ -290,11 +302,13 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           asin={request.audiobook.audibleAsin}
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
+          onRequestSuccess={onChanged}
           requestStatus={request.status}
           isAvailable={COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number])}
           requestId={request.id}
           requestedByUserId={request.userId ?? null}
           requestType={requestType}
+          requestExplicit={request.explicit === true}
         />
       )}
 

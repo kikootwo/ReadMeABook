@@ -62,6 +62,13 @@ describe('isEndpointAllowed', () => {
       expect(isEndpointAllowed('DELETE', '/api/admin/requests/abc')).toBe(false);
     });
 
+    it('the Explicit mark route stays UI-only; marking at creation rides on the allowed POST /api/requests (#542)', () => {
+      for (const method of ['PUT', 'GET', 'POST', 'PATCH', 'DELETE']) {
+        expect(isEndpointAllowed(method, '/api/requests/abc/explicit')).toBe(false);
+      }
+      expect(isEndpointAllowed('POST', '/api/requests')).toBe(true);
+    });
+
     it('the cancel route\'s description names every cancellable status and the owner `kept` value', async () => {
       const { API_TOKEN_ENDPOINT_DOCS } = await import('@/lib/constants/api-tokens');
       const { CANCELLABLE_STATUSES } = await import('@/lib/constants/request-statuses');

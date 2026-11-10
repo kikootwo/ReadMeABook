@@ -263,6 +263,9 @@ model Request {
   // e.g. asin_match:awaiting_approval, manual_import:denied, bulk_import:cancelled); the approve route and a
   // manual import that names the request clear it. NULL = no record (approved, or before this field existed).
   approvalBypassedBy String? @map("approval_bypassed_by")
+  // Marked Explicit (#542): the requester or an admin sets it, only an admin clears it. In ABS mode the delivery step
+  // turns on the ABS item's Explicit flag (never off). Kept by a re-request and a reported-issue Replace.
+  explicit         Boolean   @default(false)
 
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")

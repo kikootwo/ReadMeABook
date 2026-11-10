@@ -1,11 +1,12 @@
 /**
  * Component: Audiobookshelf API Client
  * Documentation: documentation/fixes/file-hash-matching.md
+ * Item writes: documentation/features/requester-tags.md, documentation/features/explicit-flag.md
  *
  * Provides API methods for interacting with Audiobookshelf:
  * - Library scanning and item fetching
  * - Metadata matching (with ASIN for accurate Audible lookup)
- * - Item management
+ * - Item management, requester tags and the Explicit flag
  */
 
 import { getConfigService } from '../config.service';
@@ -222,51 +223,132 @@ export async function triggerABSItemMatch(itemId: string, asin?: string): Promis
   }
 }
 
-/** Per-call bound for the tag read and write (#232). */
+/** Per-call bound for the item read and write (#232, #542). */
 export const ABS_TAG_TIMEOUT_MS = 15_000;
 
-export type ABSTagWriteResult =
-  | { status: 'added'; tags: string[] }
-  | { status: 'present' }
-  | { status: 'unreadable' }
-  | { status: 'failed'; error: string; httpStatus?: number };
+/** What one item write should add: requester tags and/or the Explicit flag (never false, #542). */
+export interface ABSItemWrite {
+  tags?: string[];
+  explicit?: true;
+}
+
+/**
+ * Per field: `none` = not asked. Tags: `added | present | unreadable` (no list to merge into:
+ * nothing written) `| failed`. Explicit: `set | present | failed`. `error`/`httpStatus` describe
+ * the last failed call.
+ */
+export interface ABSItemWriteResult {
+  tags: 'none' | 'added' | 'present' | 'unreadable' | 'failed';
+  addedTags: string[];
+  explicit: 'none' | 'set' | 'present' | 'failed';
+  error?: string;
+  httpStatus?: number;
+}
 
 const isTagList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((t) => typeof t === 'string');
 
-/**
- * Add tags to an item and keep its others (#232). ABS's PATCH /items/:id/media replaces the whole
- * tags array, so the current list is read first; a list that can't be read is never written.
- * Merged = current (order kept) + missing; PATCH only when something is missing; the response's
- * item must hold every tag. Never throws.
- */
-export async function addABSItemTags(itemId: string, tags: string[]): Promise<ABSTagWriteResult> {
-  try {
-    const item = await absRequest<{ media?: { tags?: unknown } }>(`/items/${itemId}`, { timeoutMs: ABS_TAG_TIMEOUT_MS });
-    const current = item?.media?.tags;
-    if (!isTagList(current)) {
-      logger.warn(`Item ${itemId} has no readable tag list; not writing tags`);
-      return { status: 'unreadable' };
-    }
-    const missing = [...new Set(tags)].filter((t) => !current.includes(t));
-    if (missing.length === 0) return { status: 'present' };
-    const merged = [...current, ...missing];
-    if (!current.every((t) => merged.includes(t))) throw new Error('merged tag list lost an existing tag');
+const failureOf = (error: unknown) => ({
+  error: error instanceof Error ? error.message : String(error),
+  ...(error instanceof ABSApiError ? { httpStatus: error.status } : {}),
+});
 
-    const result = await absRequest<{ libraryItem?: { media?: { tags?: unknown } } }>(`/items/${itemId}/media`, {
+type ABSItemBody = { media?: { tags?: unknown; metadata?: { explicit?: unknown } } };
+
+/**
+ * One write per item for the requester tags (#232) and the Explicit flag (#542), sharing
+ * PATCH /items/:id/media. ABS replaces the whole tags array, so tags are read first (one GET, only
+ * when tags are asked) and merged: current (order kept) + missing; a list that can't be read is
+ * never written. ABS changes only the fields it is sent, so the flag goes as `metadata.explicit`
+ * alone, also when the tag read fails. One PATCH holding only what is missing; the response must
+ * hold every tag and, when it carries a boolean, `explicit: true`. Never throws.
+ */
+export async function writeABSItem(itemId: string, want: ABSItemWrite): Promise<ABSItemWriteResult> {
+  const tags = [...new Set(want.tags ?? [])];
+  const result: ABSItemWriteResult = {
+    tags: tags.length > 0 ? 'failed' : 'none',
+    addedTags: [],
+    explicit: want.explicit === true ? 'failed' : 'none',
+  };
+  const body: { tags?: string[]; metadata?: { explicit: true } } = {};
+  let sendExplicit = want.explicit === true;
+
+  if (tags.length > 0) {
+    try {
+      const item = await absRequest<ABSItemBody>(`/items/${itemId}`, { timeoutMs: ABS_TAG_TIMEOUT_MS });
+      const current = item?.media?.tags;
+      if (item?.media?.metadata?.explicit === true && sendExplicit) {
+        result.explicit = 'present';
+        sendExplicit = false;
+      }
+      if (!isTagList(current)) {
+        logger.warn(`Item ${itemId} has no readable tag list; not writing tags`);
+        result.tags = 'unreadable';
+      } else {
+        const missing = tags.filter((t) => !current.includes(t));
+        if (missing.length === 0) {
+          result.tags = 'present';
+        } else {
+          const merged = [...current, ...missing];
+          if (!current.every((t) => merged.includes(t))) throw new Error('merged tag list lost an existing tag');
+          body.tags = merged;
+          result.addedTags = missing;
+        }
+      }
+    } catch (error) {
+      Object.assign(result, { tags: 'failed' }, failureOf(error));
+    }
+  }
+  if (sendExplicit) body.metadata = { explicit: true };
+  if (!body.tags && !body.metadata) return result;
+
+  try {
+    const saved = await absRequest<{ libraryItem?: ABSItemBody }>(`/items/${itemId}/media`, {
       method: 'PATCH',
-      body: { tags: merged },
+      body,
       timeoutMs: ABS_TAG_TIMEOUT_MS,
     });
-    const saved = result?.libraryItem?.media?.tags;
-    if (isTagList(saved) && !tags.every((t) => saved.includes(t))) {
-      logger.warn(`Item ${itemId}: Audiobookshelf did not keep the tags ${missing.join(', ')}`);
-      return { status: 'failed', error: 'tags not saved' };
+    const savedTags = saved?.libraryItem?.media?.tags;
+    const savedExplicit = saved?.libraryItem?.media?.metadata?.explicit;
+    if (body.tags) {
+      if (isTagList(savedTags) && !tags.every((t) => savedTags.includes(t))) {
+        logger.warn(`Item ${itemId}: Audiobookshelf did not keep the tags ${result.addedTags.join(', ')}`);
+        Object.assign(result, { tags: 'failed', error: 'tags not saved' });
+      } else {
+        result.tags = 'added';
+      }
     }
-    return { status: 'added', tags: missing };
+    if (body.metadata) {
+      if (typeof savedExplicit === 'boolean' && savedExplicit !== true) {
+        logger.warn(`Item ${itemId}: Audiobookshelf did not keep the Explicit flag`);
+        Object.assign(result, { explicit: 'failed', error: 'explicit flag not saved' });
+      } else {
+        result.explicit = 'set';
+      }
+    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { status: 'failed', error: message, ...(error instanceof ABSApiError ? { httpStatus: error.status } : {}) };
+    if (body.tags) result.tags = 'failed';
+    if (body.metadata) result.explicit = 'failed';
+    Object.assign(result, failureOf(error));
+  }
+  if (result.tags !== 'added') result.addedTags = [];
+  return result;
+}
+
+/**
+ * Whether the Audiobookshelf user behind the API key can see explicit books (#542): ABS hides
+ * them from that user's listings and item reads otherwise, so RMAB would lose the item. Reads
+ * GET /api/me (the key's own user). Returns only a boolean: that body carries the user's legacy
+ * token, which is never logged, stored or returned. False when the read fails. Never throws.
+ */
+export async function canKeyUserSeeExplicit(): Promise<boolean> {
+  try {
+    const me = await absRequest<{ isActive?: unknown; permissions?: { accessExplicitContent?: unknown } }>('/me', {
+      timeoutMs: ABS_TAG_TIMEOUT_MS,
+    });
+    return me?.isActive === true && me?.permissions?.accessExplicitContent === true;
+  } catch {
+    return false;
   }
 }
 

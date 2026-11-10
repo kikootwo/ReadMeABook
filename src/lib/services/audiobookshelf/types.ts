@@ -26,7 +26,8 @@ export interface ABSBookMetadata {
   isbn?: string;
   asin?: string;
   language?: string;
-  explicit: boolean;
+  /** No default in ABS: may be null or absent (#542) */
+  explicit?: unknown;
 }
 
 export interface ABSAudioFile {

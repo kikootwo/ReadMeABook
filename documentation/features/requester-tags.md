@@ -7,9 +7,9 @@ When a requested audiobook becomes `available`, RMAB adds `req:<username>` to it
 
 ## Key Details
 - **Setting:** `audiobookshelf.tag_requester` (`'true'` = on; absent/other = off). Admin → Settings → Audiobookshelf, checkbox under "Trigger library scan after import". Saved by `PUT /api/admin/settings/audiobookshelf` field `tagRequester`, written only when it is a boolean (absent leaves the key alone)
-- **Event:** the compare-and-set winner in `matchRequestsToLibrary` (`src/lib/services/library/match-requests.ts`): the library link or the ASIN match. Book ids collected in a `delivered` set; after the loop one delivery-steps block calls `applyRequesterTags` in its own try/catch, so tagging never blocks or undoes delivery or its notification. Runs in both scan jobs (full scan, recently-added check)
+- **Event:** the compare-and-set winner in `matchRequestsToLibrary` (`src/lib/services/library/match-requests.ts`): the library link or the ASIN match. Book ids collected in a `delivered` set; after the loop one delivery-steps block calls `runItemMarkStep` (`applyItemMarks`, `requester-tags.ts`) in its own try/catch, so tagging never blocks or undoes delivery or its notification. Runs in both scan jobs (full scan, recently-added check). The same step writes the ABS Explicit flag for requests marked Explicit, with tagging on or off, while the Explicit mark setting is on ([explicit-flag.md](explicit-flag.md)); one write per item carries both
 - **Notification first:** `request_available` is queued inside the loop, the tag is written after it. A user limited by tags in ABS can get the notification a moment before the book is visible; when the write fails or the tag is refused, nothing tells the user
-- **Write:** `addABSItemTags(itemId, tags)` (`src/lib/services/audiobookshelf/api.ts`): GET `/api/items/:id` → `media.tags` must be an array of strings, else warn and write nothing (ABS's PATCH replaces the whole array) → merged = current (order kept) + missing → `PATCH /api/items/:id/media {tags}` only if changed → when the response carries a tag list (`libraryItem.media.tags`), it must hold ours; a response without one counts as saved. 15 s per call. Never throws: `added | present | unreadable | failed`
+- **Write:** `writeABSItem(itemId, {tags, explicit?})` (`src/lib/services/audiobookshelf/api.ts`, shared with the Explicit flag): GET `/api/items/:id` → `media.tags` must be an array of strings, else warn and write no tags (ABS's PATCH replaces the whole array; a wanted Explicit flag is still sent alone) → merged = current (order kept) + missing → `PATCH /api/items/:id/media {tags}` only if changed → when the response carries a tag list (`libraryItem.media.tags`), it must hold ours; a response without one counts as saved. 15 s per call. Never throws: tags `none | added | present | unreadable | failed`, explicit `none | set | present | failed`
 - **Tag format:** `req:` + the user's `plexUsername` (Plex username; OIDC `preferred_username || email || sub`; local username): NFKD, drop combining marks, trim, lowercase, whitespace runs → `_`, drop everything outside `[a-z0-9_-]`. A result with no letter or digit gives no tag (`---`, `_`, `- -`, emoji only, an empty result), and so does a name with letters none of which survive (`Дочь 1`, `李雷`). `John Smith` → `req:john_smith`, `José` → `req:jose`, `john.smith@example.com` → `req:johnsmithexamplecom`. Code: `requesterTag()` in `src/lib/services/audiobookshelf/requester-tag-users.ts`
 - **Per run:** one users query and one read of the available requests of this run's delivered books and listed items (one read per 1,000 listed item ids; nothing else is read), split into eligible and not in memory. A listed item whose `tags` already hold every expected tag costs no HTTP
 
@@ -32,17 +32,17 @@ When a requested audiobook becomes `available`, RMAB adds `req:<username>` to it
 
 ## Repair (an ABS re-match drops the tag)
 - An ABS match with `overrideDetails` (or "Prefer matched metadata") and an Audible tag genre replaces the item's tags. Any later run that lists the item re-adds the missing `req:` tag and keeps ABS's tags (full scan: every item; recently-added check: 10 newest)
-- Repair acts only on a listed item whose `tags` array lacks an expected tag; a listing without a `tags` array → no GET, no PATCH. At most `REQUESTER_TAG_REPAIR_CAP` = 25 repaired items per scan run (delivered books uncapped); over the cap one info line `N more items need their requester tag; the next scan continues`
+- Repair acts only on a listed item whose `tags` array lacks an expected tag; a listing without a `tags` array → no GET, no PATCH. At most `REQUESTER_TAG_REPAIR_CAP` = 25 repaired items per scan run, shared with the Explicit flag repair (delivered books uncapped); over the cap one info line `N more items need their requester tag or Explicit flag; the next scan continues`
 - While tagging is on, a `req:` tag removed by hand comes back. To hide a book from one user: change that user's access in ABS (turning tagging off removes no tag). There is no per-book opt-out
 - Same-run gap: the "already tagged" check uses the listing taken at the start of the job, but RMAB's own ASIN match (`matchItemsWithoutAsin`) runs between that listing and the tag step. A tag that match replaces stays missing until the next run that lists the item (recently-added check if among the 10 newest, else the next full scan)
-- After 3 consecutive ABS failures the step stops for the run with one error line (403 → the API key's user needs permission to update items); later runs retry
+- After 3 consecutive ABS failures the step stops for the run with one error line `Audiobookshelf item writes stopped for this run after N failures in a row` (403 → the API key's user needs permission to update items); later runs retry
 
 ## Shared, Untaggable and Overlapping Names
 | Case | Effect | Shown |
 |---|---|---|
 | Two or more tag-set users with one tag | none of them tagged, on every path | amber box; one warning per tag per run `Not tagging with req:x: shared by a, b`; backfill `skippedShared` |
 | Pending/rejected user with a tag-set user's tag | warn only; the tag-set user is still tagged (approving the lookalike stops both) | amber box; one warning per tag per run |
-| Name gives no tag | never tagged (no bare `req:`) | amber box "no letters or digits a tag can use"; one warning per user per run; `skippedNoTag` |
+| Name gives no tag | never tagged (no bare `req:`) | amber box `"<name>" can't be turned into a tag and is never tagged.`; one warning per user per run; `skippedNoTag` |
 | Live user with a deleted user's tag | warn only; books tagged for the deleted user still carry it | amber box; one warning per tag per run |
 - Run warnings are logged when a candidate of that tag (or user) is in the run
 - A Plex or OIDC user who was deleted and signs in again gets a new account with the same username, so the deleted-overlap line appears; when it is the same person, nothing needs doing
@@ -51,10 +51,10 @@ When a requested audiobook becomes `available`, RMAB adds `req:<username>` to it
 
 ## Backfill Job `backfill_requester_tags`
 - Queued only by the ABS settings PUT on a saved false → true change (`addBackfillRequesterTagsJob`, attempts 1, skipped while one is waiting or active; enqueue failure logged, save still succeeds). Label `Requester Tag Backfill`
-- Lists the configured ABS library once; same `applyRequesterTags` in `backfill` mode: every eligible available request of a tag-set user whose item is listed; uncapped; an item listed without a `tags` array may GET (the GET guards the PATCH)
+- Lists the configured ABS library once; same `applyItemMarks` in `backfill` mode: every eligible available request of a tag-set user whose item is listed; uncapped; an item listed without a `tags` array may GET (the GET guards the PATCH). It also turns on the Explicit flag of listed items with a marked request while the Explicit mark setting is on ([explicit-flag.md](explicit-flag.md))
 - Sequential; stops at the end, when tagging is turned off (re-read every 25 items), or after 3 consecutive ABS failures; Plex mode or tagging off → `{ skipped: true }`. Idempotent (a second run writes nothing)
 - A container stop mid-run is handled like any job ([jobs.md](../backend/services/jobs.md#shutdown-and-cut-jobs)): left for retry, rerun from the start after the restart (items already tagged cost no write); a second cut fails it
-- Result in the job record: `{ considered, tagged, alreadyTagged, skippedNoTag, skippedShared, skippedUser, skippedUnapproved, skippedImported, failed, stoppedEarly }` (`considered`, `skipped*` count requests; `tagged`, `alreadyTagged`, `failed` count items)
+- Result in the job record: `{ considered, tagged, alreadyTagged, skippedNoTag, skippedShared, skippedUser, skippedUnapproved, skippedImported, failed, markedExplicit, explicitHeldBack, stoppedEarly }` (`considered`, `skipped*` count requests; `tagged`, `alreadyTagged`, `failed`, `markedExplicit`, `explicitHeldBack` count items)
 - **Run it again:** there is no button. Untick the setting, save, tick it, save; a failed or stopped run shows in the job list. Until then, existing books are tagged only by the repair (25 per scan run)
 
 ## Privacy
@@ -69,4 +69,4 @@ When a requested audiobook becomes `available`, RMAB adds `req:<username>` to it
 - **Lost update:** GET-merge-PATCH is not atomic (ABS has no If-Match); an admin tag edit in the same second can be lost. Two overlapping scan jobs with different expected tags for one item can drop one `req:` tag the same way; the next run that lists the item puts it back
 
 ## Related
-- [database.md](../backend/database.md#requests), [manual-import.md](manual-import.md), [bulk-import.md](bulk-import.md), [settings-pages.md](../settings-pages.md), [jobs.md](../backend/services/jobs.md), [file-hash-matching.md](../fixes/file-hash-matching.md)
+- [explicit-flag.md](explicit-flag.md), [database.md](../backend/database.md#requests), [manual-import.md](manual-import.md), [bulk-import.md](bulk-import.md), [settings-pages.md](../settings-pages.md), [jobs.md](../backend/services/jobs.md), [file-hash-matching.md](../fixes/file-hash-matching.md)

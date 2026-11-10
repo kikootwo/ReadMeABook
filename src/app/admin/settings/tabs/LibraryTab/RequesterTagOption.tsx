@@ -26,7 +26,7 @@ function WarningBox({ settings }: { settings: Settings }) {
     ...w.shared.map((s) => `${s.tag} is shared by ${quote(s.usernames)}: ${nobodyTagged(s.usernames.length)}.`),
     ...w.lookalikes.map((l) =>
       `${l.tag} is also the tag of ${l.status === 'rejected' ? 'rejected' : 'pending'} user "${l.username}": if you approve them, neither is tagged.`),
-    ...w.untaggable.map((n) => `"${n}" has no letters or digits a tag can use and is never tagged.`),
+    ...w.untaggable.map((n) => `"${n}" can't be turned into a tag and is never tagged.`),
     ...w.deletedOverlaps.map((d) =>
       `${d.tag} (user "${d.username}") is also the tag of deleted user ${quote(d.deletedUsernames)}; books tagged for them still carry it.`),
   ];
@@ -76,7 +76,7 @@ export function RequesterTagOption({ settings, onChange }: RequesterTagOptionPro
           </label>
           <div id={helpId}>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              When a requested audiobook becomes available, ReadMeABook adds <code>req:&lt;username&gt;</code> to its
+              When a requested audiobook becomes available, ReadMeABook adds <code className="whitespace-nowrap">req:&lt;username&gt;</code> to its
               Audiobookshelf item, keeping its other tags, so Audiobookshelf can limit each user to their own books.
               Turning this on also tags books already available; turning it off removes no tags.
             </p>
