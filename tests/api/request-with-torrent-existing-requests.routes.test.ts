@@ -16,6 +16,7 @@ let authRequest: { user: { id: string; role: string }; json: () => Promise<unkno
 let rows: Row[];
 
 const prismaMock = createPrismaMock();
+const explicitSetting = vi.hoisted(() => ({ on: true }));
 const jobQueueMock = vi.hoisted(() => ({
   addDownloadJob: vi.fn(),
   addNotificationJob: vi.fn(() => Promise.resolve()),
@@ -40,6 +41,7 @@ vi.mock('@/lib/integrations/prowlarr-connection', () => ({
 vi.mock('@/lib/middleware/interactive-search-access', () => ({
   denyWithoutInteractiveSearchAccess: async () => null,
 }));
+vi.mock('@/lib/services/audiobookshelf/explicit-flag', () => ({ isExplicitMarkOn: async () => explicitSetting.on }));
 
 const BOOK = { id: 'ab-1', audibleAsin: 'B000000001', title: 'Title', author: 'Author' };
 const PICK = {
@@ -166,4 +168,72 @@ describe('request-with-torrent refuses a pick that duplicates an existing reques
       expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
     }
   );
+});
+
+describe('request-with-torrent and the Explicit mark (#542)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rows = [];
+    prismaMock.request.findFirst.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => rows.find((r) => matchesWhere(r, where)) ?? null);
+    prismaMock.audiobook.findFirst.mockResolvedValue(BOOK);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', role: 'user', autoApproveRequests: true, plexUsername: 'user-1' });
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook: BOOK, user: { id: 'user-1', plexUsername: 'user-1' } });
+    prismaMock.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(prismaMock));
+    prismaMock.blockedRelease.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.request.deleteMany.mockResolvedValue({ count: 1 });
+    explicitSetting.on = true;
+  });
+
+  async function pickWith(body: Record<string, unknown>) {
+    authRequest = { user: { id: 'user-1', role: 'user' }, json: vi.fn().mockResolvedValue({ ...PICK, ...body }) };
+    const { POST } = await import('@/app/api/audiobooks/request-with-torrent/route');
+    const response = await POST({} as never);
+    return { status: response.status, data: prismaMock.request.create.mock.calls[0]?.[0]?.data };
+  }
+
+  it.each([
+    [{ explicit: true }, true],
+    [{ explicit: false }, false],
+    [{}, false],
+  ])('a new pick with %o stores explicit %s', async (body, expected) => {
+    const result = await pickWith(body);
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(expected);
+  });
+
+  it('setting off: explicit true is ignored, the request is created unmarked', async () => {
+    explicitSetting.on = false;
+
+    const result = await pickWith({ explicit: true });
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(false);
+  });
+
+  it('setting off: re-picking a marked failed request still copies its stored mark', async () => {
+    explicitSetting.on = false;
+    rows.push({ ...row('failed', 'user-1'), explicit: true });
+
+    const result = await pickWith({});
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(true);
+  });
+
+  it('a non-boolean explicit → 400, nothing created', async () => {
+    const result = await pickWith({ explicit: 'yes' });
+
+    expect(result.status).toBe(400);
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
+
+  it.each([{ explicit: false }, {}])('re-picking a marked failed request with %o keeps the mark (only an admin clears it)', async (body) => {
+    rows.push({ ...row('failed', 'user-1'), explicit: true });
+
+    const result = await pickWith(body);
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(true);
+  });
 });

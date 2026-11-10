@@ -197,3 +197,45 @@ describe('createRequestForUser re-request (#312)', () => {
     });
   });
 });
+
+describe('createRequestForUser and the Explicit mark (#542)', () => {
+  const createdData = () => (txMock.request.create.mock.calls[0] ?? prismaMock.request.create.mock.calls[0])?.[0]?.data;
+
+  it.each([
+    [{ explicit: true }, true],
+    [{ explicit: false }, false],
+    [{}, false],
+  ])('a first request with %o stores explicit %s', async (options, expected) => {
+    requests(null);
+    prismaMock.request.create.mockResolvedValue({ id: 'req-first', audiobook: { id: 'book-1' }, user: { id: USER } });
+
+    expect((await createRequestForUser(USER, BOOK, options)).success).toBe(true);
+    expect(createdData().explicit).toBe(expected);
+  });
+
+  it.each(['failed', 'warn', 'cancelled'])('re-requesting a marked %s request without the box keeps the mark', async (status) => {
+    requests({ id: 'req-old', status, customSearchTerms: null, explicit: true });
+
+    expect((await createRequestForUser(USER, BOOK, { explicit: false })).success).toBe(true);
+    expect(createdData().explicit).toBe(true);
+  });
+
+  it('an unmarked request re-requested with the box ticked becomes marked', async () => {
+    requests({ id: 'req-old', status: 'failed', customSearchTerms: null, explicit: false });
+
+    await createRequestForUser(USER, BOOK, { explicit: true });
+
+    expect(createdData().explicit).toBe(true);
+  });
+
+  it('an automatic re-request keeps the mark', async () => {
+    requests({
+      id: 'req-old', status: 'failed', customSearchTerms: null, explicit: true,
+      createdAt: new Date(Date.now() - 3 * 86_400_000), updatedAt: new Date(Date.now() - 2 * 86_400_000), autoRerequestCount: 0,
+    });
+    prismaMock.blockedRelease.count.mockResolvedValue(0);
+
+    expect((await createRequestForUser(USER, BOOK, { automatic: true })).success).toBe(true);
+    expect(createdData().explicit).toBe(true);
+  });
+});

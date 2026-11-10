@@ -286,7 +286,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   expect.soft(ui.putTagRequester, 'the page sends tagRequester').toBe(true);
   expect.soft(ui.putStatus).toBe(200);
   expect.soft(String(ui.warningText), 'amber box: shared tag, two names').toContain(`${SHARED} is shared by "${NAME.js1}", "${NAME.js2}": neither is tagged.`);
-  expect.soft(String(ui.warningText), 'amber box: untaggable').toContain(`"${NAME.cjk}" has no letters or digits`);
+  expect.soft(String(ui.warningText), 'amber box: untaggable').toContain(`"${NAME.cjk}" can't be turned into a tag`);
   expect.soft(String(ui.warningText), 'amber box: a tag of your own, not the shared one').toContain('a tag of your own in Audiobookshelf, not the shared one');
   expect.soft(ui.overflowX, '375: no horizontal overflow').toBe(0);
   for (const [label, seen] of [['1280', ui.inView1280], ['375', ui.inView375]] as const) {

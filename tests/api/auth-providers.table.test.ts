@@ -49,7 +49,8 @@ for (const mode of ['audiobookshelf', 'plex', null] as Mode[]) {
 /** The response each combination gets, written out from the route's rules as they stood before the shared helper */
 function expected(c: Case) {
   const disabled = c.disable === 'true';
-  const common = { localLoginDisabled: disabled, allowWeakPassword: false, automationEnabled: false };
+  // explicitMarkEnabled: false here, the key being absent (#542)
+  const common = { localLoginDisabled: disabled, allowWeakPassword: false, automationEnabled: false, explicitMarkEnabled: false };
   if (c.mode !== 'audiobookshelf') {
     return {
       backendMode: 'plex',
@@ -72,6 +73,23 @@ function expected(c: Case) {
     ...common,
   };
 }
+
+describe('GET /api/auth/providers, the Explicit mark flag (#542)', () => {
+  it.each([
+    ['audiobookshelf', 'true', true],
+    ['audiobookshelf', 'false', false],
+    ['audiobookshelf', null, false],
+    ['plex', 'true', false],
+  ] as const)('mode %s, setting %s: explicitMarkEnabled %s', async (mode, value, expectedFlag) => {
+    config.values = { 'system.backend_mode': mode, 'audiobookshelf.explicit_mark_enabled': value };
+    prismaMock.user.count.mockResolvedValue(0);
+
+    const { GET } = await import('@/app/api/auth/providers/route');
+    const payload = await (await GET()).json();
+
+    expect(payload.explicitMarkEnabled).toBe(expectedFlag);
+  });
+});
 
 describe('GET /api/auth/providers, every local-login input', () => {
   beforeEach(() => {

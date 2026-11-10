@@ -132,6 +132,7 @@ export function wireLibraryDb(prismaMock: ReturnType<typeof createPrismaMock>, d
     after?.();
     return rows;
   });
+  prismaMock.request.count.mockImplementation(async (a?: Args) => db.requests.map(withRequest).filter((r) => matches(r, a?.where)).length);
   prismaMock.request.update.mockImplementation(async (a: Args) => assign(db.requests.find((r) => r.id === a.where?.id), a.data));
   prismaMock.request.updateMany.mockImplementation(async (a: Args) => {
     const rows = db.requests.filter((r) => matches(r, a.where));

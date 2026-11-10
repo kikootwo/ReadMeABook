@@ -247,6 +247,8 @@ export async function replaceAudiobook(
     data: {
       userId: requester.userId,
       approvalBypassedBy: requester.approvalBypassedBy,
+      // The mark belongs to the book's content, not the person (#542): kept whoever becomes the requester
+      explicit: existingRequest?.explicit === true,
       audiobookId: audiobook.id,
       status: 'downloading',
       type: 'audiobook',

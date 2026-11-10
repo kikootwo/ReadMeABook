@@ -145,3 +145,35 @@ describe('replaceAudiobook: who the replacement request belongs to', () => {
     expect(prismaMock.audiobook.update.mock.calls[0][0].data).not.toHaveProperty('filePath');
   });
 });
+
+describe('replaceAudiobook: the Explicit mark (#542)', () => {
+  it('a marked request keeps its mark on the replacement when the requester is kept', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(oldRequest({ explicit: true }));
+
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+
+    expect(created()).toMatchObject({ userId: 'user-1', explicit: true });
+  });
+
+  it('a marked request keeps its mark when the admin becomes the requester', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(oldRequest({ status: 'cancelled', explicit: true }));
+
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+
+    expect(created()).toMatchObject({ userId: 'admin-1', explicit: true });
+  });
+
+  it('an unmarked request, or no request, gives an unmarked replacement', async () => {
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+    expect(created().explicit).toBe(false);
+
+    vi.clearAllMocks();
+    prismaMock.reportedIssue.findUnique.mockResolvedValue({ id: 'issue-1', status: 'open', audiobook });
+    prismaMock.request.findFirst.mockResolvedValue(null);
+    prismaMock.request.findMany.mockResolvedValue([]);
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook, user: { id: 'admin-1' } });
+    replaceContentMock.mockResolvedValue(null);
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+    expect(created().explicit).toBe(false);
+  });
+});

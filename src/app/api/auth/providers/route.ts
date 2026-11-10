@@ -8,6 +8,7 @@ import { ConfigurationService } from '@/lib/services/config.service';
 import { prisma } from '@/lib/db';
 import { isLocalLoginEnabled } from '@/lib/services/auth/local-account';
 import { RMABLogger } from '@/lib/utils/logger';
+import { EXPLICIT_MARK_SETTING_KEY } from '@/lib/constants/explicit-mark';
 
 const logger = RMABLogger.create('API.Auth.Providers');
 
@@ -49,6 +50,8 @@ export async function GET() {
 
       return NextResponse.json({
         backendMode: 'audiobookshelf',
+        // The pages show the Explicit mark only when this is true (#542; off by default)
+        explicitMarkEnabled: (await configService.get(EXPLICIT_MARK_SETTING_KEY)) === 'true',
         providers,
         registrationEnabled: localLoginEnabled && registrationEnabled,
         hasLocalUsers,
@@ -69,6 +72,7 @@ export async function GET() {
 
       return NextResponse.json({
         backendMode: 'plex',
+        explicitMarkEnabled: false, // Audiobookshelf only (#542)
         providers: ['plex'],
         registrationEnabled: false,
         hasLocalUsers,

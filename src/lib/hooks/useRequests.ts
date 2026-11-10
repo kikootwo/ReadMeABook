@@ -21,6 +21,7 @@ export interface Request {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  explicit?: boolean; // #542
   audiobook: {
     id: string;
     title: string;
@@ -175,7 +176,7 @@ export function useCreateRequest() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const createRequest = async (audiobook: Audiobook, options?: { skipAutoSearch?: boolean }) => {
+  const createRequest = async (audiobook: Audiobook, options?: { skipAutoSearch?: boolean; explicit?: boolean }) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
     }
@@ -190,7 +191,7 @@ export function useCreateRequest() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ audiobook }),
+        body: JSON.stringify({ audiobook, ...(options?.explicit ? { explicit: true } : {}) }),
       });
 
       const data = await response.json();
@@ -447,7 +448,7 @@ export function useRequestWithTorrent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const requestWithTorrent = async (audiobook: Audiobook, torrent: any) => {
+  const requestWithTorrent = async (audiobook: Audiobook, torrent: any, options?: { explicit?: boolean }) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
     }
@@ -461,7 +462,7 @@ export function useRequestWithTorrent() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ audiobook, torrent }),
+        body: JSON.stringify({ audiobook, torrent, ...(options?.explicit ? { explicit: true } : {}) }),
       });
 
       const data = await response.json();
