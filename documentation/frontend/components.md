@@ -29,14 +29,15 @@ src/components/
 
 **Audiobooks**
 - **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal. Shows "Requested by [username]" when someone else has requested the book, "Requested" when current user has requested it
-- **AudiobookGrid** - Responsive grid (1/2/3/4 cols)
+- **BookCover** ✅ - `src/components/audiobooks/BookCover.tsx`: cover image (placeholder on error, own state), aspect (square covers pref), status dot (`tone`: emerald/amber pulse/blue/red; ring for emerald/amber; hides on hover unless `dotHidesOnHover=false`), `overlay` slot (before the dot) and `children` (badges, after). Used by AudiobookCard (DOM pinned by `tests/components/audiobooks/AudiobookCard.render-equality.test.tsx`) and LibraryCard
+- **AudiobookGrid** - Responsive grid (1/2/3/4 cols); exports `getGridClasses(cardSize)` and `SkeletonCard` (reused by the Library grid)
 - **SeriesSearchError** ✅ - `src/components/series/SeriesSearchError.tsx`: `/series` page panel in place of the grid when a search fails with no results to show (`error && !isLoading && !hasData`). `role="alert"`; 502 → "Couldn't get results from Audible" + "Audible didn't return series results. Try again in a moment.", other errors → "Series search failed"; Try again button (≥44 px) reruns the search, and focus returns to it after a failed retry (`focusRetry`, once per click; `onRetryFocused` clears it, and so does editing the query, so a cached error never pulls focus from the search box). See [integrations/audible-series-search.md](../integrations/audible-series-search.md)
 - **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable. Scroll area (`flex flex-col`) holds a `flex flex-col min-h-0` content column; bottom padding is an `after:` spacer so it survives when the column is shrunk. Summary rendered by **BookSummary**
 - **BookSummary** ✅ - `src/components/audiobooks/BookSummary.tsx`. Summary h3 + capped scroll box, returned as a fragment (both are flex items of the modal content column). Wrapper owns the cap via `--summary-cap`: 38dvh by default, 15rem at `[@media(min-width:640px)_and_(min-height:500px)]`; `max-h-(--summary-cap)`. Phones and landscape phones (below that query): `shrink-0`, fixed 38dvh box, sheet scrolls. At/above it: box absorbs leftover height: wrapper `shrink basis-[content] h-24` → height between min(6rem, natural) and 15rem (CSS only: auto min size = min(content, specified h-24)); 1440x900 default modal has 0 outer overflow. Text over the cap by ≤12px: inline `maxHeight: calc(var(--summary-cap) + 12px)` (shown whole; decided against the cap, not the current height, so no flip-flop). Overflowing only: `overflow-y-auto` (else `overflow-y-hidden`), `role=region`, `aria-labelledby` heading ("Summary"), `tabIndex=0`, bottom fade `h-6` + "more" chevron button while more text below, top fade `h-4` once scrolled; fades and chevron inset by scrollbar width. Chevron: `type=button tabIndex=-1 aria-hidden` (pointer only; keyboard/SR use the region), `absolute -bottom-2` (disc top = bottom fade top, so it only covers faded text; hangs 8px below the box, inside the next section mt-6), `right: scrollbarWidth + 4`, click → `scrollBy(max(clientHeight - 40, 24))` (40 = both fades, so the cut-off line lands clear of the top fade), smooth unless reduced motion; mousedown does not take focus. Focused box that stops overflowing keeps region/tab stop until blur (focus never drops to body). Focus ring `focus-visible:outline-offset-4`. Short text: natural height, no region/tab stop/fades/chevron. `overscroll-y-auto` on every pointer (swipe/wheel at the end chains to the modal; modal scroll area is `overscroll-contain` + body lock, so the page never moves). `<p>` is `whitespace-pre-wrap break-words`, box `overflow-x-hidden`. Modal passes `description.trim()` (computed once); whitespace-only → no section
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author (a followed request: the library's edition from the API, #325a; the details modal keeps `audibleAsin`), status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search). When status=`awaiting_release` and `releaseDate` is set, shows "Releases &lt;Mon DD, YYYY&gt;" next to the status badge (UTC-formatted)
-- **StatusBadge** - Color-coded status (pending=yellow, awaiting_search=yellow, searching=blue, downloading=purple, downloaded=green, processing=orange, awaiting_import=orange, available=green, completed=green, failed=red, warn=orange, cancelled=gray, awaiting_approval=yellow, awaiting_release=teal "Awaiting Release", denied=red). Shows "Initializing..." when downloading with 0% progress (fetching torrent info), "Downloading" when progress > 0%
+- **StatusBadge** - Exports `statusLabel(status, progress?)` (the badge text, also used by Library cards). Color-coded status (pending=yellow, awaiting_search=yellow, searching=blue, downloading=purple, downloaded=green, processing=orange, awaiting_import=orange, available=green, completed=green, failed=red, warn=orange, cancelled=gray, awaiting_approval=yellow, awaiting_release=teal "Awaiting Release", denied=red). Shows "Initializing..." when downloading with 0% progress (fetching torrent info), "Downloading" when progress > 0%
 - **ProgressBar** - Animated fill with percentage
 - **InteractiveTorrentSearchModal** ✅ - Responsive table of ranked torrent results, uses ConfirmModal for downloads, hides columns on smaller screens (size on mobile, seeds on tablet, indexer on desktop). Titles render verbatim; bracketed tags (e.g. `[German]`, `[Unabridged]`) parsed via `extractTitleTags` render as slate chips in the metadata row (de-duped vs `displayFormat`); an explicit chevron-disclosure button toggles per-`guid` expand only when the title is truncated (via `useIsTruncated`), state resets on close
 - Active indicator: "Setting up..." with spinner when progress = 0%, "Active" with pulsing dot when progress > 0%
@@ -53,6 +54,9 @@ src/components/
 - **ChangePasswordModal** ✅ - Password change form for local users. Three fields (current, new, confirm), real-time validation, success/error states, auto-closes on success. Only accessible to users with `authProvider='local'`
 - **Pagination** ✅ - Traditional page navigation with prev/next buttons, smart ellipsis (shows 1...4 5 6...10)
 - **StickyPagination** ✅ - Minimal floating pill at bottom center with prev/next arrows, quick jump input, section label. Shows/hides based on section visibility (IntersectionObserver). Rounded-full design, backdrop blur, subtle shadow, auto-scroll on page change
+
+**Library** (`src/components/library/`, see [features/library-view.md](../features/library-view.md#page-library))
+- **LibraryView** (page body: query, list, detail snapshot), **LibraryStats**, **LibraryToolbar**, **ActiveChips**, **FacetList**, **FilterSheet**, **LibraryGrid** (author runs), **LibraryCard**, **LibraryEmptyState** (+ ScanNowButton, NotConfiguredNotice, LoadErrorBar), **LibraryDialog** (portal dialog shell, `z-[45]`, child-dialog pause), **LibraryDetail**, **LibraryActions**, **LibraryHistory**; pure helpers `card-display.ts`, `library-actions.ts`
 
 **Auth**
 - **ProtectedRoute** ✅ - Auth check, loading state, redirects, admin role support
@@ -84,6 +88,8 @@ src/components/
 - Rounded-full design with backdrop blur and subtle shadow
 - Responsive grid layouts (1/2/3/4 cols)
 - Enhanced CTA section with gradient background (blue-to-indigo)
+
+**Library Page** (`/library`) - every library book and every request, cover grid, filters, author groups, detail with actions; see [features/library-view.md](../features/library-view.md#page-library)
 
 **Requests Page** (`/requests`)
 - Filter tabs: All, Active, Waiting, Completed, Failed, Cancelled
@@ -204,6 +210,9 @@ interface UnifiedPaginationProps {
 - **useAudiobookDetails** ✅ - `{audiobook, isLoading, error}` - Fetches individual audiobook by ASIN
 - **useRequest** - `{createRequest, cancelRequest, isLoading}`
 - **useThemeChoice** ✅ - `ThemeChoice` applied to `<html>` (`'system' | 'light' | 'dark'`), live; see [Theme Switch](#theme-switch)
+- **useLibraryQuery** ✅ - `/library` URL state: `{query, input, setInput, toggleStatus/Source/RequestedBy, setRequestedBy, setSort, setGroup, clearFacet, clearSearch, clearAll}`; `parseLibraryQuery`, `libraryQueryString`
+- **useLibrary** ✅ - `/library` list (`useSWRInfinite`) + live overlay + settle revalidation; `libraryListKey`, `applyLive`, `LIVE_KEY`
+- **useLibraryRequestDetail** ✅ - request history for the Library detail (whitelisted by `pickRequestHistory`), polled only while live
 - **useSeriesSearch** ✅ - `{series, isLoading, hasData, error, retry}`: trimmed query (no request when blank), no automatic retry on error, `error.status` from `fetchJSON`, `retry` = `mutate()`
 
 ## Styling

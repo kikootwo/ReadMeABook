@@ -125,7 +125,7 @@
 - **Home page sections (per-user, configurable)** → [features/home-sections.md](features/home-sections.md)
 
 ## Library View
-- **GET /api/library (list + live mode), merge rule, gating, filters/facets, row snapshot and memo caches** (the /library page lands later) → [features/library-view.md](features/library-view.md)
+- **Library page (/library) and GET /api/library (list + live mode), merge rule, gating, filters/facets, row snapshot and memo caches** → [features/library-view.md](features/library-view.md)
 
 ## BookDate (AI Recommendations)
 - **AI-powered recommendations, swipe interface** → [features/bookdate.md](features/bookdate.md)

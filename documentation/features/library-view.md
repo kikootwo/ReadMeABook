@@ -1,6 +1,6 @@
 # Library View
 
-**Status:** ⏳ In Progress | API done (`GET /api/library`, list + live mode); the `/library` page lands in a later PR (#177)
+**Status:** ✅ Implemented | `GET /api/library` (list + live mode) and the `/library` page (#177)
 
 ## Overview
 One list of everything in the configured Plex/Audiobookshelf library plus every audiobook requested through RMAB, each book shown once, with filters, facets, search, sort, author groups and a cheap live-poll mode. Read-only: no new capability for any user.
@@ -109,11 +109,34 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 - `SEARCHABLE_STATUSES` (manual-search route, admin dropdown), `EBOOK_FETCHABLE_STATUSES` (fetch-ebook route, admin dropdown), live sets + window.
 - `ebookSourcesEnabled()` (`src/lib/services/ebook-sources.ts`): one rule for `viewer.canFetchEbook`, the ebook-status route, the admin fetch-ebook route (`requests/[id]/fetch-ebook`) and find-missing-ebooks (legacy `ebook_sidecar_enabled` fallback). Same answer as the old direct reads for every value the settings page writes (`true`/`false`). Reads through the config service, which answers null on a database error or for an empty value; null on the Anna's Archive key falls back to the legacy key, otherwise a failed read counts as off. `audiobooks/[asin]/fetch-ebook` keeps its own copy of the rule (unchanged).
 
+## Page (`/library`)
+- **Files:** `src/app/library/page.tsx` (Suspense > ProtectedRoute > ToastProvider > Header + `LibraryView`); components in `src/components/library/`; hooks `src/lib/hooks/useLibraryQuery.ts`, `useLibrary.ts`, `useLibraryRequestDetail.ts`. Cover art: `src/components/audiobooks/BookCover.tsx` (shared with `AudiobookCard`).
+- **Layout:** stats header (h1 "Library", Live pill while live polling runs, 4 tiles), search + sort + Group None/Author toolbar, filter rail (`aside`, ≥1024 px) or Filters bottom sheet (`FilterSheet`, below 1024), active chips + Clear all, cover grid (`getGridClasses` + card size pref), Load more (60 per page). Grouped: one header per author run (split across pages → one header), sort select shows "Author A to Z" and is disabled.
+- **URL** (`router.replace`, `scroll:false`, never push; fixed order, defaults left out): `q` (300 ms debounce, max 200), `status`, `source`, `requestedBy` (uuids, max 50; ids the facets do not list are dropped), `sort`, `group`. Invalid values are dropped on read, not sent. A URL the page did not write (header Library link while on `?q=x`) is adopted. **Clear all** clears search, filters and the Hide available pref; sort and group stay.
+- **Prefs:** waits for `PreferencesContext.hydrated` before the first fetch, so a saved `hideAvailable` never costs a default-key fetch. `hideAvailable` is sent as `hideAvailable=true`.
+- **List (`useSWRInfinite`):** key `libraryListKey(query, hideAvailable)`; `revalidateFirstPage:false`, focus/reconnect off, `keepPreviousData`. Mount with a cached key → `mutate()` (returning to a cached filter or page reloads). `StaleCursor`/`BadCursor` → back to page 1. 4xx no retry; 5xx up to 2 retries with backoff. Previous data shown while a new key loads (`lagging`); a failed new key keeps the old grid with an error bar.
+- **Live overlay:** `useSWR('/api/library?live=1')` only after the first page; `refreshInterval` = response `refreshMs` (0 stops it), focus revalidates. Live progress/status applied over loaded items (`applyLive`). **Settle:** a live id leaving, or a status-group move (once per id:status), schedules one list revalidation after 1 s + 0-1 s jitter, coalesced.
+- **Actions** (`library-actions.ts`, a UI hint from the API's `viewer` + `request.isMine`; every endpoint runs its own check):
+
+| Action | Shown when | Endpoint |
+|---|---|---|
+| Search again | admin, status in `SEARCHABLE_STATUSES` | POST `/api/requests/{id}/manual-search` |
+| Interactive search | admin or own request, status in `ADVANCEABLE_FROM_INTERACTIVE_SEARCH`, user's `permissions.interactiveSearch` not false | `InteractiveTorrentSearchModal` (enabled once `customSearchTerms` is loaded) |
+| Fetch ebook | admin, `viewer.canFetchEbook`, status in `EBOOK_FETCHABLE_STATUSES` | POST `/api/requests/{id}/fetch-ebook` |
+| View request | `canSeeRequestDetails` | admin `/admin?search=<title>&type=audiobook`, requester `/requests` |
+
+- After an action: toast + bound `mutate()` (every loaded page refetches) + live revalidate. Refused action → route `error`/`message` as an error toast.
+- **Detail (`LibraryDetail` in `LibraryDialog`):** keeps a snapshot of the opened book, so it stays open when an action or refresh moves the book out of the current filter; closes only by the viewer (Esc, backdrop, close button). Rows: "In your library" (Path row only when the API sent `path`; dash when null), Files (download size), Request history and Actions only when `canSeeRequestDetails`. History from GET `/api/requests/{id}` through a whitelist (`pickRequestHistory`: customSearchTerms, requestedAt, completedAt, download indexer/release/client/times, jobs); polled every 5 s only while the book is live. Other users see public fields only and no request detail call.
+- **Dialog:** portal, backdrop `z-[45]` (above header z-40, below toasts z-50), focus in / Tab trap / focus back to opener, body scroll lock; Esc and the trap pause while a child dialog (interactive search) is open, and the lock is set again when it closes.
+- **States:** total 0 → "Nothing here yet" (Find a book; admin: Scan library now = trigger the scheduled library scan job, falls back to a link to `/admin/jobs`); matched 0 → "No books match" + Clear search and filters; first load failed → error + Retry; `libraryConfigured:false` → admin-only notice linking `/admin/settings?tab=library`.
+- **Header:** Library link before My Requests (signed in). Desktop nav from 1024 px (`lg`), hamburger menu below; username shown from 1280 px (`xl`), so an admin header never overflows at 1024.
+
 ## Known limits
 - Format is never shown (`audiobooks.file_format` is overwritten by the ebook organize); no library path; ASIN drift (#284) can show a book twice; series only on RMAB books; one active library.
 - Load 1 and Load 2 are separate reads (no shared transaction): a scan landing between them, or a library change still being rebuilt, can show a just-delivered book as request-only (status `available`) until the rebuild lands.
 - Only the first full call for a library (process start, library switch) waits for the row load and prepare: 0.7-1.0 s at 10k rows on 2 CPUs (`177-library-perf`). Every later row change is rebuilt in the background while callers get the previous snapshot. A request change makes the next call reload the requests and merge again (the perf window ticks request progress every 5 s, so its full-mode figures include these re-merges).
-- No rate limit: a signed-in client looping on distinct queries still costs one filter/sort pass over every entry per new query key, and every full call runs the two version queries, enrichment and serialization.
+- No rate limit: a signed-in client looping on distinct queries still costs one filter/sort pass over every entry per new query key, and every full call runs the requests version query, enrichment and serialization (the rows version read is shared by concurrent calls).
+- Page: request history shows only stored steps (jobs, latest download); no format row; the login redirect drops the `/library` query string.
 - Budgets (`177-library-perf`, 10k rows): met on a quiet 2-CPU host; a host busy with other work (transcodes, other containers) runs slower, and live p95 and event-loop lag grow faster than the slowdown. The spec voids its own run when its idle and stress figures show a busy host.
 
 ## Related: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md), [backend/database.md](../backend/database.md), [integrations/ebook-sidecar.md](../integrations/ebook-sidecar.md)
