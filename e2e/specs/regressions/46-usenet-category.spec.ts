@@ -6,7 +6,7 @@
  *   1  custom new `AudioBooks-E2E` via the API: stored with ownedCategory; two grabs (phm, martian) send one
  *      set_config in total (SABnzbd's array category list read by name, names compared in any case); both import
  *   2  pre-existing `books` at `other-app` (artemis), its job folder already holding another app's file;
- *      PUT `Books`: stored `books`, no ownedCategory, no set_config for it; the job lands in /downloads/other-app;
+ *      PUT `Books`: stored `books` (ownedCategory still the earlier `audiobooks-e2e`), no set_config for it; the job lands in /downloads/other-app;
  *      import with "remove after processing" on removes the imported files only: the other app's file and its
  *      folder stay; `books` still points at other-app
  *   3  restore `readmeabook`
@@ -64,7 +64,7 @@ test('2 pre-existing category: not re-pathed; cleanup keeps the other app files'
   const since = await lastSeq();
   const put = await putCategory(rmab, SAB, 'Books');
   c.save('put.json', put);
-  c.check(`stored books (the client's name), no ownedCategory (${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'books' && put.stored?.ownedCategory === undefined, 'control');
+  c.check(`stored books (the client's name), not ReadMeABook's own (${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'books' && put.stored?.ownedCategory === 'audiobooks-e2e', 'control');
 
   await loadScenario('artemis', 'usenet', 'artemis-mp3');
   c.save('listing-before.txt', listing('/downloads/other-app'));
@@ -93,7 +93,7 @@ test('3 restore readmeabook', async () => {
   const rmab = await Rmab.loginAdmin();
   const put = await putCategory(rmab, SAB, 'readmeabook');
   c.save('put.json', put);
-  c.check(`restored (${put.status}, ${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'readmeabook' && put.stored?.ownedCategory === undefined, 'control');
+  c.check(`restored (${put.status}, ${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'readmeabook', 'control');
   await setRemoveAfterProcessing(rmab, 2, false);
   // The seeded category must not outlive the spec (last test: a reset also drops client sessions)
   await fakeArr.reset();
