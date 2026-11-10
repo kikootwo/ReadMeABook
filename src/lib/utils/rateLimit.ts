@@ -261,11 +261,17 @@ export function reserve(requests: ReadonlyArray<{ namespace: RateLimitNamespace;
   return { ok: true, reservations };
 }
 
-/** Give back reservations. Only touches a bucket still in the window it was reserved in. */
+/**
+ * Give back reservations. Only touches a bucket still in the window it was reserved in,
+ * live or dropped since (its kept count).
+ */
 export function refund(reservations: ReadonlyArray<Reservation>): void {
   for (const { namespace, key, resetAt } of reservations) {
-    const bucket = stateFor(namespace).buckets.get(key);
-    if (bucket && bucket.resetAt === resetAt && bucket.count > 0) bucket.count -= 1;
+    const state = stateFor(namespace);
+    const bucket = state.buckets.get(key) ?? state.dropped.get(key);
+    if (!bucket || bucket.resetAt !== resetAt || bucket.count <= 0) continue;
+    bucket.count -= 1;
+    if (bucket.count === 0 && state.dropped.get(key) === bucket) state.dropped.delete(key);
   }
 }
 

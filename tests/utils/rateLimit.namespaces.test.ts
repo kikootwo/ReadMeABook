@@ -229,6 +229,35 @@ describe('rate limiter namespaces', () => {
       expect(one('signin-known-browser', 'back').ok).toBe(true);
       expect(_getBucketUsage('signin-known-browser', 'back')).toBe(1);
     });
+
+    it('refunds a reservation whose entry was dropped before the refund', () => {
+      const { maxEntries } = RATE_LIMITS['signin-known-browser'];
+      for (let n = 0; n < 3; n += 1) one('signin-known-browser', 'back');
+      const last = one('signin-known-browser', 'back');
+      fill('signin-known-browser', maxEntries - 1, 5);
+      expect(one('signin-known-browser', 'new').ok).toBe(true);
+      expect(_getBucketUsage('signin-known-browser', 'back')).toBe(0);
+
+      if (!last.ok) throw new Error('reserve refused');
+      refund(last.reservations);
+
+      // The kept count was 4, the refund made it 3, and coming back adds 1
+      expect(one('signin-known-browser', 'back').ok).toBe(true);
+      expect(_getBucketUsage('signin-known-browser', 'back')).toBe(4);
+    });
+
+    it('holds an account key to its limit when the table is filled to half limit and the key alternates with new keys', () => {
+      const { limit, maxEntries } = RATE_LIMITS['signin-account'];
+      fill('signin-account', maxEntries - 1, limit / 2);
+
+      let accepted = 0;
+      for (let round = 0; round < 50; round += 1) {
+        for (let n = 0; n < 4; n += 1) if (one('signin-account', 'account').ok) accepted += 1;
+        one('signin-account', `new-${round}`);
+      }
+
+      expect(accepted).toBe(limit);
+    });
   });
 
   it('shares counts between two copies of the module', async () => {
