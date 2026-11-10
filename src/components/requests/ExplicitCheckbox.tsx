@@ -40,6 +40,8 @@ export function ExplicitCheckbox({ checked, onChange, isAdmin, busy = false, loc
   const reasonId = `${id}-reason`;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const locked = lockedProp ?? (checked && !isAdmin);
+  // Mid-save: a wait cursor and a lighter border. Idle border is 3:1 or more on white and dark
+  const waiting = busy && !locked;
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const next = event.target.checked;
@@ -60,7 +62,7 @@ export function ExplicitCheckbox({ checked, onChange, isAdmin, busy = false, loc
       <label
         htmlFor={id}
         className={`inline-flex min-h-[44px] flex-wrap items-center gap-x-2 gap-y-0.5 text-sm ${
-          locked || busy ? 'cursor-default' : 'cursor-pointer'
+          waiting ? 'cursor-wait' : locked ? 'cursor-default' : 'cursor-pointer'
         } text-gray-700 dark:text-gray-300`}
       >
         {/* Drawn by hand so a locked (disabled) mark keeps its rose tick instead of the native grey */}
@@ -72,7 +74,9 @@ export function ExplicitCheckbox({ checked, onChange, isAdmin, busy = false, loc
             disabled={locked || busy}
             onChange={handleChange}
             aria-describedby={locked ? reasonId : undefined}
-            className="peer h-4 w-4 appearance-none rounded border border-gray-400 bg-white checked:border-rose-600 checked:bg-rose-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 dark:border-gray-500 dark:bg-gray-800 dark:checked:border-rose-500 dark:checked:bg-rose-500"
+            className={`peer h-4 w-4 appearance-none rounded border bg-white checked:border-rose-600 checked:bg-rose-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 dark:bg-gray-800 dark:checked:border-rose-500 dark:checked:bg-rose-500 ${
+              waiting ? 'cursor-wait border-gray-300 dark:border-gray-600' : 'border-gray-500 dark:border-gray-400'
+            }`}
           />
           <svg aria-hidden="true" viewBox="0 0 16 16" className="pointer-events-none absolute inset-0 hidden h-4 w-4 text-white peer-checked:block">
             <path d="M4 8.5l2.5 2.5L12 5.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />

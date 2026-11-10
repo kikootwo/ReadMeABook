@@ -110,6 +110,28 @@ describe('ExplicitCheckbox', () => {
     expect(screen.queryByText(EXPLICIT_LOCKED_REASON)).toBeNull();
   });
 
+  const borderShade = (cls: string, dark: boolean) =>
+    Number(cls.match(new RegExp(`(?:^|\\s)${dark ? 'dark:' : ''}border-gray-(\\d+)(?:\\s|$)`))?.[1]);
+
+  it('the unticked box border reads at 3:1 or more: gray-500 or darker on white, gray-400 or lighter in dark mode', () => {
+    render(<ExplicitCheckbox checked={false} onChange={vi.fn()} isAdmin={false} />);
+
+    expect(borderShade(box().className, false)).toBeGreaterThanOrEqual(500);
+    expect(borderShade(box().className, true)).toBeLessThanOrEqual(400);
+  });
+
+  it('a box mid-save shows it (a wait cursor and a lighter border); a locked box does not', () => {
+    const { rerender } = render(<ExplicitCheckbox checked={false} onChange={vi.fn()} isAdmin={true} busy={true} />);
+
+    expect(box().className).toMatch(/(^|\s)cursor-wait(\s|$)/);
+    expect(box().closest('label')?.className).toMatch(/(^|\s)cursor-wait(\s|$)/);
+    expect(borderShade(box().className, false)).toBeLessThan(500);
+
+    rerender(<ExplicitCheckbox checked={true} onChange={vi.fn()} isAdmin={false} busy={true} />);
+    expect(box().className).not.toMatch(/cursor-wait/);
+    expect(box().closest('label')?.className).not.toMatch(/cursor-wait/);
+  });
+
   it('has a 44px touch target', () => {
     render(<ExplicitCheckbox checked={false} onChange={vi.fn()} isAdmin={false} />);
 
