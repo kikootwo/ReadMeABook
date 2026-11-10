@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 import { ConfigurationService } from '@/lib/services/config.service';
 import { prisma } from '@/lib/db';
+import { isLocalLoginEnabled } from '@/lib/services/auth/local-account';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Auth.Providers');
@@ -32,6 +33,9 @@ export async function GET() {
       const registrationEnabled = (await configService.get('auth.registration_enabled')) === 'true';
       const oidcProviderName = await configService.get('oidc.provider_name') || 'SSO';
 
+      // Audiobookshelf mode and DISABLE_LOCAL_LOGIN not 'true': the rule the Users page's Add User follows too
+      const localLoginEnabled = await isLocalLoginEnabled(backendMode);
+
       // Check if any local users exist in database (for login form visibility); soft-deleted users can't sign in
       const hasLocalUsers = (await prisma.user.count({
         where: { authProvider: 'local', deletedAt: null }
@@ -39,14 +43,14 @@ export async function GET() {
 
       const providers: string[] = [];
       if (oidcEnabled) providers.push('oidc');
-      // Add 'local' provider if not disabled and (users exist OR registration is enabled)
+      // Add 'local' provider if local login is enabled and (users exist OR registration is enabled)
       // Registration needs local auth form to be shown even when no users exist yet
-      if ((hasLocalUsers || registrationEnabled) && !localLoginDisabled) providers.push('local');
+      if (localLoginEnabled && (hasLocalUsers || registrationEnabled)) providers.push('local');
 
       return NextResponse.json({
         backendMode: 'audiobookshelf',
         providers,
-        registrationEnabled: !localLoginDisabled && registrationEnabled,
+        registrationEnabled: localLoginEnabled && registrationEnabled,
         hasLocalUsers,
         oidcProviderName: oidcEnabled ? oidcProviderName : null,
         localLoginDisabled,

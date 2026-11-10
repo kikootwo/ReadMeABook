@@ -18,6 +18,7 @@ import { getEncryptionService } from '@/lib/services/encryption.service';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getRegistrationRefusal, REJECTED_ACCOUNT_ERROR } from './local-account-status';
+import { checkLocalCredentials, createLocalAccount } from './local-account';
 
 const logger = RMABLogger.create('LocalAuth');
 
@@ -148,19 +149,11 @@ export class LocalAuthProvider implements IAuthProvider {
   async register(params: RegisterParams): Promise<AuthResult> {
     try {
       const { username, password } = params;
-      const normalizedUsername = username?.trim().toLowerCase();
 
-      // Validate
-      if (!normalizedUsername || normalizedUsername.length < 3) {
-        return { success: false, error: 'Username must be at least 3 characters' };
-      }
-
-      const allowWeakPassword = process.env.ALLOW_WEAK_PASSWORD === 'true';
-      if (!password) {
-        return { success: false, error: 'Password is required' };
-      }
-      if (!allowWeakPassword && password.length < 8) {
-        return { success: false, error: 'Password must be at least 8 characters' };
+      // Username and password rules come before the registration setting
+      const check = checkLocalCredentials(username, password);
+      if (!check.ok) {
+        return { success: false, error: check.error };
       }
 
       // Check if registration is enabled
@@ -169,47 +162,27 @@ export class LocalAuthProvider implements IAuthProvider {
         return { success: false, error: 'Registration is disabled' };
       }
 
-      // Check username uniqueness (only among non-deleted users)
-      const existing = await prisma.user.findFirst({
-        where: {
-          plexUsername: normalizedUsername,
-          authProvider: 'local',
-          deletedAt: null, // Allow reuse of usernames from deleted accounts
-        },
-      });
-
-      if (existing) {
-        return { success: false, error: 'Username already taken' };
-      }
-
-      // Hash password
-      const passwordHash = await bcrypt.hash(password, 10);
-
-      // Encrypt the hash before storing
-      const encryptedHash = this.encryptionService.encrypt(passwordHash);
-
       // Determine registration status
       const requireApproval = (await this.configService.get('auth.require_admin_approval')) === 'true';
-      const registrationStatus = requireApproval ? 'pending_approval' : 'approved';
 
       // Check if first user (make admin)
       // Soft-deleted users count on purpose: a deleted account must never make the next sign-up an admin
       const userCount = await prisma.user.count();
       const isFirstUser = userCount === 0;
 
-      // Create user
-      const user = await prisma.user.create({
-        data: {
-          plexId: `local-${normalizedUsername}`,
-          plexUsername: normalizedUsername,
-          authToken: encryptedHash,
-          authProvider: 'local',
+      const created = await createLocalAccount(
+        { username, password },
+        {
           role: isFirstUser ? 'admin' : 'user',
           isSetupAdmin: isFirstUser,
-          registrationStatus: isFirstUser ? 'approved' : registrationStatus,
+          registrationStatus: isFirstUser || !requireApproval ? 'approved' : 'pending_approval',
           lastLoginAt: new Date(),
-        },
-      });
+        }
+      );
+      if (!created.ok) {
+        return { success: false, error: created.error };
+      }
+      const { user } = created;
 
       // If requires approval and not first user, return pending status
       if (requireApproval && !isFirstUser) {
