@@ -111,14 +111,14 @@ describe('rate limiter namespaces', () => {
     expect(_getBucketUsage('signin-account', 'acct')).toBe(2);
   });
 
-  it('keeps a capped entry through a flood of new keys', () => {
+  it('keeps a capped entry while many new keys arrive', () => {
     const { maxEntries } = RATE_LIMITS['signin-account'];
     for (let i = 0; i < 10; i += 1) one('signin-account', 'capped');
     for (let i = 0; i < 4; i += 1) one('signin-account', 'half'); // 4 of 10: under half
     for (let i = 0; i < 5; i += 1) one('signin-account', 'at-half');
 
     for (let i = 0; i < maxEntries * 2; i += 1) {
-      expect(one('signin-account', `flood-${i}`).ok).toBe(true);
+      expect(one('signin-account', `new-${i}`).ok).toBe(true);
     }
 
     expect(_getBucketCount('signin-account')).toBe(maxEntries);
