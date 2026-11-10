@@ -59,7 +59,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - 10s delay between checks (prevents excessive logging)
 - Only logs progress at 5% intervals or first 5%
 - Auto-reschedules until complete/failed
-- **Client reports `failed`** (#332, `client-failure.ts`): automatic grab + release fault → block, request `searching`, next automatic search (`clientFailures` + 1, Bull `jobId` `next-release-<historyId>`), at most 3 grabs in a row; hand-picked/ebook grabs and not-the-release's-fault failures → `failed`; an older download never changes the request. Rule table: [release-blocklist.md](../../admin-features/release-blocklist.md#next-release-after-a-client-failure-332)
+- **Client reports `failed`** (#332, `client-failure.ts`): automatic grab + release fault → block, request `searching`, next automatic search (`clientFailures` + 1, Bull `jobId` `next-release-<historyId>`), at most 3 grabs in a row; hand-picked/ebook grabs and not-the-release's-fault failures → `failed`; an older download never changes the request; a second run of the same failure (Bull rerun after a cut) changes nothing an earlier run did (`already_handled`), but queues the search when the earlier run was cut before it. Requester text carries a short reason, never the client's own text. Rule table: [release-blocklist.md](../../admin-features/release-blocklist.md#next-release-after-a-client-failure-332)
 - Every re-queue (progress, save-path wait, connection back-off) carries `clientFailures` when set (`requeueMonitor`)
 - qBittorrent finished but still outside its save path: 30 s grace (5 re-checks), then one `warn` and organize from the incomplete folder (#520, [qbittorrent.md](../../phase3/qbittorrent.md#completion--relocation-grace))
 - **Cancelled/deleted requests** (`src/lib/utils/request-stop-guard.ts`):
@@ -79,7 +79,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - No torrents found → 'awaiting_search' status (not failed)
 - Allows automatic retry via scheduled job
 - Upstream release-date gate: 4 enqueue sites (`request-creator.service`, `retry-missing-torrents.processor`, `monitor-rss-feeds.processor`, `bookdate/swipe/route`) check `shouldSkipAutoSearch` against `indexer.skip_unreleased`; gated requests are created/kept in `awaiting_release` and `addSearchJob` is not called. Manual search bypasses the gate, and so does the next-release search after a client failure (`client-failure.ts`, #332: the book was already grabbed).
-- Next-release search (`clientFailures` > 0) that finds nothing usable with every indexer search answered → `failed` "Download failed; no other release found: …" + one `request_error` (not `awaiting_search`). Every grab it queues carries `clientFailures` (`?? 0`).
+- Next-release search (`clientFailures` > 0) that finds nothing usable with every indexer search answered → `failed` "Download failed; no other release found: …" + one `request_error` (not `awaiting_search`). Every grab it queues carries `clientFailures` (`?? 0`). When it throws, or its grab (`download_torrent`) fails, on Bull's last attempt (`isLastAttempt`: the queue passes `attemptsMade` and `opts.attempts` to both processors) → one closing `request_error`.
 
 **organize_files:**
 - No audiobook files found → 'awaiting_import' status

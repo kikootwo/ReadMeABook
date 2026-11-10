@@ -174,8 +174,9 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 | Deluge | state `Error` | `message` |
 | SABnzbd | history status containing "failed" | `failMessage` |
 | NZBGet | history `FAILURE/*`, `DELETED/*`, unknown prefix | raw status first, then Par/Unpack/Delete codes |
-- The monitor hands it to `client-failure.ts`: automatic grabs move on to the next-ranked release (at most 3 in a row); storage/setup failures (`isReleaseFault()` false: full disk, permissions, missing data, unmounted path, NZBGet `DELETED/MANUAL`/`FAILURE/MOVE`, qBittorrent `missingFiles`) are never blocked. Rule: [release-blocklist.md](../admin-features/release-blocklist.md#next-release-after-a-client-failure-332)
-- Each failed attempt stays in the client (errored torrent, failed history entry); request delete removes only the newest selected download
+- The monitor hands it to `client-failure.ts`: automatic grabs move on to the next-ranked release (at most 3 in a row); storage/setup failures (`isReleaseFault()` false: full disk or quota, permissions, missing data, unmounted path or dropped share, too many open files, NZBGet `DELETED/MANUAL`/`FAILURE/MOVE`, qBittorrent `missingFiles`) are never blocked. Rule: [release-blocklist.md](../admin-features/release-blocklist.md#next-release-after-a-client-failure-332)
+- Requesters and notifications see the client's name and a short reason; `errorMessage` (raw client text, can hold server paths) goes only to the job log and the blocklist row's admin-only `reasonDetail`
+- Each failed attempt stays in the client (errored torrent, failed history entry); request delete and cancel act on the newest selected download only
 
 ### Torrent Ownership (#423)
 **Files:** `src/lib/utils/torrent-ownership.ts` (rule), `src/lib/integrations/torrent-probe.ts` (strict probe parsers)
