@@ -101,9 +101,9 @@ async function addFlow(page: Page, tag: string, mobile: boolean, username: strin
   return { headerButton: true, error, toast: (await toast.innerText()).trim(), listed: await entry.isVisible() };
 }
 
-interface Narrow { scrollWidth: number; clientWidth: number; actionsRight: number; actionRows: number }
+interface Narrow { scrollWidth: number; clientWidth: number; actionsRight: number }
 
-/** The page width against the viewport, and how far right (and on how many rows) the header actions sit */
+/** The page width against the viewport, and how far right the header actions reach */
 async function narrowHeader(page: Page, width: number): Promise<Narrow> {
   await page.goto('/admin/users');
   const button = page.getByRole('button', { name: 'Add User' });
@@ -112,12 +112,10 @@ async function narrowHeader(page: Page, width: number): Promise<Narrow> {
   if (width === 320) await snap(page, DIR, '320-dark-1-page');
   return button.evaluate((el) => {
     const row = el.parentElement as HTMLElement;
-    const tops = new Set(Array.from(row.children).map((c) => Math.round(c.getBoundingClientRect().top)));
     return {
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
       actionsRight: Math.round(row.getBoundingClientRect().right),
-      actionRows: tops.size,
     };
   });
 }
