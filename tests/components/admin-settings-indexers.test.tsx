@@ -73,6 +73,7 @@ describe('IndexersTab - Auto-load Indexers on Tab Activation', () => {
       serverUrl: '',
       apiToken: '',
       libraryId: '',
+      ebookLibraryId: '',
       triggerScanAfterImport: false,
     },
     oidc: {

@@ -53,6 +53,18 @@ export function AudiobookshelfSection({
     onValidationChange('audiobookshelf', false);
   };
 
+  // A saved ebook library missing from the loaded list (deleted, or another server) stays visible
+  const ebookLibraryUnknown =
+    !!settings.audiobookshelf.ebookLibraryId &&
+    !libraries.some((lib) => lib.id === settings.audiobookshelf.ebookLibraryId);
+
+  const handleEbookLibraryChange = (ebookLibraryId: string) => {
+    onChange({
+      ...settings,
+      audiobookshelf: { ...settings.audiobookshelf, ebookLibraryId },
+    });
+  };
+
   const handleTriggerScanChange = (triggerScanAfterImport: boolean) => {
     onChange({
       ...settings,
@@ -123,7 +135,7 @@ export function AudiobookshelfSection({
             ))}
           </select>
         ) : (
-          <div className="text-sm text-gray-500 py-2">
+          <div className="text-sm text-gray-500 dark:text-gray-400 py-2">
             Test your connection to load libraries.
           </div>
         )}
@@ -148,6 +160,46 @@ export function AudiobookshelfSection({
             </p>
           </div>
         </label>
+
+        {settings.audiobookshelf.triggerScanAfterImport && (
+          <div className="ml-7 pt-2">
+            <label
+              htmlFor={libraries.length > 0 ? 'abs-ebook-library' : undefined}
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
+              Ebook Library
+            </label>
+            {libraries.length > 0 ? (
+              <select
+                id="abs-ebook-library"
+                aria-describedby="abs-ebook-library-help"
+                value={settings.audiobookshelf.ebookLibraryId}
+                onChange={(e) => handleEbookLibraryChange(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              >
+                <option value="">Same as audiobook library</option>
+                {ebookLibraryUnknown && (
+                  <option value={settings.audiobookshelf.ebookLibraryId}>
+                    Unknown library ({settings.audiobookshelf.ebookLibraryId})
+                  </option>
+                )}
+                {libraries.map((lib) => (
+                  <option key={lib.id} value={lib.id}>
+                    {lib.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="text-sm text-gray-500 dark:text-gray-400 py-2">
+                Test your connection to load libraries.
+              </div>
+            )}
+            <p id="abs-ebook-library-help" className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              The library to scan after an ebook is imported. Choose a separate library if your ebook
+              organization template places ebooks outside your audiobook library&apos;s folders.
+            </p>
+          </div>
+        )}
       </div>
 
       <RequesterTagOption settings={settings} onChange={onChange} />

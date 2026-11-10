@@ -134,12 +134,13 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
     setLoadingStates((prev) => ({ ...prev, [requestId]: true }));
 
     try {
-      await fetchJSON(`/api/admin/requests/${requestId}/approve`, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'approve' }),
-      });
+      const result = await fetchJSON<{ awaitingRelease?: boolean; message?: string }>(
+        `/api/admin/requests/${requestId}/approve`,
+        { method: 'POST', body: JSON.stringify({ action: 'approve' }) }
+      );
 
-      toast.success('Request approved');
+      // An unreleased book waits for its release date instead of searching now
+      toast.success(result?.awaitingRelease && result.message ? result.message : 'Request approved');
 
       await mutate('/api/admin/requests/pending-approval');
       await mutate('/api/admin/requests/recent');

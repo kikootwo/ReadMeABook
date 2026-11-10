@@ -78,6 +78,13 @@ function originOf(url: string): string | null {
   return parseHttpUrl(url)?.origin ?? null;
 }
 
+/** First auth scheme word of a `WWW-Authenticate` value (`Basic realm="x"` gives `Basic`); nothing else */
+function authSchemeOf(header: unknown): string | undefined {
+  const value = Array.isArray(header) ? header[0] : header;
+  if (typeof value !== 'string') return undefined;
+  return /^\s*([A-Za-z][A-Za-z0-9._~+-]{0,31})(?=[\s,]|$)/.exec(value)?.[1];
+}
+
 /**
  * Fetch a .torrent/.nzb source URL, following up to MAX_SOURCE_REDIRECT_HOPS redirects.
  * Throws DownloadSourceError for an HTTP error status from the source.
@@ -149,11 +156,17 @@ export async function fetchDownloadSource(url: string, options: FetchSourceOptio
         currentUrl = nextUrl;
         continue;
       }
+      const onProwlarr = configuredBase !== null && originOf(currentUrl) === configuredBase.origin;
       throw new DownloadSourceError(
         `Grab failed: source returned HTTP ${status}`,
         status,
         urlForLog(currentUrl),
-        error
+        error,
+        {
+          hop: onProwlarr ? 'prowlarr' : hop > 0 ? 'redirect' : 'direct',
+          redirects: hop,
+          authScheme: authSchemeOf(error.response.headers?.['www-authenticate']),
+        }
       );
     }
 

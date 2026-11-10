@@ -48,7 +48,8 @@ Allows admins to review and approve/deny user requests before they are processed
   - If request has `selectedTorrent` → Download that specific torrent (clear `selectedTorrent` field)
   - Admin-provided and stored picks pass the same check as user picks (`guardTorrentSelection` / `guardEbookSelection`); Anna's Archive picks get links rebuilt from `md5`; an unusable admin-provided pick → 400 (request stays `awaiting_approval`); an unusable stored user pick, or an Anna's Archive pick with no links left, is cleared with a warning and approval falls back to the automatic search
   - If no `selectedTorrent` → Trigger automatic search job (status: 'pending')
-  - Send approved notification
+  - Unreleased audiobook with no usable pick + `indexer.skip_unreleased` ON → status `awaiting_release`, no search queued; `retry_missing_torrents` searches on release day (#556). Same check as request creation (`shouldWaitForRelease`, `src/lib/services/release-gate.ts`) on `Request.releaseDate`; undated, released, setting OFF or a failed setting read → search now. Ebook requests always search now (creation never holds them either)
+  - Send approved notification (once; nothing more is sent when the search later starts)
 - **Deny:** → Change status to 'denied', no further processing. A denied request stays denied for its user: `select-torrent` and `interactive-search` answer a non-admin 403 `RequestDenied` (#232)
 - **Approve** also writes `Request.approvalBypassedBy = NULL` (clears an earlier record of a completion without approval, [database.md](../backend/database.md#requests)); deny leaves it
 
@@ -193,7 +194,9 @@ Approve or deny a specific request
 - If no `selectedTorrent`:
   - Triggers automatic search job (status: 'pending')
   - Message: "Request approved and search job triggered"
-- Both send approved notification
+  - Unreleased audiobook + `indexer.skip_unreleased` ON: status `awaiting_release`, no job, `awaitingRelease: true`, message "Request approved; it will be searched on its release date (May 5, 2027)" (UTC day, en-US short); the dashboard toast shows this message
+- Unusable stored pick: `selectionDropped: <reason>`, message "The user's selected release could not be used (<reason>). <message above> instead."
+- All send approved notification
 
 **Response (approve with pre-selected torrent):**
 ```json
@@ -210,6 +213,16 @@ Approve or deny a specific request
   "success": true,
   "message": "Request approved and search job triggered",
   "request": { /* full request object with status: 'pending' */ }
+}
+```
+
+**Response (approve, unreleased book waits):**
+```json
+{
+  "success": true,
+  "message": "Request approved; it will be searched on its release date (May 5, 2027)",
+  "awaitingRelease": true,
+  "request": { /* full request object with status: 'awaiting_release' */ }
 }
 ```
 
@@ -288,7 +301,7 @@ Update user (includes autoApproveRequests field)
 - **Info modal:** `AudiobookDetailsModal` rendered with `adminActions` prop containing Approve/Search/Deny buttons, allowing admin to review full book details (cover, description, series, genres, narrator, etc.) without leaving the approval workflow
 - Auto-refreshes every 10 seconds (SWR)
 - Loading states on buttons during approval/denial
-- Success/error toast notifications
+- Success/error toast notifications ("Request approved"; for an unreleased book the API message, e.g. "Request approved; it will be searched on its release date (May 5, 2027)", and the row shows the "Awaiting Release" badge)
 - Mutates multiple caches on action: pending-approval, recent requests, metrics
 
 ### Admin Users Page (/admin/users)

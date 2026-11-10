@@ -163,10 +163,22 @@ export class DownloadSourceError extends Error {
     message: string,
     public readonly status: number | undefined,
     public readonly sourceUrl: string,
-    public readonly originalError?: unknown
+    public readonly originalError?: unknown,
+    /** Which server answered (set by the shared fetcher); never a path, query or header value */
+    public readonly failure?: SourceFetchFailure
   ) {
     super(message);
   }
+}
+
+/** The hop that returned a failed source fetch's HTTP status */
+export interface SourceFetchFailure {
+  /** prowlarr: the configured Prowlarr origin; redirect: another host after a redirect; direct: another host, no redirect */
+  hop: 'prowlarr' | 'redirect' | 'direct';
+  /** Redirects followed before the failing response */
+  redirects: number;
+  /** Scheme word of `WWW-Authenticate` (e.g. `Basic`), never the realm or parameters */
+  authScheme?: string;
 }
 
 /** HTTP source failures that may clear on their own or succeed via another indexer. */

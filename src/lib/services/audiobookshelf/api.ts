@@ -122,6 +122,11 @@ export async function searchABSItems(libraryId: string, query: string) {
  * Note: This endpoint returns plain text "OK" instead of JSON
  */
 export async function triggerABSScan(libraryId: string) {
+  // The id is a saved setting placed in the URL path: one encoded segment, never a dot segment
+  if (typeof libraryId !== 'string' || libraryId === '' || libraryId === '.' || libraryId === '..') {
+    throw new Error(`Invalid Audiobookshelf library id: "${String(libraryId)}"`);
+  }
+
   const configService = getConfigService();
   const serverUrl = await configService.get('audiobookshelf.server_url');
   const apiToken = await configService.get('audiobookshelf.api_token');
@@ -130,7 +135,7 @@ export async function triggerABSScan(libraryId: string) {
     throw new Error('Audiobookshelf not configured');
   }
 
-  const url = `${serverUrl.replace(/\/$/, '')}/api/libraries/${libraryId}/scan`;
+  const url = `${serverUrl.replace(/\/$/, '')}/api/libraries/${encodeURIComponent(libraryId)}/scan`;
 
   const response = await fetch(url, {
     method: 'POST',

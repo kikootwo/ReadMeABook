@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
         serverUrl: configMap.get('audiobookshelf.server_url') || '',
         apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),
         libraryId: configMap.get('audiobookshelf.library_id') || '',
+        ebookLibraryId: configMap.get('audiobookshelf.ebook_library_id') || '',
         triggerScanAfterImport: configMap.get('audiobookshelf.trigger_scan_after_import') === 'true',
         tagRequester: configMap.get(REQUESTER_TAG_SETTING_KEY) === 'true',
         // Computed whether or not tagging is on, so the box shows as soon as it is ticked (#232)
