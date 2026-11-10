@@ -4,6 +4,9 @@
  *
  * Run with: --offline-fixtures --overrides abs-fake-metadata (real ABS; fake Audible/Audnexus answers;
  * generated audio). Schedules off (back on at the end). Names and made-up ASINs carry this run's suffix <r>.
+ * 0. The Explicit mark setting (542-setting-leg.ts): off on the fresh stack, so no control anywhere (details
+ *    modal, My Requests, admin table and menu), explicit on create ignored, a direct PUT refused (403); the
+ *    admin turns it on in Settings (switch shots); its request Z is deleted. Legs 1-8 run with it on.
  * 1. Requester tagging OFF (the default). eve<r> (local, auto-approve) opens book A (fixture phm) from
  *    Search (search and details answers replayed in the browser: the proxy refuses RMAB's catalog calls):
  *    the Explicit row and its confirm at 375 dark; at 1280 light the tick asks first (confirm shot), then
@@ -39,6 +42,7 @@ import { dbNow, psql, sqlStr } from './242-helpers';
 import { disableSchedules, FAKE_PROXY, printenv, waitStartupSettled } from './284-helpers';
 import { absItemFor, backfillAfter, clearEarlierRun, importGenerated, madeUpBook, requestStatus, runJob, setAudibleTags, setTagging, waitSettled } from './232-tag-helpers';
 import { absApiKey, absUser, browse, itemState, putExplicit, readStatus, registerSession, setAbsKey, userPermissions } from './542-helpers';
+import { expectSettingLeg, setExplicitMark, settingLeg } from './542-setting-leg';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 
@@ -81,6 +85,7 @@ test.afterAll(async () => {
   writeEvidence(`${DIR}/cleanup.json`, { keyRowRestored: !!originalKeyRow && psql(KEY_ROW) === originalKeyRow, absKeysLeft: (await leftKeys(abs)).length });
   for (const id of disabledJobs.splice(0)) await admin.raw('PUT', `/api/admin/jobs/${id}`, { enabled: true });
   await setTagging(admin, false).catch(() => undefined);
+  await setExplicitMark(admin, false).catch(() => undefined);
   if (phmAsin) await setAudibleTags(phmAsin, []).catch(() => undefined);
 });
 
@@ -108,11 +113,9 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
   const eve = await registerSession(admin, `eve${RUN}`);
   writeEvidence(`${DIR}/step0-run.json`, { run: RUN, A: A.asin, B: B.asin, C: C.asin, eve: eve.name, clearedFromEarlierRun: cleared });
 
-  // 1. The details modal: the Explicit row at 375 dark; at 1280 light the tick asks first, then Request
-  const ui: Record<string, unknown> = {};
   // Replayed in the browser (page.route): with the fake-metadata proxy RMAB can't reach the catalog
   const shown = { asin: A.asin, title: A.title, author: A.author, narrator: A.narrator, durationMinutes: A.runtimeMin ?? undefined, language: 'english' };
-  const openA = async (page: import('@playwright/test').Page) => {
+  const openDetailsOfA = async (page: import('@playwright/test').Page) => {
     await page.route((url) => url.pathname === '/api/audiobooks/search', (route) =>
       route.fulfill({ json: { success: true, results: [shown], totalResults: 1, page: 1, hasMore: false } }));
     await page.route((url) => url.pathname === `/api/audiobooks/${A.asin}`, (route) =>
@@ -123,6 +126,17 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
     await expect(card).toBeVisible({ timeout: 30_000 });
     // The title, not the card's centre: the centre can be the card's own Request button
     await card.getByRole('heading', { name: A.title }).click();
+  };
+
+  // 0. The setting: off on the fresh stack (nothing anywhere, PUT refused), then on through Settings
+  const Z = madeUpBook(madeUpAsin('Z6'), `Zerowords${RUN}`);
+  const s0 = await settingLeg({ browser, admin, adminStorage: ADMIN_STORAGE(), eve, book: Z, dir: DIR, openDetails: openDetailsOfA });
+  writeEvidence(`${DIR}/step0-setting.json`, s0);
+
+  // 1. The details modal: the Explicit row at 375 dark; at 1280 light the tick asks first, then Request
+  const ui: Record<string, unknown> = {};
+  const openA = async (page: import('@playwright/test').Page) => {
+    await openDetailsOfA(page);
     const box = page.getByRole('checkbox', { name: /^Explicit/ });
     await expect(box).toBeVisible({ timeout: 30_000 });
     await box.scrollIntoViewIfNeeded();
@@ -368,6 +382,7 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
   await restoreOriginalKey();
 
   // Checks
+  expectSettingLeg(s0);
   const before = s2Before.a;
   expect.soft(ui.checkedAtOpen, 'step 1: the box starts unticked').toBe(false);
   expect.soft(ui.checkedWhileAsking, 'step 1: not ticked until confirmed').toBe(false);
