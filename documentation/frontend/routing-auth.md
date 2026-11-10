@@ -12,7 +12,7 @@ Authentication and authorization system protecting routes, ensuring only authent
 ## Routes
 
 **Public:** `/login`, `/setup`, `/api/*` (handle auth independently)
-**Protected:** `/` (home), `/search`, `/requests`, `/profile`
+**Protected:** `/` (home), `/search`, `/library`, `/requests`, `/profile`
 **Admin:** `/admin/*` - requires admin role
 
 ## ProtectedRoute Component

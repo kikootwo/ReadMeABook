@@ -153,19 +153,33 @@ async function contentVersion(query: Prisma.Sql): Promise<string> {
   return `${result?.n ?? 0}:${result?.h ?? '0'}`;
 }
 
+/** The row version read in flight per library id (single-flight; nothing is kept once it settles). */
+const rowsVersionInFlight = new Map<string, Promise<string>>();
+
 /**
  * Load 1's version: a checksum of exactly the selected columns of the library's committed rows. Any
  * insert, delete or change of a selected value moves it, whatever its updated_at says (late commits,
  * same-millisecond writes, raw SQL); a write that changes nothing selected (the recently-added check
  * stamping last_scanned_at, a scan rewriting a row unchanged) leaves it, so the snapshot holds.
+ *
+ * Single-flight per library id: a call arriving while the read is running awaits that read, so a
+ * burst of calls costs one checksum scan. Only scans write these rows and the snapshot already serves
+ * stale rows while it rebuilds, so joining a read that began just before a write adds no new staleness
+ * class. The requests version is never shared: an action's refetch must see its own write.
  */
-export async function libraryRowsVersion(libraryId: string): Promise<string> {
+export function libraryRowsVersion(libraryId: string): Promise<string> {
+  const running = rowsVersionInFlight.get(libraryId);
+  if (running) return running;
   const columns = Prisma.raw(columnList('p', LIBRARY_ROW_COLUMNS));
-  return contentVersion(Prisma.sql`
+  const promise = contentVersion(Prisma.sql`
     select count(*)::int as n,
            coalesce(sum(hashtextextended(row(${columns})::text, 0)::numeric), 0)::text as h
     from plex_library p
-    where p.plex_library_id = ${libraryId}`);
+    where p.plex_library_id = ${libraryId}`).finally(() => {
+    if (rowsVersionInFlight.get(libraryId) === promise) rowsVersionInFlight.delete(libraryId);
+  });
+  rowsVersionInFlight.set(libraryId, promise);
+  return promise;
 }
 
 /** Load 2's version: the same checksum over the qualifying requests joined to their user and audiobook. */
