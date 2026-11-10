@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils/cn';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { COMPLETED_STATUSES, CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { COMPLETED_STATUSES, CANCELLABLE_STATUSES, requestPhase } from '@/lib/constants/request-statuses';
 import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
 
 interface RequestCardProps {
@@ -61,6 +61,9 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const canCancel = (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
+  // Processing says what it is doing; its bar shows only while chapters merge (#216)
+  const phase = requestPhase(request.status, request.progress);
+  const barPercent = phase ? phase.percent : isActive && request.progress > 0 ? request.progress : null;
 
   const releaseDateLabel = React.useMemo(() => {
     if (request.status !== 'awaiting_release' || !request.releaseDate) return null;
@@ -182,13 +185,19 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
                 Ebook
               </span>
             )}
-            {isActive && request.progress > 0 && (
+            {phase && (
+              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full"></div>
+                <span>{phase.label}</span>
+              </div>
+            )}
+            {!phase && isActive && request.progress > 0 && (
               <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                 <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full"></div>
                 <span>Active</span>
               </div>
             )}
-            {isActive && request.progress === 0 && (
+            {!phase && isActive && request.progress === 0 && (
               <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                 <div className="animate-spin w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
                 <span>Setting up...</span>
@@ -196,20 +205,27 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
             )}
           </div>
 
-          {/* Progress Bar (for downloading/processing) */}
-          {isActive && request.progress > 0 && (
+          {/* Progress Bar (downloading/searching; processing only while chapters merge) */}
+          {barPercent !== null && (
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
                 <span>Progress</span>
-                <span>{request.progress}%</span>
+                <span>{barPercent}%</span>
               </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+              <div
+                className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden"
+                role="progressbar"
+                aria-label="Progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={barPercent}
+              >
                 <div
                   className={cn(
                     'h-full rounded-full transition-all duration-300',
                     request.status === 'downloading' ? 'bg-purple-600' : 'bg-orange-600'
                   )}
-                  style={{ width: `${request.progress}%` }}
+                  style={{ width: `${barPercent}%` }}
                 />
               </div>
             </div>

@@ -2,8 +2,9 @@
  * Component: One-time Application Initialization (runs inside the init route)
  * Documentation: documentation/backend/services/scheduler.md
  *
- * Readiness check (database + Redis), then credential migration and scheduler
- * start. Runs at most once per process; concurrent callers share one run.
+ * Readiness check (database + Redis), then credential migration, the merge
+ * progress reset (#216) and scheduler start. Runs at most once per process;
+ * concurrent callers share one run.
  */
 
 import Redis from 'ioredis';
@@ -13,6 +14,7 @@ import { runCredentialMigration } from '@/lib/services/credential-migration.serv
 import { RMABLogger } from '@/lib/utils/logger';
 import { STARTUP_REDIS_PING_TIMEOUT_MS } from '@/lib/constants/startup';
 import { processSingleton } from '@/lib/utils/process-singleton';
+import { resetInterruptedMergeProgress } from '@/lib/utils/merge-progress';
 
 const logger = RMABLogger.create('Startup');
 
@@ -82,11 +84,22 @@ async function redisReady(): Promise<boolean> {
   }
 }
 
+/** A chapter merge cut by the restart left its request below 100: reset it (non-fatal). */
+async function resetMergeProgressAfterRestart(): Promise<void> {
+  try {
+    const count = await resetInterruptedMergeProgress();
+    if (count > 0) logger.info(`Reset merge progress on ${count} processing request(s) cut by the restart`);
+  } catch (error) {
+    logger.warn('Could not reset merge progress after restart', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function runInit(): Promise<AppInitOutcome> {
   if (!(await databaseReady()) || !(await redisReady())) return 'not-ready';
   try {
     logger.info('Initializing application services...');
     await runCredentialMigration();
+    await resetMergeProgressAfterRestart();
     await getSchedulerService().start();
     state().done = true;
     logger.info('Application services initialized successfully');

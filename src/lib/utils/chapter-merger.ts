@@ -71,6 +71,12 @@ export interface MergeOptions {
   year?: number;
   outputPath: string; // ASIN: added by the organizer to the file it places (ffmpeg drops it)
   dirMode?: number;
+  /**
+   * Merge progress (#216): 0 as ffmpeg starts, each whole-percent change while it
+   * runs (capped at 99), then 100 once it has exited (on every exit path). Never
+   * called when the chapters' total duration is unknown. A throw is ignored.
+   */
+  onProgress?: (percent: number) => void;
 }
 
 export interface MergeResult {
@@ -521,14 +527,25 @@ async function checkLibFdkAac(): Promise<boolean> {
   }
 }
 
+/** Calls a merge progress callback; a throw from it never fails the merge. */
+function notifyProgress(onProgress: ((percent: number) => void) | undefined, percent: number): void {
+  try {
+    onProgress?.(percent);
+  } catch {
+    // The callback reports to the UI only
+  }
+}
+
 /**
- * Execute FFmpeg (argv array, no shell) with real-time progress logging
+ * Execute FFmpeg (argv array, no shell) with real-time progress logging.
+ * `onProgress` gets each whole-percent change of `time=` (capped at 99).
  */
 async function executeFFmpegWithProgress(
   args: string[],
   timeout: number,
   expectedDuration: number, // milliseconds
-  logger?: RMABLogger
+  logger?: RMABLogger,
+  onProgress?: (percent: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn('ffmpeg', args);
@@ -536,6 +553,7 @@ async function executeFFmpegWithProgress(
     let stderrBuffer = '';
     let lastProgressLog = Date.now();
     let lastProgressPercent = 0;
+    let lastReportedPercent = -1;
 
     // Set timeout
     const timeoutHandle = setTimeout(() => {
@@ -548,9 +566,9 @@ async function executeFFmpegWithProgress(
       const output = data.toString();
       stderrBuffer += output;
 
-      // Parse FFmpeg progress output
+      // Parse FFmpeg progress output (the newest stats line of the chunk; hours may exceed 99)
       // Format: frame=... fps=... q=... size=... time=HH:MM:SS.MS bitrate=... speed=...
-      const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+      const timeMatch = [...output.matchAll(/time=(\d+):(\d{2}):(\d{2})\.(\d{2})/g)].pop();
 
       if (timeMatch) {
         const hours = parseInt(timeMatch[1]);
@@ -559,6 +577,19 @@ async function executeFFmpegWithProgress(
         const currentTimeMs = (hours * 3600 + minutes * 60 + seconds) * 1000;
 
         const progressPercent = Math.min(100, Math.round((currentTimeMs / expectedDuration) * 100));
+
+        // Request progress: 99 at most while ffmpeg runs (100 means it has exited)
+        if (onProgress && expectedDuration > 0) {
+          const reported = Math.min(99, Math.floor((currentTimeMs / expectedDuration) * 100));
+          if (reported !== lastReportedPercent) {
+            lastReportedPercent = reported;
+            try {
+              onProgress(reported);
+            } catch {
+              // A throw here would be uncaught (stderr listener) and end the process
+            }
+          }
+        }
 
         // Log progress every 10% or every 5 minutes (whichever comes first)
         const timeSinceLastLog = Date.now() - lastProgressLog;
@@ -792,14 +823,19 @@ export async function mergeChapters(
     const commandPreview = command.length > 500 ? command.substring(0, 500) + '...' : command;
     await logger?.info(`FFmpeg command: ${commandPreview}`);
 
-    // Execute FFmpeg with progress logging (from here on the output path holds this merge's file)
+    // Execute FFmpeg with progress logging (from here on the output path holds this merge's file).
+    // Progress runs 0..99 while ffmpeg runs and is 100 the moment it exits; no total, no progress
+    const onProgress = totalDuration > 0 ? options.onProgress : undefined;
     try {
       ffmpegStarted = true;
-      await executeFFmpegWithProgress(args, timeout, totalDuration, logger);
+      notifyProgress(onProgress, 0);
+      await executeFFmpegWithProgress(args, timeout, totalDuration, logger, onProgress);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       await logger?.error(`FFmpeg merge failed: ${errorMsg}`);
       throw new Error(`FFmpeg merge failed: ${errorMsg}`);
+    } finally {
+      notifyProgress(onProgress, 100);
     }
 
     // Verify output file exists
