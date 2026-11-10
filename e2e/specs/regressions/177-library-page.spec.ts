@@ -52,15 +52,21 @@ test.afterAll(() => {
 });
 
 /**
- * Evidence shot with the pointer parked in the left gutter (no hover state in the picture), after
- * every CSS transition has ended (a theme switch fades `transition-colors` text for 150 ms).
+ * Waits for every finite CSS transition and animation (a theme switch fades `transition-colors`
+ * text for 150 ms; a toast slides in from the right). The Live pill's endless pulse is skipped.
  */
-async function shot(page: Page, name: string) {
-  await page.mouse.move(1, 400);
+async function settle(page: Page) {
   await page.evaluate(async () => {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    await Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => null)));
+    const finite = document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity);
+    await Promise.all(finite.map((a) => a.finished.catch(() => null)));
   });
+}
+
+/** Evidence shot with the pointer parked in the left gutter (no hover state in the picture), settled. */
+async function shot(page: Page, name: string) {
+  await page.mouse.move(1, 400);
+  await settle(page);
   await snap(page, DIR, name);
 }
 
@@ -252,6 +258,8 @@ test('#177 page: the admin detail, Search again and its toast over the open deta
   await detail.getByRole('button', { name: 'Search again' }).click();
   const toast = page.getByText(`Searching again for ${TITLES.failed}`);
   await expect(toast).toBeVisible();
+  await settle(page); // the toast slides in from beyond the right edge
+  // At the toast's centre the toast is the top element and the detail's layer lies under it
   const order = await toast.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const stack = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2);
@@ -259,6 +267,7 @@ test('#177 page: the admin detail, Search again and its toast over the open deta
     return { toast: stack.findIndex((n) => n === el || el.contains(n) || n.contains(el)), dialog: stack.findIndex((n) => dialog.contains(n) || n === dialog.parentElement) };
   });
   expect(order.toast, `toast is hit at its own centre: ${JSON.stringify(order)}`).toBe(0);
+  expect(order.dialog, `the detail layer is under the toast: ${JSON.stringify(order)}`).toBeGreaterThan(0);
   await shot(page, 'toast-over-detail');
   // The book left "failed"; the detail keeps its snapshot and stays open
   await expect(detail).toBeVisible();
