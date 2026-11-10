@@ -71,7 +71,7 @@ describe('AdminUsersPage add user', () => {
 
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'NewReader' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
-    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add User' }));
 
     await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith('User "newreader" added'));
@@ -88,5 +88,28 @@ describe('AdminUsersPage add user', () => {
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(fetchJSONMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Add User' })).toHaveFocus();
+  });
+
+  it('returns focus to Add User after adding', async () => {
+    setup(true);
+    fetchJSONMock.mockResolvedValue({ user: { plexUsername: 'newreader' } });
+    render(<AdminUsersPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add User' }));
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'newreader' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add User' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Add User' })).toHaveFocus();
+  });
+
+  it('lets the header actions wrap so a narrow screen never scrolls sideways', () => {
+    setup(true);
+    render(<AdminUsersPage />);
+
+    expect(screen.getByRole('button', { name: 'Add User' }).parentElement).toHaveClass('flex-wrap');
   });
 });

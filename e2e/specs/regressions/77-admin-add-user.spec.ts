@@ -6,6 +6,7 @@
  *   1  1280 px, light: page with Add User, empty dialog, taken-name error (the admin's own name in
  *      upper case), list after adding
  *   2  375 px, dark: the same with a password mismatch as the inline error
+ *   3  320, 360 and 375 px, dark: the header actions wrap, so the page never scrolls sideways (320 shot)
  * Each added user is local, role user, approved, never signed in; the first one then signs in on /login.
  * Snapshots come before the checks (`expect.soft`), so a run on an older image still leaves its shots.
  */
@@ -60,7 +61,7 @@ function userEntry(page: Page, name: string, mobile: boolean): Locator {
 async function fill(dialog: Locator, username: string, password: string, confirm: string) {
   await dialog.getByLabel('Username').fill(username);
   await dialog.getByLabel('Password', { exact: true }).fill(password);
-  await dialog.getByLabel('Confirm password').fill(confirm);
+  await dialog.getByLabel('Confirm Password').fill(confirm);
 }
 
 interface FlowResult { headerButton: boolean; error: string; toast: string; listed: boolean }
@@ -100,6 +101,27 @@ async function addFlow(page: Page, tag: string, mobile: boolean, username: strin
   return { headerButton: true, error, toast: (await toast.innerText()).trim(), listed: await entry.isVisible() };
 }
 
+interface Narrow { scrollWidth: number; clientWidth: number; actionsRight: number; actionRows: number }
+
+/** The page width against the viewport, and how far right (and on how many rows) the header actions sit */
+async function narrowHeader(page: Page, width: number): Promise<Narrow> {
+  await page.goto('/admin/users');
+  const button = page.getByRole('button', { name: 'Add User' });
+  await expect(button).toBeVisible({ timeout: 30_000 });
+  await settle(page);
+  if (width === 320) await snap(page, DIR, '320-dark-1-page');
+  return button.evaluate((el) => {
+    const row = el.parentElement as HTMLElement;
+    const tops = new Set(Array.from(row.children).map((c) => Math.round(c.getBoundingClientRect().top)));
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      actionsRight: Math.round(row.getBoundingClientRect().right),
+      actionRows: tops.size,
+    };
+  });
+}
+
 test('77: an admin adds local users from the Users page and the new user signs in', async ({ browser }) => {
   test.setTimeout(180_000);
   const admin = await Rmab.loginAdmin();
@@ -129,6 +151,13 @@ test('77: an admin adds local users from the Users page and the new user signs i
       });
       await ctx.close();
     }
+    const narrow: Record<number, Narrow> = {};
+    for (const width of [320, 360, 375]) {
+      const { ctx, page } = await session(browser, { width, height: 812, dark: true, signedIn: true });
+      narrow[width] = await narrowHeader(page, width);
+      await ctx.close();
+    }
+    result.narrow = narrow;
     result.registrationDuringAdd = registrationSettings();
     result.firstRow = userRow(first.username.toLowerCase());
     result.secondRow = userRow(second.username.toLowerCase());
@@ -159,6 +188,10 @@ test('77: an admin adds local users from the Users page and the new user signs i
 
   const desktop = result.desktop as FlowResult;
   const mobile = result.mobile as FlowResult;
+  for (const [width, m] of Object.entries(result.narrow as Record<string, Narrow>)) {
+    expect.soft(m.scrollWidth, `page width at ${width} px`).toBeLessThanOrEqual(m.clientWidth);
+    expect.soft(m.actionsRight, `header actions at ${width} px`).toBeLessThanOrEqual(m.clientWidth);
+  }
   expect.soft(result.registrationDuringAdd).toEqual({ enabled: false, requireAdminApproval: true });
   expect.soft(desktop.error).toBe('That username is already taken');
   expect.soft(mobile.error).toBe('Passwords do not match');

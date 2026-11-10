@@ -126,7 +126,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 ## User Management Features
 
 - List all users with avatar, email, role, request count, last login, autoApproveRequests
-- Add User (#77, `src/components/admin/users/AddUserDialog.tsx`): header button only when `localLoginEnabled`; dialog (page dialog style, bottom sheet on mobile) with username, password, confirm password, Cancel / Add User. Mismatch checked client-side; server messages inline under the field they name (else at the form bottom). Success: dialog closes, toast `User "<username>" added`, list refetched. Escape/Cancel ignored while adding
+- Add User (#77, `src/components/admin/users/AddUserDialog.tsx`): header button only when `localLoginEnabled`; dialog (page dialog style, bottom sheet on mobile) with Username, Password, Confirm Password, Cancel / Add User. Mismatch checked client-side; server messages inline under the field they name (else at the form bottom), `role="alert"`, focus moves to the first field with an error (else Username). Success: dialog closes, toast `User "<username>" added`, list refetched. Escape/Cancel/backdrop ignored while adding; closing returns focus to the Add User button. `role="dialog"` on a div around the form; the backdrop is a sibling (a text selection dragged out of a field never closes it). Header action row wraps (`flex-wrap`), no sideways scroll at 320 px
 - Edit user roles (user/admin)
 - Cannot change own role (security)
 - Delete (`UserActionsCell`, `src/components/admin/users/UserActionsCell.tsx`): shown for local, Plex and OIDC users, never for the setup admin or yourself (current user from `useAuth`). OIDC rows show "OIDC Managed" instead of Edit Role
