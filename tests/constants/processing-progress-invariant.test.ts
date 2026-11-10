@@ -9,7 +9,8 @@
  *
  * What it finds: an object literal whose `status` property (quoted key too) has a
  * 'processing' string literal anywhere in its value (`ok ? 'processing' : ...`
- * included), outside any `where` (a property or variable of that name: a read).
+ * included), outside any `where` (a property or variable of that name, or a filter
+ * constant named `..._WHERE` or `...Where`: a read).
  * What it does not find: a status from a variable or shorthand (`{ status }`), an
  * assignment (`data.status = ...`), a spread that overrides `progress`, raw SQL,
  * and writes of `progress` alone (the download processors filter those to
@@ -55,10 +56,13 @@ function mentionsProcessing(node: ts.Node): boolean {
   return (ts.isStringLiteralLike(node) && node.text === 'processing') || !!ts.forEachChild(node, (child) => mentionsProcessing(child) || undefined);
 }
 
-/** Inside a `where` property or a variable named `where` (a filter reads, it does not write). */
+/** `where`, or a filter constant such as `BEING_IMPORTED_WHERE` or `activeWhere`. */
+const isWhereName = (name: string | null) => name === 'where' || (!!name && /(_WHERE|Where)$/.test(name));
+
+/** Inside a `where` property or a filter variable (a filter reads, it does not write). */
 function inWhere(node: ts.Node): boolean {
   for (let current = node.parent; current; current = current.parent) {
-    if ((ts.isPropertyAssignment(current) || ts.isVariableDeclaration(current)) && nameOf(current.name) === 'where') return true;
+    if ((ts.isPropertyAssignment(current) || ts.isVariableDeclaration(current)) && isWhereName(nameOf(current.name))) return true;
   }
   return false;
 }
@@ -109,6 +113,7 @@ describe('processing progress contract', () => {
     ['a nested where filter', "prisma.request.count({ where: { OR: [{ status: 'processing' }] } })"],
     ['a relation filter', "prisma.user.findMany({ where: { requests: { some: { status: 'processing' } } } })"],
     ['a filter kept in a variable', "const where = { status: 'processing' };"],
+    ['a filter constant', "export const BEING_IMPORTED_WHERE = { status: 'processing', deletedAt: null } as const;"],
   ])('skips a read: %s', (_shape, code) => {
     expect(progressOf(code)).toEqual([]);
   });

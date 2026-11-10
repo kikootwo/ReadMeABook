@@ -18,8 +18,17 @@ import {
 import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-delete-download';
 import { clearRemovedEbookFolder, findChildRequests, keepDeliveredChildren, type ChildRequests } from './request-delete-children';
 import type { KeptFile } from '../utils/book-folder-delete';
+import { BEING_IMPORTED_WHERE, deleteTouchesLibrary } from '../utils/delete-touches-library';
 
 const logger = RMABLogger.create('RequestDelete');
+
+export interface DeleteRequestOptions {
+  /**
+   * Bulk delete (#212): refuse, changing nothing (error 'InLibrary'), when the request's
+   * book is in the library or being imported (deleteTouchesLibrary on this call's own load)
+   */
+  refuseInLibrary?: boolean;
+}
 
 export interface DeleteRequestResult {
   success: boolean;
@@ -76,10 +85,15 @@ export interface DeleteRequestResult {
  *    A folder left with nothing but junk goes; the book's stored path is cleared if it was that folder
  * 3. Soft delete request (set deletedAt, deletedBy)
  * Note: No backend library deletion or audiobook linkage clearing for ebooks
+ *
+ * With `refuseInLibrary` (bulk delete): right after step 1, a request whose book is in the
+ * library or being imported (deleteTouchesLibrary) is refused with error 'InLibrary', nothing changed;
+ * one that passes leaves the plex_library rows (deleteLibraryRecords) as they are
  */
 export async function deleteRequest(
   requestId: string,
-  adminUserId: string
+  adminUserId: string,
+  options: DeleteRequestOptions = {}
 ): Promise<DeleteRequestResult> {
   try {
     // 1. Find request (only active, non-deleted)
@@ -131,6 +145,26 @@ export async function deleteRequest(
         torrentsKeptNotOwned: 0,
         error: 'NotFound',
       };
+    }
+
+    // Bulk delete: decided on this load, before any side effect
+    if (options.refuseInLibrary) {
+      const importing = await prisma.request.count({ where: { audiobookId: request.audiobookId, ...BEING_IMPORTED_WHERE } });
+      const row = { type: requestType, status: request.status, completedAt: request.completedAt, placedEbookFiles: request.placedEbookFiles, audiobook: request.audiobook };
+      if (deleteTouchesLibrary(row, importing > 0)) {
+        logger.info(`Request ${requestId} not deleted (bulk delete): its book is in the library or being imported`);
+        return {
+          success: false,
+          message: 'Not deleted: the book is in your library or being imported',
+          filesDeleted: false,
+          torrentsRemoved: 0,
+          torrentsKeptSeeding: 0,
+          torrentsKeptUnlimited: 0,
+          torrentsKeptShared: 0,
+          torrentsKeptNotOwned: 0,
+          error: 'InLibrary',
+        };
+      }
     }
 
     // 2. Handle downloads & seeding (skip for ebooks - they use direct HTTP downloads)
@@ -193,7 +227,8 @@ export async function deleteRequest(
         if (outcome.kind === 'removed' || outcome.kind === 'gone') {
           await deleteBackendItem(book, outcome, backendMode, configService);
         }
-        await deleteLibraryRecords(book);
+        // Bulk delete leaves the library index alone: the book can be in the library by another route
+        if (!options.refuseInLibrary) await deleteLibraryRecords(book);
 
         // Reset to requested, clear the library linkage and the (now removed) stored folder
         await prisma.audiobook.update({
