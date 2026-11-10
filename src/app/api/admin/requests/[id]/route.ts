@@ -41,8 +41,12 @@ export async function DELETE(
 
         const { id } = await params;
 
-        // Perform soft delete with cleanup
-        const result = await deleteRequest(id, req.user.id);
+        // Perform soft delete with cleanup. ?keepLibrary=1 (bulk delete, #212): refuse, 409
+        // InLibrary, when the book is in the library or being imported
+        const keepLibrary = request.nextUrl.searchParams.get('keepLibrary') === '1';
+        const result = keepLibrary
+          ? await deleteRequest(id, req.user.id, { refuseInLibrary: true })
+          : await deleteRequest(id, req.user.id);
 
         if (!result.success) {
           return NextResponse.json(
@@ -50,7 +54,7 @@ export async function DELETE(
               error: result.error || 'DeleteFailed',
               message: result.message,
             },
-            { status: result.error === 'NotFound' ? 404 : 500 }
+            { status: result.error === 'NotFound' ? 404 : result.error === 'InLibrary' ? 409 : 500 }
           );
         }
 

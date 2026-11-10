@@ -67,6 +67,7 @@ src/components/
 **Admin**
 - **MetricCard** - Icon, label, value, trend
 - **DataTable** - Sorting, filtering, pagination
+- **BulkActionBar** ✅ - `src/app/admin/components/BulkActionBar.tsx`: requests table bulk bar fixed to the viewport bottom (count, Clear, Approve/Deny/Cancel/Delete with counts, confirm, progress with Stop, result with Details). With `SelectionCheckbox.tsx` (tri-state page header, row boxes, 44px label), `useRequestSelection.ts`, `useBulkRun.ts`. See [admin-features/bulk-request-actions.md](../admin-features/bulk-request-actions.md)
 - **Chart** - Line/bar/pie
 
 ## Pages Implemented ✅
