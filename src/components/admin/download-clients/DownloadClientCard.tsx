@@ -71,8 +71,9 @@ export function DownloadClientCard({ client, onEdit, onDelete }: DownloadClientC
               {displayUrl}
             </p>
             {showCategory && (
-              <p className="flex min-w-0 gap-1 text-xs text-indigo-600 dark:text-indigo-400">
-                <span className="truncate" title={`Category: ${category}`}>Category: {category}</span>
+              // Wraps: the suffix moves to its own line before the name is cut; only a name too long for a line truncates
+              <p className="flex flex-wrap min-w-0 gap-x-1 text-xs text-indigo-600 dark:text-indigo-400">
+                <span className="truncate min-w-0 max-w-full" title={`Category: ${category}`}>Category: {category}</span>
                 {categoryShared && (
                   <span className="flex-shrink-0 font-medium text-amber-700 dark:text-amber-400" title={existingCategoryNote(client.type) ?? undefined}>
                     (existing, left as is)

@@ -157,10 +157,12 @@ test('4 a long existing name keeps its suffix on a phone', async ({ browser }) =
   const box = await suffix.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const card = el.closest('div.rounded-lg')!.getBoundingClientRect();
-    return { right: r.right, cardRight: card.right, clipped: el.scrollWidth > el.clientWidth };
+    const name = el.previousElementSibling as HTMLElement;
+    return { right: r.right, cardRight: card.right, clipped: el.scrollWidth > el.clientWidth, nameClipped: name.scrollWidth > name.clientWidth };
   });
   c.save('suffix-box.json', box);
   c.check(`suffix inside the card and not clipped (${JSON.stringify(box)})`, box.right <= box.cardRight && !box.clipped, 'safety');
+  c.check('the name audiobooks-readarr is shown whole (the suffix wraps instead)', !box.nameClipped, 'control');
   await page.screenshot(shot('card-existing-long-375-dark'));
   await close();
   expect(c.finish().map((f) => f.name)).toEqual([]);
