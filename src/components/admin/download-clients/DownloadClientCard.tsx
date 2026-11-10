@@ -7,6 +7,7 @@
 
 import React from 'react';
 import { DownloadClientType, getClientDisplayName } from '@/lib/interfaces/download-client.interface';
+import { DEFAULT_DOWNLOAD_CATEGORY, existingCategoryNote, managesCategoryPath, ownsCategory, sameCategory } from '@/lib/utils/download-category';
 
 interface DownloadClientCardProps {
   client: {
@@ -15,6 +16,9 @@ interface DownloadClientCardProps {
     name: string;
     url: string;
     enabled: boolean;
+    category?: string;
+    ownedCategory?: string;
+    categoryInClient?: boolean;
     customPath?: string;
     postImportCategory?: string;
   };
@@ -35,6 +39,13 @@ export function DownloadClientCard({ client, onEdit, onDelete }: DownloadClientC
 
   // Truncate URL for display
   const displayUrl = client.url.length > 40 ? `${client.url.substring(0, 40)}...` : client.url;
+
+  // Category line only for a non-default name; amber when it already existed in the client
+  // (the wizard's card has only the modal's preview until setup complete decides ownership)
+  const category = client.category?.trim();
+  const showCategory = !!category && !sameCategory(category, DEFAULT_DOWNLOAD_CATEGORY);
+  const categoryShared = showCategory && managesCategoryPath(client.type) &&
+    (client.categoryInClient ?? !ownsCategory(category, client.ownedCategory));
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4 hover:shadow-lg transition-shadow">
@@ -59,6 +70,16 @@ export function DownloadClientCard({ client, onEdit, onDelete }: DownloadClientC
             <p className="text-xs text-gray-500 dark:text-gray-400 truncate" title={client.url}>
               {displayUrl}
             </p>
+            {showCategory && (
+              <p className="flex min-w-0 gap-1 text-xs text-indigo-600 dark:text-indigo-400">
+                <span className="truncate" title={`Category: ${category}`}>Category: {category}</span>
+                {categoryShared && (
+                  <span className="flex-shrink-0 font-medium text-amber-700 dark:text-amber-400" title={existingCategoryNote(client.type) ?? undefined}>
+                    (existing, left as is)
+                  </span>
+                )}
+              </p>
+            )}
             {client.customPath && (
               <p className="text-xs text-blue-600 dark:text-blue-400 truncate" title={`Custom path: ${client.customPath}`}>
                 Path: {client.customPath}

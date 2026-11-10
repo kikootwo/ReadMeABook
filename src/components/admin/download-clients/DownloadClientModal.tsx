@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/Input';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { DownloadClientType, getClientDisplayName, CLIENT_PROTOCOL_MAP } from '@/lib/interfaces/download-client.interface';
 import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
+import { categoryInputError, existsInClient, normalizeCategory } from '@/lib/utils/download-category';
+import { DownloadCategoryField } from './DownloadCategoryField';
 
 interface DownloadClientModalProps {
   isOpen: boolean;
@@ -31,6 +33,7 @@ interface DownloadClientModalProps {
     remotePath?: string;
     localPath?: string;
     category?: string;
+    ownedCategory?: string;
     customPath?: string;
     postImportCategory?: string;
   };
@@ -127,6 +130,11 @@ export function DownloadClientModal({
     // SABnzbd always requires API key; qBittorrent credentials are optional (supports IP whitelist auth)
     if (type === 'sabnzbd' && (!password.trim() || (mode === 'add' && password === MASKED_PASSWORD))) {
       newErrors.password = 'API key is required';
+    }
+
+    const categoryError = category.trim() ? categoryInputError(type, category) : 'Category is required';
+    if (categoryError) {
+      newErrors.category = categoryError;
     }
 
     if (customPath.includes('..')) {
@@ -241,10 +249,7 @@ export function DownloadClientModal({
         const message = data.message || (data.version ? `Connected successfully (v${data.version})` : 'Connection successful');
         setTestResult({ success: true, message });
 
-        // Fetch categories for torrent clients after successful connection
-        if (type && CLIENT_PROTOCOL_MAP[type] === 'torrent') {
-          fetchCategories();
-        }
+        fetchCategories(); // suggestions and the "already in the client" note
       } else {
         setTestResult({ success: false, message: data.error || 'Connection test failed' });
       }
@@ -257,6 +262,13 @@ export function DownloadClientModal({
       setTesting(false);
     }
   };
+
+  const cleanCustomPath = customPath.replace(/^\/+|\/+$/g, '').trim();
+  const downloadsTo = cleanCustomPath ? `${downloadDir}/${cleanCustomPath}` : downloadDir;
+  const categoryInClient = existsInClient(type, category, availableCategories, initialClient?.ownedCategory);
+  const usenetFolder = categoryInClient && (type === 'sabnzbd' || type === 'nzbget')
+    ? `${typeName}'s “${normalizeCategory(type, category)}” folder (ReadMeABook must be able to read it)`
+    : null;
 
   const handleSave = async () => {
     if (!validate()) {
@@ -286,7 +298,8 @@ export function DownloadClientModal({
         remotePathMappingEnabled,
         remotePath: remotePathMappingEnabled ? remotePath : undefined,
         localPath: remotePathMappingEnabled ? localPath : undefined,
-        category,
+        category: category.trim(),
+        categoryInClient, // display-only preview for the wizard's card; the server decides ownership
         customPath: sanitizedCustomPath,
         postImportCategory,
       };
@@ -427,6 +440,16 @@ export function DownloadClientModal({
           </label>
         </div>
 
+        <DownloadCategoryField
+          type={type}
+          value={category}
+          onChange={setCategory}
+          error={errors.category}
+          suggestions={availableCategories}
+          inClient={categoryInClient}
+          downloadsTo={downloadsTo}
+        />
+
         {/* Custom Download Path */}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -442,9 +465,7 @@ export function DownloadClientModal({
             Optional relative sub-path appended to the base download directory
           </p>
           <p className="mt-1 text-xs font-medium text-blue-600 dark:text-blue-400">
-            Downloads to: {customPath.replace(/^\/+|\/+$/g, '').trim()
-              ? `${downloadDir}/${customPath.replace(/^\/+|\/+$/g, '').trim()}`
-              : downloadDir}
+            Downloads to: {usenetFolder ?? downloadsTo}
           </p>
         </div>
 

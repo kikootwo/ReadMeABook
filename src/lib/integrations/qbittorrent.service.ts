@@ -14,6 +14,7 @@ import { RMABLogger } from '../utils/logger';
 import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
+import { findCategory, ownsCategory, sameCategory } from '../utils/download-category';
 import { qbittorrentProbeList } from './torrent-probe';
 import { acceptedAddId, candidateIds, decodedMagnet, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, TorrentListUnavailableError, validTorrentId } from './qbittorrent-ids';
 import {
@@ -134,6 +135,7 @@ export class QBittorrentService implements IDownloadClient {
   private authOptional: boolean;
   private defaultSavePath: string;
   private defaultCategory: string;
+  private categoryOwned: boolean;
   private disableSSLVerify: boolean;
   private httpsAgent?: https.Agent;
   private pathMappingConfig: PathMappingConfig;
@@ -147,7 +149,8 @@ export class QBittorrentService implements IDownloadClient {
     defaultSavePath: string = '/downloads',
     defaultCategory: string = 'readmeabook',
     disableSSLVerify: boolean = false,
-    pathMappingConfig?: PathMappingConfig
+    pathMappingConfig?: PathMappingConfig,
+    categoryOwned: boolean = true // false: the category already existed; never created or re-pathed
   ) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.username = username;
@@ -155,6 +158,7 @@ export class QBittorrentService implements IDownloadClient {
     this.authOptional = !username && !password;
     this.defaultSavePath = defaultSavePath;
     this.defaultCategory = defaultCategory;
+    this.categoryOwned = categoryOwned;
     this.disableSSLVerify = disableSSLVerify;
     this.pathMappingConfig = pathMappingConfig || { enabled: false, remotePath: '', localPath: '' };
 
@@ -292,10 +296,13 @@ export class QBittorrentService implements IDownloadClient {
     }
 
     try {
-      const category = options?.category || this.defaultCategory;
+      const requested = options?.category || this.defaultCategory;
 
-      // Ensure category exists; if it can't be, the add names the folder itself (Manual mode)
-      const savePath = (await this.ensureCategory(category)) ? undefined : this.remoteSavePath();
+      // Ensure category exists (the client's spelling comes back); if it can't be, or it is not
+      // ReadMeABook's own, the add names the folder itself (Manual mode)
+      const ensured = await this.ensureCategory(requested);
+      const category = ensured || requested;
+      const savePath = ensured ? undefined : this.remoteSavePath();
 
       // Determine if this is a magnet link or .torrent file URL
       if (url.startsWith('magnet:')) {
@@ -534,9 +541,16 @@ export class QBittorrentService implements IDownloadClient {
    * Ensure category exists in qBittorrent with correct save path
    * Checks existing categories first, then creates or updates as needed
    * Applies reverse path mapping (local → remote) for remote seedbox scenarios
-   * Returns false when it could not (the add then sends the save path itself)
+   * Returns the client's spelling of the category, or null when it could not, or when the
+   * category is not ReadMeABook's own (the add then sends the save path itself)
    */
-  protected async ensureCategory(category: string): Promise<boolean> {
+  protected async ensureCategory(category: string): Promise<string | null> {
+    const owned = sameCategory(category, this.defaultCategory) ? this.categoryOwned : ownsCategory(category);
+    if (!owned) {
+      logger.debug(`Category "${category}" already existed in qBittorrent; left as is, the add sets the save path`);
+      return null;
+    }
+
     if (!this.cookie && !this.authOptional) {
       await this.login();
     }
@@ -549,10 +563,11 @@ export class QBittorrentService implements IDownloadClient {
         headers: this.authHeaders(),
       });
 
-      const categories = categoriesResponse.data;
-      const existingCategory = categories[category];
+      const categories = categoriesResponse.data || {};
+      const key = findCategory(Object.keys(categories), category);
+      const existingCategory = key ? categories[key] : undefined;
 
-      if (!existingCategory) {
+      if (!key || !existingCategory) {
         // Category doesn't exist - create it
         logger.info(` Creating category "${category}" with save path: ${remoteSavePath}`);
 
@@ -571,17 +586,18 @@ export class QBittorrentService implements IDownloadClient {
         );
 
         logger.info(` Category "${category}" created successfully`);
+        return category;
       } else {
         // Category exists - check if save path needs updating
         const currentSavePath = existingCategory.savePath || existingCategory.save_path;
 
         if (currentSavePath !== remoteSavePath) {
-          logger.info(` Updating category "${category}" save path from "${currentSavePath}" to "${remoteSavePath}"`);
+          logger.info(` Updating category "${key}" save path from "${currentSavePath}" to "${remoteSavePath}"`);
 
           await this.client.post(
             '/torrents/editCategory',
             new URLSearchParams({
-              category,
+              category: key,
               savePath: remoteSavePath,
             }),
             {
@@ -594,10 +610,10 @@ export class QBittorrentService implements IDownloadClient {
 
           logger.info(` Category "${category}" save path updated successfully`);
         } else {
-          logger.info(` Category "${category}" already has correct save path: ${remoteSavePath}`);
+          logger.info(` Category "${key}" already has correct save path: ${remoteSavePath}`);
         }
+        return key;
       }
-      return true;
     } catch (error) {
       // If we can't ensure the category, log error but don't throw:
       // addTorrent then sends the save path itself, in Manual mode
@@ -611,7 +627,7 @@ export class QBittorrentService implements IDownloadClient {
       } else {
         logger.error('Failed to ensure category', { error: error instanceof Error ? error.message : String(error) });
       }
-      return false;
+      return null;
     }
   }
 
@@ -814,8 +830,9 @@ export class QBittorrentService implements IDownloadClient {
 
       return Object.keys(response.data || {});
     } catch (error) {
-      logger.error('Failed to get categories', { error: error instanceof Error ? error.message : String(error) });
-      return [];
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('Failed to get categories', { error: message });
+      throw new Error(`Failed to get qBittorrent categories: ${message}`);
     }
   }
 

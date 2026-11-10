@@ -116,6 +116,13 @@ Files will be found correctly because all paths align.
 
 ---
 
+## Usenet Categories RMAB Did Not Create
+
+- Picking a SABnzbd/NZBGet category that already exists (another app's) means RMAB never changes it: jobs land in **that category's folder**, with its settings (sorter, post-processing script)
+- RMAB imports from the path the client reports, so that folder must be visible to RMAB at the same path (or through remote path mapping); otherwise the import fails as "files not found"
+- After import, cleanup removes only the imported files there, never the folder's other contents
+- qBittorrent is different: a shared category's torrents still download to RMAB's folder (Manual mode)
+
 ## Remote Path Mapping (Advanced)
 
 **Note:** 99% of users don't need this. If your download client and RMAB run on the same machine or have access to the same file system (a NAS for example) with matching volume mounts (as shown above), skip this section.

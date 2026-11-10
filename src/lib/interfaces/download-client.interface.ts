@@ -298,9 +298,9 @@ export interface IDownloadClient {
 
   /**
    * Get available categories/labels from the download client.
-   * - qBittorrent: Returns configured category names
-   * - Transmission: Returns empty array (uses free-form labels)
-   * - Usenet clients: Returns empty array (feature scoped to torrent clients)
+   * - qBittorrent/SABnzbd/NZBGet: configured category names (SABnzbd's `*` left out);
+   *   throws when the client can't be read (an empty list must mean "none")
+   * - Deluge: labels; Transmission: empty array (uses free-form labels)
    */
   getCategories(): Promise<string[]>;
 

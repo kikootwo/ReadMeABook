@@ -10,6 +10,7 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { assertSafeToDelete, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
 import { collectGuardRoots, guardAllows, planDownloadCleanup, sweepEmptyParents } from './organize-cleanup-guard';
+import { removeImportedFilesOnly, usenetCategoryIsShared } from './shared-category-cleanup';
 import {
   folderRemovalBlocker,
   type ImportEvidence,
@@ -131,15 +132,21 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
       // Act on the path the guard returned; lstat so a symlink is removed as a link
       const stats = await fs.lstat(deletePath);
 
-      if (stats.isDirectory()) {
-        await fs.rm(deletePath, { recursive: true, force: true });
-        logger.info(`Removed directory: ${deletePath}`);
+      if (stats.isDirectory() && (await usenetCategoryIsShared(downloadHistory.downloadClient, configService))) {
+        // Another app's category: its folder may hold that app's files (shared-category-cleanup.ts)
+        if (await removeImportedFilesOnly(downloadPath, deletePath, evidence, logger)) {
+          await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupParents');
+        }
       } else {
-        await fs.unlink(deletePath);
-        logger.info(`Removed file: ${deletePath}`);
+        if (stats.isDirectory()) {
+          await fs.rm(deletePath, { recursive: true, force: true });
+          logger.info(`Removed directory: ${deletePath}`);
+        } else {
+          await fs.unlink(deletePath);
+          logger.info(`Removed file: ${deletePath}`);
+        }
+        await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupParents');
       }
-
-      await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupParents');
     } catch (fsError) {
       if ((fsError as NodeJS.ErrnoException).code === 'ENOENT') {
         logger.info(`Download path already deleted: ${deletePath}`);

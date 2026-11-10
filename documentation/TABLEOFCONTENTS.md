@@ -87,6 +87,7 @@
 - **Automatic-search match gates (one-word titles, required numbers, author whole words, volume conflict, #223)** → [phase3/match-gates.md](phase3/match-gates.md)
 - **Multi-download-client support (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet; base32 magnets, torrent IDs)** → [phase3/download-clients.md](phase3/download-clients.md)
 - **.torrent/.nzb fetch, redirects, Prowlarr key scoping, which server answered a failed grab (401/403 hint), user-picked release validation** → [phase3/download-clients.md](phase3/download-clients.md#source-fetch--prowlarr-key-scoping)
+- **Custom download category / label, a category another app already uses (ownership, SABnzbd category list #579)** → [phase3/download-clients.md](phase3/download-clients.md#download-categories-46-579)
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **qBittorrent torrent IDs (hybrid v1+v2 torrents, base32 magnets)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **qBittorrent finished in the incomplete folder (30 s relocation grace, "didn't move it" warning, writable save path, #520)** → [phase3/qbittorrent.md](phase3/qbittorrent.md#completion--relocation-grace)

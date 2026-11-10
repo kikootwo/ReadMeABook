@@ -367,6 +367,12 @@ When user deletes and re-requests the same audiobook:
 - Windows drive roots normalize to `C:/` (`normalizeGuardPath`), never `C:.` (the drive's current directory).
 - `media_dir` resolution shared via `src/lib/utils/media-dir.ts` (`media_dir` → `MEDIA_DIR` → `/media/audiobooks`).
 
+### Download cleanup in a category RMAB did not create
+**Code:** `src/lib/processors/shared-category-cleanup.ts`
+- When the job's usenet client (current config, same type as the row) uses a category that already existed in the client (not `readmeabook`, not `ownedCategory`; [download-clients.md](download-clients.md#download-categories-46-579)), a folder download is never removed recursively: that category's folder, sorter or script can put another app's files next to the job
+- Instead: unlink each verified imported file under the folder (records with `verified: true`, mapped onto the guard's canonical path), then `rmdir` each folder they left empty, deepest first, up to and including the job folder; a non-empty folder stays (extras such as `.nfo` or a cover stay too). Parents are swept only when the job folder is gone. The provenance gate, blocker re-walk and guard run first as before; the client's history archive still runs
+- No usenet client configured, or a different type → the normal whole-folder removal
+
 **Same-file copies:** `copyFile` is a no-op when source and destination are the same file (`isSameFile`: realpath equal, or same dev + non-zero inode); the organizer skips audio and cover art already in place.
 
 ## Verified Import (delete only what reached the library)
