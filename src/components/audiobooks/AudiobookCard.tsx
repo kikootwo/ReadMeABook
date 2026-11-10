@@ -9,7 +9,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import Image from 'next/image';
+import { BookCover, type CoverTone } from '@/components/audiobooks/BookCover';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { useCreateRequest } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,9 @@ interface AudiobookCardProps {
 }
 
 // Status configuration for elegant display
-const getStatusConfig = (audiobook: Audiobook) => {
+const getStatusConfig = (
+  audiobook: Audiobook
+): { type: string; label: string; color: CoverTone } | null => {
   if (audiobook.isAvailable || audiobook.requestStatus === 'completed') {
     return { type: 'available', label: 'In Library', color: 'emerald' };
   }
@@ -46,8 +48,6 @@ const getStatusConfig = (audiobook: Audiobook) => {
   return null;
 };
 
-const PLACEHOLDER_COVER = '/placeholder_cover.svg';
-
 export function AudiobookCard({
   audiobook,
   onRequestSuccess,
@@ -60,7 +60,6 @@ export function AudiobookCard({
   const [showModal, setShowModal] = useState(false);
   const [localRequestStatus, setLocalRequestStatus] = useState<string | undefined>(undefined);
   const [localIsIgnored, setLocalIsIgnored] = useState<boolean | undefined>(undefined);
-  const [coverError, setCoverError] = useState(false);
 
   // Build a display-only audiobook with local overrides
   const displayAudiobook = localRequestStatus !== undefined
@@ -104,113 +103,76 @@ export function AudiobookCard({
       >
         {/* Cover Container - The Hero */}
         <div className="relative">
-          {/* Cover Image with Premium Shadow */}
-          <div
-            className={`
-              relative overflow-hidden rounded-2xl
-              shadow-lg shadow-black/20 dark:shadow-black/40
-              group-hover:shadow-xl group-hover:shadow-black/25 dark:group-hover:shadow-black/50
-              transform group-hover:scale-[1.02] group-hover:-translate-y-1
-              transition-all duration-300 ease-out
-              ${squareCovers ? 'aspect-square' : 'aspect-[2/3]'}
-              ${status?.type === 'available' ? 'ring-2 ring-emerald-400/60 dark:ring-emerald-500/50' : ''}
-              ${status?.type === 'processing' ? 'ring-2 ring-amber-400/60 dark:ring-amber-500/50' : ''}
-            `}
-          >
-            {/* Cover Art */}
-            {audiobook.coverArtUrl && !coverError ? (
-              <Image
-                src={audiobook.coverArtUrl}
-                alt=""
-                fill
-                className="object-cover"
-                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
-                onError={() => setCoverError(true)}
-              />
-            ) : (
-              <Image
-                src={PLACEHOLDER_COVER}
-                alt=""
-                fill
-                className="object-cover"
-                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
-              />
-            )}
-
-            {/* Hover Overlay with Actions - Desktop Only
-                pointer-events-none by default so taps on mobile pass through to card
-                Only enable pointer-events on devices that support hover */}
-            <div className="
-              absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent
-              opacity-0 pointer-events-none
-              [@media(hover:hover)]:group-hover:opacity-100
-              [@media(hover:hover)]:group-hover:pointer-events-auto
-              transition-opacity duration-300
-            ">
-              <div className="absolute inset-x-0 bottom-0 p-4 flex flex-col gap-2">
-                {/* Quick Action Button */}
-                {canRequest ? (
-                  <button
-                    onClick={handleRequest}
-                    disabled={isLoading || !user}
-                    className={`
-                      w-full py-2.5 px-4 rounded-xl font-semibold text-sm
-                      backdrop-blur-md transition-all duration-200
-                      ${isLoading
-                        ? 'bg-white/20 text-white/70 cursor-wait'
-                        : 'bg-white text-gray-900 hover:bg-blue-500 hover:text-white hover:scale-[1.02] hover:shadow-lg hover:shadow-blue-500/25 active:scale-[0.98]'
-                      }
-                    `}
-                  >
-                    {isLoading ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        Requesting...
-                      </span>
-                    ) : !user ? 'Sign in to Request' : 'Request'}
-                  </button>
-                ) : status?.type === 'available' ? (
-                  <div className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center bg-emerald-500 text-white backdrop-blur-md shadow-lg shadow-emerald-500/25">
-                    In Your Library
-                  </div>
-                ) : (
-                  <div className={`
-                    w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center backdrop-blur-md
-                    ${status?.type === 'processing' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25' : ''}
-                    ${status?.type === 'pending' ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25' : ''}
-                    ${status?.type === 'denied' ? 'bg-red-500 text-white shadow-lg shadow-red-500/25' : ''}
-                  `}>
-                    {status?.type === 'processing' && (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        Processing
-                      </span>
+          <BookCover
+            coverUrl={audiobook.coverArtUrl}
+            squareCovers={squareCovers}
+            tone={status?.color ?? null}
+            overlay={
+              <>
+                {/* Hover Overlay with Actions - Desktop Only
+                    pointer-events-none by default so taps on mobile pass through to card
+                    Only enable pointer-events on devices that support hover */}
+                <div className="
+                  absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent
+                  opacity-0 pointer-events-none
+                  [@media(hover:hover)]:group-hover:opacity-100
+                  [@media(hover:hover)]:group-hover:pointer-events-auto
+                  transition-opacity duration-300
+                ">
+                  <div className="absolute inset-x-0 bottom-0 p-4 flex flex-col gap-2">
+                    {/* Quick Action Button */}
+                    {canRequest ? (
+                      <button
+                        onClick={handleRequest}
+                        disabled={isLoading || !user}
+                        className={`
+                          w-full py-2.5 px-4 rounded-xl font-semibold text-sm
+                          backdrop-blur-md transition-all duration-200
+                          ${isLoading
+                            ? 'bg-white/20 text-white/70 cursor-wait'
+                            : 'bg-white text-gray-900 hover:bg-blue-500 hover:text-white hover:scale-[1.02] hover:shadow-lg hover:shadow-blue-500/25 active:scale-[0.98]'
+                          }
+                        `}
+                      >
+                        {isLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            Requesting...
+                          </span>
+                        ) : !user ? 'Sign in to Request' : 'Request'}
+                      </button>
+                    ) : status?.type === 'available' ? (
+                      <div className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center bg-emerald-500 text-white backdrop-blur-md shadow-lg shadow-emerald-500/25">
+                        In Your Library
+                      </div>
+                    ) : (
+                      <div className={`
+                        w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center backdrop-blur-md
+                        ${status?.type === 'processing' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25' : ''}
+                        ${status?.type === 'pending' ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25' : ''}
+                        ${status?.type === 'denied' ? 'bg-red-500 text-white shadow-lg shadow-red-500/25' : ''}
+                      `}>
+                        {status?.type === 'processing' && (
+                          <span className="flex items-center justify-center gap-2">
+                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            Processing
+                          </span>
+                        )}
+                        {status?.type === 'pending' && 'Requested'}
+                        {status?.type === 'denied' && 'Request Denied'}
+                      </div>
                     )}
-                    {status?.type === 'pending' && 'Requested'}
-                    {status?.type === 'denied' && 'Request Denied'}
                   </div>
-                )}
-              </div>
-            </div>
-
-            {/* Subtle Status Indicator (visible when not hovered) */}
-            {status && (
-              <div className={`
-                absolute top-3 right-3 w-3 h-3 rounded-full
-                shadow-lg transition-opacity duration-300 group-hover:opacity-0
-                ${status.type === 'available' ? 'bg-emerald-400' : ''}
-                ${status.type === 'processing' ? 'bg-amber-400 animate-pulse' : ''}
-                ${status.type === 'pending' ? 'bg-blue-400' : ''}
-                ${status.type === 'denied' ? 'bg-red-400' : ''}
-              `} />
-            )}
-
+                </div>
+              </>
+            }
+          >
             {/* Rating Badge - Top Left, Elegant */}
             {audiobook.rating && audiobook.rating > 0 && (
               <div className="absolute top-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg bg-black/50 backdrop-blur-md text-white text-xs font-medium transition-opacity duration-300 group-hover:opacity-0">
@@ -233,7 +195,7 @@ export function AudiobookCard({
                 <span>Ignored</span>
               </div>
             )}
-          </div>
+          </BookCover>
         </div>
 
         {/* Metadata - Clean, Minimal */}
