@@ -31,10 +31,14 @@ const expectAtMostThreeColumns = (grid: HTMLElement) => {
   expect(classes.filter((c) => /grid-cols-(?:[4-9]|\d{2,})$/.test(c))).toEqual([]);
 };
 
-/** Each card's name and badge share one row that wraps the badge below the name when it can't fit */
+/**
+ * Each card's name and badge share one row that wraps the badge below the name only when it can't fit;
+ * the name block grows from a zero basis, so its description wraps before the badge does
+ */
 const expectWrappingHeaders = () => {
   for (const name of CLIENT_NAMES) {
     const heading = screen.getByRole('heading', { level: 4, name });
+    expect(heading.parentElement!.className.split(/\s+/), name).toContain('flex-1');
     const row = heading.parentElement!.parentElement as HTMLElement;
     const badge = row.querySelector(':scope > span') as HTMLElement;
     expect(badge?.textContent, name).toMatch(/^(Torrent|Usenet)$/);

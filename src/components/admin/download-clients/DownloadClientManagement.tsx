@@ -258,7 +258,7 @@ export function DownloadClientManagement({
           {/* qBittorrent Card */}
           <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6${hasTorrentClient ? ' opacity-50' : ''}`}>
             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 mb-3">
-              <div>
+              <div className="flex-1">
                 <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
                   qBittorrent
                 </h4>
@@ -289,7 +289,7 @@ export function DownloadClientManagement({
           {/* Transmission Card */}
           <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6${hasTorrentClient ? ' opacity-50' : ''}`}>
             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 mb-3">
-              <div>
+              <div className="flex-1">
                 <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
                   Transmission
                 </h4>
@@ -320,7 +320,7 @@ export function DownloadClientManagement({
           {/* Deluge Card */}
           <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6${hasTorrentClient ? ' opacity-50' : ''}`}>
             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 mb-3">
-              <div>
+              <div className="flex-1">
                 <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
                   Deluge
                 </h4>
@@ -351,7 +351,7 @@ export function DownloadClientManagement({
           {/* SABnzbd Card */}
           <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6${hasUsenetClient ? ' opacity-50' : ''}`}>
             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 mb-3">
-              <div>
+              <div className="flex-1">
                 <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
                   SABnzbd
                 </h4>
@@ -382,7 +382,7 @@ export function DownloadClientManagement({
           {/* NZBGet Card */}
           <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6${hasUsenetClient ? ' opacity-50' : ''}`}>
             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 mb-3">
-              <div>
+              <div className="flex-1">
                 <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
                   NZBGet
                 </h4>
