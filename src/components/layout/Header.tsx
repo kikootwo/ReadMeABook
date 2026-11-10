@@ -132,14 +132,14 @@ export function Header() {
                 ReadMeABook
               </span>
             </Link>
-            {/* Hide version badge on mobile to prevent overlap */}
+            {/* Version badge: not on phones; from 1024 to 1279 px only its update dot (the inline nav needs the room) */}
             <div className="hidden sm:block flex-shrink-0">
-              <VersionBadge />
+              <VersionBadge compactAtLg />
             </div>
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden lg:flex items-center gap-5 xl:gap-6 whitespace-nowrap">
             <Link
               href="/"
               className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
@@ -174,6 +174,14 @@ export function Header() {
             )}
             {user && (
               <Link
+                href="/library"
+                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                Library
+              </Link>
+            )}
+            {user && (
+              <Link
                 href="/requests"
                 className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
@@ -195,7 +203,7 @@ export function Header() {
             {/* Search Button (visible on mobile) */}
             <Link
               href="/search"
-              className="md:hidden p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
+              className="lg:hidden p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
               aria-label="Search"
             >
               <svg
@@ -216,7 +224,7 @@ export function Header() {
             {/* Mobile Menu Button */}
             <button
               onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="md:hidden p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
+              className="lg:hidden p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
               aria-label="Toggle menu"
             >
               {showMobileMenu ? (
@@ -267,7 +275,7 @@ export function Header() {
                       {user.username.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <span className="hidden md:inline text-gray-700 dark:text-gray-300">
+                  <span className="hidden xl:inline text-gray-700 dark:text-gray-300">
                     {user.username}
                   </span>
                 </button>
@@ -282,7 +290,7 @@ export function Header() {
 
         {/* Mobile Navigation Menu */}
         {showMobileMenu && (
-          <div className="md:hidden border-t border-gray-200 dark:border-gray-700 mt-3 pt-3">
+          <div className="lg:hidden border-t border-gray-200 dark:border-gray-700 mt-3 pt-3">
             <nav className="flex flex-col space-y-2">
               <Link
                 href="/"
@@ -319,6 +327,15 @@ export function Header() {
                   className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
                 >
                   BookDate
+                </Link>
+              )}
+              {user && (
+                <Link
+                  href="/library"
+                  onClick={() => setShowMobileMenu(false)}
+                  className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+                >
+                  Library
                 </Link>
               )}
               {user && (
