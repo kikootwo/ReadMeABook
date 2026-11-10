@@ -10,7 +10,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { cancelLoadedRequest } from '@/lib/services/request-cancel.service';
 import { cancelResponse } from '@/lib/utils/cancel-response';
-import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord, withRequestLibraryDisplay } from '@/lib/services/request-detail-query';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord, hideStoredPick, withRequestLibraryDisplay } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { toJsonSafe } from '@/lib/utils/json-safe';
@@ -296,7 +296,8 @@ export async function PATCH(
 
         return NextResponse.json({
           success: true,
-          request: hidePlacementRecord(updated),
+          // As the GET: the stored pick for admins only, and without the indexer key
+          request: await stripProwlarrKeyFromResults(hideStoredPick(updated, req.user.role)),
           message: `Request retry initiated (${jobType})`,
         });
       }

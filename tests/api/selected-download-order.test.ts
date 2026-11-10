@@ -35,9 +35,9 @@ describe('one selected download per request: the newest (#332)', () => {
     expect(OWNER_REQUEST_DETAIL_SELECT.downloadHistory).toMatchObject({ take: 1, orderBy: NEWEST_FIRST });
   });
 
+  // GET /api/admin/requests/recent reads no download row
   it.each([
     ['GET /api/admin/requests', '@/app/api/admin/requests/route', 'http://localhost/api/admin/requests'],
-    ['GET /api/admin/requests/recent', '@/app/api/admin/requests/recent/route', 'http://localhost/api/admin/requests/recent'],
   ])('%s', async (_name, modulePath, url) => {
     const { GET } = await import(modulePath);
     await GET({ url } as unknown as NextRequest);

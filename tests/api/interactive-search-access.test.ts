@@ -230,10 +230,11 @@ describe('Prowlarr key never reaches the browser', () => {
     });
   });
 
-  it('GET /api/admin/requests/recent removes the key from a stored link', async () => {
+  it('GET /api/admin/requests/recent returns no stored link and no key', async () => {
     authRequest = { user: { id: 'admin-1', role: 'admin', tokenId: 'tok-2' }, json: vi.fn() };
     prismaMock.request.findMany.mockResolvedValue([{
-      id: 'req-1', status: 'downloaded', type: 'audiobook', createdAt: new Date('2024-01-01'), completedAt: null, errorMessage: null,
+      id: 'req-1', status: 'failed', type: 'audiobook', createdAt: new Date('2024-01-01'), completedAt: null,
+      errorMessage: `Grab failed: ${PROWLARR_LINK}`,
       audiobook: { id: 'ab-1', title: 'T', author: 'A', absItemId: null, libraryAsin: null },
       user: { id: 'user-1', plexUsername: 'owner' },
       downloadHistory: [{ torrentUrl: PROWLARR_LINK }],
@@ -245,6 +246,28 @@ describe('Prowlarr key never reaches the browser', () => {
 
     expect(response.status).toBe(200);
     expect(JSON.stringify(body)).not.toContain(KEY);
-    expect(body.requests[0]).toMatchObject({ requestId: 'req-1', torrentUrl: 'http://prowlarr:9696/1/download?link=abc' });
+    expect(body.requests[0]).toMatchObject({ requestId: 'req-1', errorMessage: 'Grab failed: http://prowlarr:9696/1/download?link=abc' });
+    expect(body.requests[0].torrentUrl).toBeUndefined();
+    expect(prismaMock.request.findMany.mock.calls.at(-1)?.[0].include.downloadHistory).toBeUndefined();
+  });
+
+  it.each([
+    ['admin session', { id: 'admin-1', role: 'admin' }],
+    ['admin API token', { id: 'admin-1', role: 'admin', tokenId: 'tok-2' }],
+  ])('GET /api/requests gives an %s stored picks without the key', async (_label, user) => {
+    authRequest = { user, nextUrl: new URL('http://localhost/api/requests'), json: vi.fn() };
+    prismaMock.request.findMany.mockResolvedValue([{
+      id: 'req-1', userId: 'user-1', status: 'awaiting_approval', audiobook: { id: 'ab-1' }, user: { id: 'user-1' },
+      selectedTorrent: { downloadUrl: PROWLARR_LINK },
+    }]);
+    prismaMock.request.count.mockResolvedValue(1);
+
+    const { GET } = await import('@/app/api/requests/route');
+    const response = await GET({ nextUrl: new URL('http://localhost/api/requests') } as never);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(body)).not.toContain(KEY);
+    expect(body.requests[0].selectedTorrent).toEqual({ downloadUrl: 'http://prowlarr:9696/1/download?link=abc' });
   });
 });

@@ -37,7 +37,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Request ID, title, user, status, created/completed dates
 - `title`/`author` requested, `displayTitle`/`displayAuthor` shown, `libraryAsin` effective: as the list above (#325a)
 - Limited to 50 entries, no filtering
-- `torrentUrl` (newest selected download) goes out through `stripProwlarrKeyFromResults()`: no indexer key
+- No download fields (no `torrentUrl`); the response goes out through `stripProwlarrKeyFromResults()`: no indexer key
 
 **GET /api/admin/requests/pending-approval**
 - Requests with status 'awaiting_approval', includes audiobook + user details

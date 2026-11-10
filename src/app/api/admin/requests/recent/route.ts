@@ -37,16 +37,6 @@ export async function GET(request: NextRequest) {
             plexUsername: true,
           },
         },
-        downloadHistory: {
-          where: {
-            selected: true,
-          },
-          select: {
-            torrentUrl: true,
-          },
-          orderBy: { createdAt: 'desc' }, // the newest selected row (#332)
-          take: 1,
-        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -72,11 +62,10 @@ export async function GET(request: NextRequest) {
         createdAt: request.createdAt,
         completedAt: request.completedAt,
         errorMessage: request.errorMessage,
-        torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
       };
     });
 
-    // A stored torrentUrl can be an indexer link; it goes out without the indexer key
+    // No stored download links here; any other text goes out without the indexer key
     return NextResponse.json({ requests: await stripProwlarrKeyFromResults(formatted) });
       } catch (error) {
         logger.error('Failed to fetch recent requests', { error: error instanceof Error ? error.message : String(error) });
