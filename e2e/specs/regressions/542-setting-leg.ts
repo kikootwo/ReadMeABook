@@ -146,7 +146,9 @@ export async function settingLeg(opts: {
 /** The leg's checks (soft). */
 export function expectSettingLeg(r: Record<string, unknown>) {
   const none = { pageFlag: false, boxes: 0, menuItems: 0, word: false };
-  expect.soft([r.storedBefore, r.settingBefore, r.providersBefore], 'leg 0: off on a fresh stack (no key stored)').toEqual(['<absent>', false, false]);
+  // No key on a stack this spec opens; 'false' when an earlier spec saved the settings page (it sends the field)
+  expect.soft(['<absent>', 'false'], 'leg 0: off at the start (no key stored, or saved off)').toContain(r.storedBefore);
+  expect.soft([r.settingBefore, r.providersBefore], 'leg 0: the settings and providers responses say off').toEqual([false, false]);
   expect.soft([r.postStatus, r.storedMark], 'leg 0: explicit on create ignored while off').toEqual([201, 'false']);
   expect.soft(r.requesterPut, 'leg 0: the requester PUT is refused').toEqual({ status: 403, body: { error: 'FeatureDisabled', message: 'The Explicit mark is turned off in Settings' } });
   expect.soft((r.adminPut as { status: number }).status, 'leg 0: the admin PUT is refused').toBe(403);
