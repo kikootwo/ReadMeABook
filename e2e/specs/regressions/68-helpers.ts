@@ -5,7 +5,7 @@
 
 import { expect, type Browser, type Page } from '@playwright/test';
 import { Abs, authState, ctl, env, evidencePath, fakeArr, Rmab, urls, waitFor, type Book } from '../../lib/harness';
-import { markJobs, psql, sh, sqlStr, waitOrganized } from './242-helpers';
+import { asApp, markJobs, psql, q, sh, sqlStr, waitOrganized } from './242-helpers';
 
 export const SHOTS = '68';
 export const SHARED_DOWNLOADS = '/media/downloads';
@@ -181,4 +181,28 @@ export async function elementShot(page: Page, selector: ReturnType<Page['locator
   await selector.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   await selector.screenshot({ path: evidencePath(SHOTS, 'shots', `${name}.jpg`), type: 'jpeg', quality: 85 });
+}
+
+/** A made-up book row (offline RMAB can't fetch one by ASIN); returns its id. */
+export function insertBook(title: string, asin: string): string {
+  return psql(`insert into audiobooks (id, audible_asin, title, author, narrator, status, updated_at)
+               values (gen_random_uuid()::text, ${sqlStr(asin)}, ${sqlStr(title)}, 'Test Author', 'Other Narrator', 'requested', now()) returning id`).split('\n')[0];
+}
+
+/** Generated tones (6 s each) as the app user: `dir/<name>` for each name. */
+export function generateTones(dir: string, names: string[]): string[] {
+  asApp([`mkdir -p ${q(dir)}`, ...names.map((n, i) =>
+    `ffmpeg -nostdin -loglevel error -f lavfi -i sine=frequency=${300 + 100 * i}:duration=6 -c:a libmp3lame -b:a 64k -y ${q(`${dir}/${n}`)}`)].join('\n'));
+  return names.map((n) => `${dir}/${n}`);
+}
+
+/** Manual Import of `folderPath` for a book row or an existing request; waits for the organize job. */
+export async function manualImport(rmab: Rmab, folderPath: string, target: { audiobookId: string } | { requestId: string }) {
+  const since = markJobs();
+  const res = await rmab.raw('POST', '/api/admin/manual-import', { ...target, folderPath, cleanupSource: false });
+  const body = await res.clone().json().catch(() => ({}));
+  expect(res.status, `manual import ${folderPath}: ${JSON.stringify(body)}`).toBe(200);
+  const requestId: string = body.requestId ?? (target as { requestId: string }).requestId;
+  const settled = await waitOrganized(since, requestId);
+  return { requestId, status: settled.status };
 }
