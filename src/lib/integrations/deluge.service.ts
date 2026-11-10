@@ -165,30 +165,42 @@ export class DelugeService implements IDownloadClient {
     if (!url || typeof url !== 'string' || url.trim() === '') {
       throw new Error('Invalid download URL: URL is required and must be a non-empty string');
     }
+    return this.addSource(url, options);
+  }
+
+  /** A .torrent file's own bytes (admin Add Torrent): the same add as addDownload, sent as they are */
+  async addTorrentData(data: Buffer, options?: AddDownloadOptions): Promise<AddDownloadResult> {
+    return this.addSource(data, options);
+  }
+
+  /** Shared by addDownload and addTorrentData: the label (category) and the add */
+  private async addSource(source: string | Buffer, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     const category = options?.category || this.defaultCategory;
-    return url.startsWith('magnet:')
-      ? this.addMagnetLink(url, category, options)
-      : this.addTorrentFile(url, category, options);
+    if (Buffer.isBuffer(source)) return this.addTorrentBuffer(source, category, options);
+    return source.startsWith('magnet:') ? this.addMagnetLink(source, category, options) : this.addTorrentFile(source, category, options);
   }
 
   private async addMagnetLink(magnetUrl: string, category: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     const hashes = magnetHashes(magnetUrl);
     if (!hashes?.v1) throw new Error('Invalid magnet link - could not extract info_hash');
     logger.info(`Extracted info_hash from magnet: ${hashes.v1}`);
+    return this.addOnce(hashes, 'magnet link', 'core.add_torrent_magnet', [magnetUrl, this.buildTorrentOptions(options?.paused)], category);
+  }
 
+  /** Shared by magnet and .torrent adds: a copy already in Deluge is taken over; else the add, seed limits off, label */
+  private async addOnce(hashes: TorrentHashes, kind: string, method: string, args: unknown[], category: string): Promise<AddDownloadResult> {
     const existing = await this.existingTorrent(hashes);
     if (existing) {
       logger.info(`Torrent ${existing.id} is already in Deluge (not added by RMAB)`);
       return existing;
     }
 
-    const opts = this.buildTorrentOptions(options?.paused);
-    const data = await this.rpc('core.add_torrent_magnet', [magnetUrl, opts]);
-    if (!data.result) return this.recheckRejectedAdd(hashes, `Deluge rejected magnet link: ${data.error?.message || 'unknown error'}`);
+    const data = await this.rpc(method, args);
+    if (!data.result) return this.recheckRejectedAdd(hashes, `Deluge rejected ${kind}: ${data.error?.message || 'unknown error'}`);
 
     const id = addedTorrentId(data.result, hashes, (message) => logger.warn(message));
     await this.postAddSetup(id, category);
-    logger.info(`Successfully added magnet link: ${id}`);
+    logger.info(`Successfully added ${kind}: ${id}`);
     return { id, alreadyInClient: false, infoHash: hashes.v1 };
   }
 
@@ -202,8 +214,11 @@ export class DelugeService implements IDownloadClient {
       timeoutMs: DOWNLOAD_CLIENT_TIMEOUT,
     });
     if (source.kind === 'magnet') return this.addMagnetLink(source.magnetUrl, category, options);
+    return this.addTorrentBuffer(source.data, category, options);
+  }
 
-    const torrentBuffer = source.data;
+  /** Shared by fetched and uploaded .torrent files: parse for the hashes, send the bytes unchanged under a fixed name */
+  private async addTorrentBuffer(torrentBuffer: Buffer, category: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     let parsed: any;
     try { parsed = await parseTorrent(torrentBuffer); }
     catch { throw new Error('Invalid .torrent file - failed to parse'); }
@@ -212,22 +227,8 @@ export class DelugeService implements IDownloadClient {
     const hashes = torrentFileHashes(parsed);
     if (!hashes?.v1) throw new Error('Failed to extract info_hash from .torrent file');
     logger.info(`Extracted info_hash: ${hashes.v1}`);
-
-    const existing = await this.existingTorrent(hashes);
-    if (existing) {
-      logger.info(`Torrent ${existing.id} is already in Deluge (not added by RMAB)`);
-      return existing;
-    }
-
-    const filename = parsed.name ? `${parsed.name}.torrent` : 'torrent.torrent';
-    const opts = this.buildTorrentOptions(options?.paused);
-    const data = await this.rpc('core.add_torrent_file', [filename, torrentBuffer.toString('base64'), opts]);
-    if (!data.result) return this.recheckRejectedAdd(hashes, `Deluge rejected .torrent file: ${data.error?.message || 'unknown error'}`);
-
-    const id = addedTorrentId(data.result, hashes, (message) => logger.warn(message));
-    await this.postAddSetup(id, category);
-    logger.info(`Successfully added torrent: ${id}`);
-    return { id, alreadyInClient: false, infoHash: hashes.v1 };
+    const args = [`${hashes.v1}.torrent`, torrentBuffer.toString('base64'), this.buildTorrentOptions(options?.paused)];
+    return this.addOnce(hashes, '.torrent file', 'core.add_torrent_file', args, category);
   }
 
   /** A stored base32 hash is looked up (and acted on) as hex: Deluge keys torrents by lowercase hex */

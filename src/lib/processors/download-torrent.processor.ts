@@ -21,6 +21,8 @@ import {
   DownloadSourceError,
   UnusableDownloadSourceError,
   isRetryableDownloadSourceError,
+  type AddDownloadOptions,
+  type AddDownloadResult,
   type IDownloadClient,
 } from '../interfaces/download-client.interface';
 
@@ -49,6 +51,14 @@ async function resumeHeldJob(client: IDownloadClient, id: string, logger: Return
   } catch (error) {
     logger.warn(`Could not resume paused ${client.clientType} job ${id}`, { error: error instanceof Error ? error.message : String(error) });
   }
+}
+
+/** An uploaded .torrent's bytes to a torrent client that takes them; any other client fails for good */
+async function addUploadedTorrent(client: IDownloadClient, base64: string, options: AddDownloadOptions): Promise<AddDownloadResult> {
+  if (client.protocol !== 'torrent' || !client.addTorrentData) {
+    throw new Error(`${client.clientType} cannot add a .torrent file`);
+  }
+  return client.addTorrentData(Buffer.from(base64, 'base64'), options);
 }
 
 /**
@@ -131,18 +141,22 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
       let infoHash: string | undefined;
       let paused: boolean | undefined;
       try {
-        ({ id: downloadClientId, alreadyInClient, infoHash, paused } = await client.addDownload(
-          // Prowlarr links (also ones published on a proxy's address) go to the configured base; others as-is
-          toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
-          {
-            category,
-            priority: 'normal',
-            sourceAuth,
-            ...(isRetry ? { retry: true } : {}),
-            // SABnzbd matches a job it already holds by the release title (#329)
-            ...(protocol === 'usenet' ? { releaseTitle: candidate.title } : {}),
-          }
-        ));
+        const addOptions = {
+          category,
+          priority: 'normal' as const,
+          sourceAuth,
+          ...(isRetry ? { retry: true } : {}),
+          // SABnzbd matches a job it already holds by the release title (#329)
+          ...(protocol === 'usenet' ? { releaseTitle: candidate.title } : {}),
+        };
+        // An admin-uploaded .torrent (Add Torrent): its bytes, from the job data only, never a candidate field
+        ({ id: downloadClientId, alreadyInClient, infoHash, paused } = payload.torrentFile && candidate === torrent
+          ? await addUploadedTorrent(client, payload.torrentFile, addOptions)
+          : await client.addDownload(
+            // Prowlarr links (also ones published on a proxy's address) go to the configured base; others as-is
+            toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
+            addOptions
+          ));
       } catch (error) {
         if (error instanceof UnusableDownloadSourceError) {
           // This release can't be fetched (bad redirect, malformed magnet, ...): try the next one

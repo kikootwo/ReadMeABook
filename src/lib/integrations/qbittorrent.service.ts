@@ -297,7 +297,16 @@ export class QBittorrentService implements IDownloadClient {
       logger.error('Invalid download URL', { url });
       throw new Error('Invalid download URL: URL is required and must be a non-empty string');
     }
+    return this.addSource(url, options, retried);
+  }
 
+  /** A .torrent file's own bytes (admin Add Torrent): the same add as addDownload, sent as they are */
+  async addTorrentData(data: Buffer, options?: AddDownloadOptions): Promise<AddDownloadResult> {
+    return this.addSource(data, this.torrentOptions(options));
+  }
+
+  /** Shared by addTorrent and addTorrentData: login, category (owned or not), the add, one re-login on 403 */
+  private async addSource(source: string | Buffer, options?: AddTorrentOptions, retried = false): Promise<AddDownloadResult> {
     // Ensure we're authenticated
     if (!this.cookie && !this.authOptional) {
       await this.login();
@@ -312,13 +321,15 @@ export class QBittorrentService implements IDownloadClient {
       const category = ensured || requested;
       const savePath = ensured ? undefined : this.remoteSavePath();
 
-      // Determine if this is a magnet link or .torrent file URL
-      if (url.startsWith('magnet:')) {
+      // Determine if this is a .torrent file's bytes, a magnet link or a .torrent file URL
+      if (Buffer.isBuffer(source)) {
+        return await this.uploadTorrentData(source, category, options, savePath);
+      } else if (source.startsWith('magnet:')) {
         logger.info('[QBittorrent] Detected magnet link');
-        return await this.addMagnetLink(url, category, options, savePath);
+        return await this.addMagnetLink(source, category, options, savePath);
       } else {
         logger.info('[QBittorrent] Detected .torrent file URL');
-        return await this.addTorrentFile(url, category, options, savePath);
+        return await this.addTorrentFile(source, category, options, savePath);
       }
     } catch (error) {
       // Preserve source/indexer failures so the processor can try another release
@@ -338,7 +349,7 @@ export class QBittorrentService implements IDownloadClient {
       if (!retried && !this.authOptional && axios.isAxiosError(error) && error.response?.status === 403) {
         logger.info('[QBittorrent] Session expired, re-authenticating...');
         await this.login();
-        return this.addTorrent(url, options, true);
+        return this.addSource(source, options, true);
       }
 
       logger.error('Failed to add torrent', { error: error instanceof Error ? error.message : String(error) });
@@ -491,8 +502,16 @@ export class QBittorrentService implements IDownloadClient {
       logger.info(' Download source resolved to a magnet link');
       return await this.addMagnetLink(source.magnetUrl, category, options, savePath);
     }
+    return this.uploadTorrentData(source.data, category, options, savePath);
+  }
 
-    const torrentBuffer = source.data;
+  /** Shared by fetched and uploaded .torrent files: parse for the hashes, then upload the bytes unchanged */
+  private async uploadTorrentData(
+    torrentBuffer: Buffer,
+    category: string,
+    options?: AddTorrentOptions,
+    savePath?: string
+  ): Promise<AddDownloadResult> {
     logger.info(` Processing torrent file: ${torrentBuffer.length} bytes`);
 
     // Parse .torrent file to extract info_hash (deterministic)
@@ -520,9 +539,8 @@ export class QBittorrentService implements IDownloadClient {
     // RMAB manages torrent lifecycle via the cleanup-seeded-torrents processor.
     const formData = new FormData();
 
-    const filename = parsedTorrent.name ? `${parsedTorrent.name}.torrent` : 'torrent.torrent';
     formData.append('torrents', torrentBuffer, {
-      filename,
+      filename: `${hashes.v1}.torrent`, // fixed: never a name taken from the file
       contentType: 'application/x-bittorrent',
     });
     formData.append('category', category);
@@ -1137,12 +1155,17 @@ export class QBittorrentService implements IDownloadClient {
    * Delegates to addTorrent with sensible defaults for audiobook downloads.
    */
   async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
-    return this.addTorrent(url, {
+    return this.addTorrent(url, this.torrentOptions(options));
+  }
+
+  /** The unified options as addTorrent's: every add through the interface is tagged `audiobook` */
+  private torrentOptions(options?: AddDownloadOptions): AddTorrentOptions {
+    return {
       category: options?.category,
       paused: options?.paused,
       tags: ['audiobook'],
       sourceAuth: options?.sourceAuth,
-    });
+    };
   }
 
   /**

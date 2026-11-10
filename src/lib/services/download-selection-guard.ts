@@ -5,6 +5,7 @@
  * - Torrent/NZB selections: downloadUrl must be a magnet URI or a Prowlarr
  *   proxy-download URL (`/{indexerId}/download`), always rewritten onto the
  *   configured Prowlarr origin and base path.
+ * - Magnets an admin adds by hand (Add Torrent): the same rule plus exactly one v1 hash.
  * - Anna's Archive selections: only the md5 is trusted; links are rebuilt server-side.
  * - Search responses: the Prowlarr API key is stripped (by value) before leaving the server.
  */
@@ -12,6 +13,8 @@
 import { NextResponse } from 'next/server';
 import { getProwlarrConnection } from '@/lib/integrations/prowlarr-connection';
 import { isMagnetUri, stripApiKey, toConfiguredProwlarrUrl } from '@/lib/utils/prowlarr-url';
+import { decodedMagnet } from '@/lib/integrations/torrent-ids';
+import { MAX_MAGNET_BODY_BYTES } from '@/lib/constants/download-source';
 
 export const DEFAULT_ANNAS_ARCHIVE_BASE_URL = 'https://annas-archive.gl';
 
@@ -35,6 +38,34 @@ export async function checkClientDownloadUrl(url: unknown): Promise<GuardResult<
   const { base } = await getProwlarrConnection();
   const rewritten = toConfiguredProwlarrUrl(url, base);
   return rewritten ? { ok: true, value: rewritten } : { ok: false, error: UNTRUSTED_DOWNLOAD_URL_MESSAGE };
+}
+
+const MAGNET_HASH_PARAM = /[?&]xt(?:\.\d+)?=urn:(btih|btmh):([^&]*)/gi; // the params magnetHashes reads
+const BTIH_VALUE = /^(?:[0-9a-f]{40}|[a-z2-7]{32})$/i;
+
+/**
+ * A magnet an admin adds to a request by hand: the shared rule (`checkClientDownloadUrl`), and
+ * strictly one torrent: at most 16 KiB, no control characters, exactly one btih (`xt` or `xt.N`) of
+ * 40 hex or 32 base32 characters, at most one btmh. The value is the magnet with `&amp;` read as `&`
+ * (what every client is sent), otherwise the string as given.
+ */
+export async function checkAddableMagnet(url: unknown): Promise<GuardResult<string>> {
+  if (typeof url !== 'string' || url.trim() === '') return { ok: false, error: 'Paste a magnet link' };
+  if (Buffer.byteLength(url, 'utf8') > MAX_MAGNET_BODY_BYTES) return { ok: false, error: 'This magnet link is too long' };
+  if (/[\x00-\x1f\x7f]/.test(url) || !isMagnetUri(url)) return { ok: false, error: 'This is not a magnet link' };
+  const shared = await checkClientDownloadUrl(url);
+  if (!shared.ok) return shared;
+
+  const magnet = decodedMagnet(shared.value);
+  const params = [...magnet.matchAll(MAGNET_HASH_PARAM)];
+  const btih = params.filter(([, kind]) => kind.toLowerCase() === 'btih');
+  const btmh = params.length - btih.length;
+  if (btih.length > 1 || btmh > 1) return { ok: false, error: 'This magnet link names more than one torrent' };
+  if (btih.length === 0) {
+    return { ok: false, error: btmh ? 'This magnet link has no BitTorrent v1 hash (btih); use the .torrent file' : 'This magnet link has no info hash' };
+  }
+  if (!BTIH_VALUE.test(btih[0][2])) return { ok: false, error: "This magnet link's info hash is not valid" };
+  return { ok: true, value: magnet };
 }
 
 /** Validate a client- or DB-supplied torrent/NZB selection (downloadUrl normalized onto the configured base). */

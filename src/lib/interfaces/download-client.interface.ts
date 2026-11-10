@@ -248,6 +248,12 @@ export interface IDownloadClient {
   addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult>;
 
   /**
+   * Add a .torrent file's bytes as they are (admin Add Torrent). Torrent clients only; the same add
+   * as a fetched .torrent in addDownload (category, tag, save path, seed limits, takeover check).
+   */
+  addTorrentData?(data: Buffer, options?: AddDownloadOptions): Promise<AddDownloadResult>;
+
+  /**
    * Get current status of a download.
    * Includes retry logic for race conditions (e.g., torrent not immediately available after adding).
    * @param id - Download ID returned by addDownload
