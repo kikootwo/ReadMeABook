@@ -95,7 +95,7 @@ describe('Request action routes', () => {
     configState.values.clear();
     // The fetch-ebook gate reads its keys through the config service (ebookSourcesEnabled)
     configServiceMock.get.mockImplementation(async (key: string) => configState.values.get(key) ?? null);
-    authRequest ={ user: { id: 'user-1', role: 'user' }, json: vi.fn() };
+    authRequest = { user: { id: 'user-1', role: 'user' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     prismaMock.configuration.findUnique.mockImplementation(
       async ({ where: { key } }: { where: { key: string } }) => {
