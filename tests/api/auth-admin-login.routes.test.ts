@@ -39,7 +39,7 @@ vi.mock('@/lib/utils/jwt', () => ({
 
 const makeRequest = (body: Record<string, any>) => ({
   json: vi.fn().mockResolvedValue(body),
-  headers: new Headers({ 'x-forwarded-for': '203.0.113.7' }),
+  headers: new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7' }),
   cookies: { get: () => undefined },
 });
 

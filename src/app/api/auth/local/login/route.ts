@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES, requireJsonContentType: true });
     if (!bodyResult.ok) return bodyResult.response;
     const { username, password } = bodyResult.data;
 

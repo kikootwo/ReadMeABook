@@ -10,6 +10,10 @@
  * the issue time and a hash of the account's stored password hash, keyed by a purpose key
  * derived from the access-token secret. A password change, a deleted account or a new
  * secret ends every cookie for that account.
+ *
+ * Counts: one account has at most SLOTS_PER_ACCOUNT known-browser buckets. A cookie's
+ * slot comes from its MAC, so a fifth browser shares a slot (and its count) with one of
+ * the others; no cookie is ended to make room.
  */
 
 import crypto from 'crypto';
@@ -25,6 +29,7 @@ const MAX_COOKIE_CHARS = 256;
 const MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
 const FUTURE_SKEW_SECONDS = 5 * 60;
 const BUCKET_ID_CHARS = 32;
+export const SLOTS_PER_ACCOUNT = 4;
 
 /** The fields of the signed-in account row the cookie is bound to */
 export interface KnownBrowserAccount {
@@ -32,8 +37,12 @@ export interface KnownBrowserAccount {
   authToken: string | null;
 }
 
+function passwordBinding(authToken: string): string {
+  return crypto.createHash('sha256').update(authToken).digest('hex');
+}
+
 function computeMac(userId: string, issuedAt: number, authToken: string): Buffer {
-  const binding = crypto.createHash('sha256').update(authToken).digest('hex');
+  const binding = passwordBinding(authToken);
   return crypto
     .createHmac('sha256', derivePurposeKey(PURPOSE))
     .update(`rmab-known-browser|${VERSION}|${userId}|${issuedAt}|${binding}`)
@@ -69,8 +78,14 @@ export function knownBrowserBucket(
   const expected = computeMac(userId, issuedAt, account.authToken);
   if (!crypto.timingSafeEqual(presented, expected)) return null;
 
-  // Keyed on the recomputed MAC, so encoding variants of one cookie share one bucket
-  return crypto.createHash('sha256').update(expected).digest('hex').slice(0, BUCKET_ID_CHARS);
+  // Slot from the recomputed MAC (encoding variants of one cookie share it); the password
+  // binding gives the account fresh buckets after a password change
+  const slot = expected[0] % SLOTS_PER_ACCOUNT;
+  return crypto
+    .createHash('sha256')
+    .update(`${userId}|${passwordBinding(account.authToken)}|${slot}`)
+    .digest('hex')
+    .slice(0, BUCKET_ID_CHARS);
 }
 
 /** Read the cookie from a sign-in request */

@@ -122,7 +122,7 @@ describe('a reset password works at the admin login', () => {
     const login = (password: string) =>
       POST({
         json: async () => ({ username: ' Admin ', password }),
-        headers: new Headers({ 'x-forwarded-for': '203.0.113.7' }),
+        headers: new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7' }),
         cookies: { get: () => undefined },
       } as any);
 

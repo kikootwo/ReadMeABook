@@ -5,7 +5,8 @@
  * Shared by POST /api/auth/admin/login and POST /api/auth/local/login. Each password
  * check is reserved first, in one synchronous step, and refunded when the password is
  * right:
- * - a browser holding a valid known-browser cookie for the account: its own bucket only;
+ * - a browser holding a valid known-browser cookie for the account: its own bucket only
+ *   (when that table has no room, it is counted like any other browser);
  * - any other browser: the account bucket and the client address bucket, all or none.
  * Unknown names are counted like real ones and get a password check against a fixed
  * dummy hash, so both answer the same way.
@@ -53,6 +54,9 @@ export function loggedUsername(username: unknown): string {
 
 function refusalText(refusal: RateLimitRefusal): string {
   const wait = formatRetryAfter(refusal.retryAfterSeconds);
+  if (refusal.reason === 'full') {
+    return `Sign-in is busy. Try again in ${wait}.`;
+  }
   if (refusal.namespace === 'signin-known-browser') {
     return `Too many sign-in attempts from this browser. Try again in ${wait}.`;
   }
@@ -84,15 +88,17 @@ export function createSignInGuard(request: NextRequest): SignInGuard {
     begin(normalizedUsername, found) {
       account = found;
       const browser = knownBrowserBucket(readKnownBrowserCookie(request), found);
-      const result = browser
-        ? reserve([{ namespace: 'signin-known-browser', key: browser }])
-        : reserve([
-            {
-              namespace: 'signin-account',
-              key: crypto.createHash('sha256').update(normalizedUsername).digest('hex').slice(0, ACCOUNT_KEY_CHARS),
-            },
-            { namespace: 'signin-address', key: clientAddressKey(request.headers) },
-          ]);
+      let result = browser ? reserve([{ namespace: 'signin-known-browser', key: browser }]) : null;
+      // No browser cookie, or no room for its bucket: the account and address limits apply
+      if (!result || (!result.ok && result.refusal.reason === 'full')) {
+        result = reserve([
+          {
+            namespace: 'signin-account',
+            key: crypto.createHash('sha256').update(normalizedUsername).digest('hex').slice(0, ACCOUNT_KEY_CHARS),
+          },
+          { namespace: 'signin-address', key: clientAddressKey(request.headers) },
+        ]);
+      }
       if (!result.ok) {
         logRefusal(result.refusal, normalizedUsername, found);
         return { ok: false, error: refusalText(result.refusal), retryAfterSeconds: result.refusal.retryAfterSeconds };
@@ -109,6 +115,11 @@ export function createSignInGuard(request: NextRequest): SignInGuard {
       if (account && passwordValid) setKnownBrowserCookie(response, request, account);
     },
   };
+}
+
+/** After a password change, keep the browser that made it known (for the new password) */
+export function renewKnownBrowser(response: NextResponse, request: NextRequest, account: SignInAccount): void {
+  setKnownBrowserCookie(response, request, account);
 }
 
 /**

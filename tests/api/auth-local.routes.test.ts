@@ -20,7 +20,7 @@ vi.mock('@/lib/services/auth/LocalAuthProvider', () => ({
 const makeRequest = (body: any, headers?: Record<string, string>) => ({
   json: vi.fn().mockResolvedValue(body),
   headers: {
-    get: (key: string) => headers?.[key.toLowerCase()] || null,
+    get: (key: string) => ({ 'content-type': 'application/json', ...headers })[key.toLowerCase()] || null,
   },
 });
 
