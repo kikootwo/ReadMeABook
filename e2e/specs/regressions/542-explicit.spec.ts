@@ -8,7 +8,8 @@
  *    Search (search and details answers replayed in the browser: the proxy refuses RMAB's catalog calls):
  *    the Explicit row at 375 dark; at 1280 light the tick asks first (confirm shot), then Request sends
  *    explicit: true to the real route. B (made up) is requested unmarked through the API.
- * 2. Both delivered (manual import of generated audio), a manual ABS tag `keepme` on each, ONE
+ * 2. Both delivered (A by the stack scenario's real download, or generated audio when nothing is found;
+ *    B by manual import of generated audio), a manual ABS tag `keepme` on each, ONE
  *    recently-added check: A explicit in ABS with title, authors, ASIN and tags as before; B untouched
  *    (explicit false, not saved again).
  * 3. ABS filters: a "user" without explicit access lists B but not A, and reads A as 403.
@@ -28,7 +29,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { Abs, authState, evidencePath, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackLogsSync, writeEvidence } from '../../lib/harness';
+import { Abs, authState, evidencePath, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackLogsSync, waitFor, writeEvidence } from '../../lib/harness';
 import { dbNow, psql, sqlStr } from './242-helpers';
 import { disableSchedules, FAKE_PROXY, printenv, waitStartupSettled } from './284-helpers';
 import { absItemFor, backfillAfter, clearEarlierRun, importGenerated, madeUpBook, requestStatus, runJob, setAudibleTags, setTagging, waitSettled } from './232-tag-helpers';
@@ -133,8 +134,17 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
   writeEvidence(`${DIR}/step1-modal.json`, { ui, aReq, bReq, ...s1 });
 
   // 2. Delivery with tagging off: A flagged, other metadata and tags kept; B untouched
-  const settled = { a: await waitSettled(aReq), b: await waitSettled(bReq) };
-  const itemA = (await absItemFor(abs, await importGenerated(admin, aReq, 'a542'))).id;
+  // A is a fixture book: the stack's scenario may download it for real (organized → downloaded);
+  // when the search finds nothing it gets generated audio like B
+  const aSettled = await waitFor('A settled', async () => {
+    const s = requestStatus(aReq);
+    return ['downloaded', 'awaiting_search', 'failed'].includes(s) ? s : null;
+  }, { timeoutMs: 420_000, intervalMs: 3_000 });
+  const settled = { a: aSettled, b: await waitSettled(bReq) };
+  const aPath = aSettled === 'downloaded'
+    ? psql(`select a.file_path from requests r join audiobooks a on a.id = r.audiobook_id where r.id = ${sqlStr(aReq)}`)
+    : await importGenerated(admin, aReq, 'a542');
+  const itemA = (await absItemFor(abs, aPath)).id;
   const itemB = (await absItemFor(abs, await importGenerated(admin, bReq, 'b542'))).id;
   for (const id of [itemA, itemB]) await abs.req('PATCH', `/api/items/${id}/media`, { tags: ['keepme'] });
   const s2Before = { a: await itemState(abs, itemA), b: await itemState(abs, itemB), statusA: requestStatus(aReq), statusB: requestStatus(bReq) };
@@ -255,7 +265,8 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
     await expect(rowC).toBeVisible({ timeout: 30_000 });
     await rowC.getByTitle('Actions').click();
     await page.getByRole('button', { name: 'Remove explicit mark' }).click();
-    await expect(page.getByText('Explicit mark removed')).toBeVisible({ timeout: 15_000 });
+    // C is available, so the clear answers with the "still marks this book explicit" message
+    await expect(page.getByText(/^Mark removed\. Audiobookshelf still marks this book explicit/)).toBeVisible({ timeout: 15_000 });
     await rowC.getByTitle('Actions').click();
     const putP = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === `/api/requests/${cReq}/explicit`);
     await page.getByRole('button', { name: 'Mark explicit' }).click();
