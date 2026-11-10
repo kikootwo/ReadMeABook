@@ -67,10 +67,16 @@ export async function waitSettled(id: string, statuses = ['awaiting_search', 'fa
   return waitFor(`request ${id} settled`, async () => (statuses.includes(requestStatus(id)) ? requestStatus(id) : null), { timeoutMs: 240_000, intervalMs: 2_000 });
 }
 
-/** Manual import (unnamed request) of a folder of generated tones for the request's book; waits for organize. */
-export async function importGenerated(admin: Rmab, requestId: string, label: string): Promise<string> {
+/** A folder of generated tones under /downloads (as the app user). */
+function generatedFolder(label: string): string {
   const dir = `/downloads/e2e-232/${label}-${Date.now().toString(36)}`;
   asApp(`mkdir -p ${q(dir)}\nffmpeg -nostdin -loglevel error -f lavfi -i sine=frequency=440:duration=6 -c:a libmp3lame -b:a 64k -y ${q(`${dir}/${label}.mp3`)}`);
+  return dir;
+}
+
+/** Manual import (unnamed request) of a folder of generated tones for the request's book; waits for organize. */
+export async function importGenerated(admin: Rmab, requestId: string, label: string): Promise<string> {
+  const dir = generatedFolder(label);
   const audiobookId = psql(`select audiobook_id from requests where id = ${sqlStr(requestId)}`);
   const since = markJobs();
   const res = await admin.raw('POST', '/api/admin/manual-import', { audiobookId, folderPath: dir, cleanupSource: false });
@@ -78,6 +84,51 @@ export async function importGenerated(admin: Rmab, requestId: string, label: str
   await waitOrganized(since, requestId);
   sh(`rm -rf ${q(dir)}`);
   return psql(`select coalesce(file_path, '') from audiobooks where id = ${sqlStr(audiobookId)}`);
+}
+
+/** Manual import by ASIN of a book nobody requested: the import creates the admin's own request. */
+export async function importUnrequested(admin: Rmab, asin: string): Promise<{ requestId: string; filePath: string }> {
+  const dir = generatedFolder('unrequested');
+  const since = markJobs();
+  const res = await admin.raw('POST', '/api/admin/manual-import', { asin, folderPath: dir, cleanupSource: false });
+  const body = await res.clone().json().catch(() => ({}));
+  expect(res.status, `manual import of ${asin}: ${JSON.stringify(body)}`).toBe(200);
+  await waitOrganized(since, body.requestId);
+  sh(`rm -rf ${q(dir)}`);
+  return { requestId: body.requestId, filePath: psql(`select coalesce(a.file_path, '') from requests r join audiobooks a on a.id = r.audiobook_id where r.id = ${sqlStr(body.requestId)}`) };
+}
+
+/**
+ * A second run on the same stack: a fixture book an earlier run delivered is taken back out (ABS item
+ * deleted with its files, RMAB's library rows and link columns cleared, its requests soft-deleted), so
+ * this run can request or import it again. A book never delivered is left alone. Returns what it cleared.
+ */
+export async function clearEarlierRun(abs: Abs, asins: string[]): Promise<string[]> {
+  const cleared: string[] = [];
+  for (const asin of asins) {
+    const rows = psql(`select concat_ws('|', id, coalesce(abs_item_id, ''), coalesce(file_path, '')) from audiobooks where audible_asin = ${sqlStr(asin)}`).split('\n').filter(Boolean);
+    for (const row of rows) {
+      const [id, itemId, filePath] = row.split('|');
+      const live = psql(`select count(*) from requests where audiobook_id = ${sqlStr(id)} and deleted_at is null`);
+      if (!itemId && !filePath && live === '0') continue;
+      if (itemId) {
+        const res = await fetch(`${urls.abs()}/api/items/${itemId}?hard=1`, { method: 'DELETE', headers: { Authorization: `Bearer ${abs.token}` } });
+        expect([200, 404], `delete ABS item ${itemId}`).toContain(res.status);
+        psql(`delete from plex_library where plex_guid = ${sqlStr(itemId)}`);
+      }
+      if (filePath.startsWith(`${MEDIA}/`)) sh(`rm -rf ${q(filePath)}`);
+      psql(`update requests set deleted_at = now() where audiobook_id = ${sqlStr(id)} and deleted_at is null`);
+      psql(`update audiobooks set abs_item_id = null, plex_guid = null, file_path = null, files_hash = null, library_asin = null, completed_at = null where id = ${sqlStr(id)}`);
+      cleared.push(asin);
+    }
+  }
+  return cleared;
+}
+
+/** The ABS library's lastScan (ms), set when a library scan finishes. */
+export async function absLastScan(abs: Abs, libraryId: string): Promise<number | null> {
+  const body = await abs.req<{ lastScan?: number; library?: { lastScan?: number } }>('GET', `/api/libraries/${libraryId}`);
+  return body.library?.lastScan ?? body.lastScan ?? null;
 }
 
 /** ABS scan, then the item whose folder is RMAB's `filePath`. */

@@ -3,24 +3,32 @@
  * Documentation: documentation/testing/e2e-harness.md
  *
  * Run with: --offline-fixtures --overrides abs-fake-metadata (real ABS; fake Audible/Audnexus answers;
- * generated audio). Schedules off (back on at the end). Local users registered with no approval:
- * alice, bob, john.smith, johnsmith, 李小雷 (auto-approve), carol (approval required).
- * 1. Tagging on through the settings checkbox (amber box: 1280 light, 375 dark). alice's martian runs a
- *    real download to `downloaded`; the ABS scan adds the item; a manual ABS tag `keepme` is added before
- *    RMAB's first write; ONE recently-added check → the item holds `keepme` then `req:alice`.
+ * generated audio). Schedules off (back on at the end). Every name and made-up ASIN carries this run's
+ * suffix <r>, and a fixture book an earlier run delivered is taken back out first, so the spec can run
+ * again on the same stack. Local users registered with no approval: alice<r>, bob<r>, john.smith<r>,
+ * johnsmith<r>, three CJK letters (auto-approve), carol<r> (approval required).
+ * 1. Tagging on through the settings checkbox (shots: 1280 light, 375 dark with the checkbox, its text and
+ *    the amber box). alice's martian runs a real download to `downloaded`; the ABS scan adds the item; a
+ *    manual ABS tag `keepme` is added before RMAB's first write; ONE recently-added check → the item holds
+ *    `keepme` then `req:alice<r>`.
  * 2. A real ABS match with overrideDetails, the fake Audnexus answering an Audible tag genre: precondition
- *    the Audible tag present and `req:alice` gone. ONE full scan → `req:alice` back, Audible tag kept. A
- *    match without override flags and an ABS `scan?force=1` keep it.
- * 3. john.smith's artemis (manual import of generated audio, unnamed) → available, no `req:johnsmith`;
- *    log `Not tagging with req:johnsmith`; the settings warnings list the shared tag and 李小雷.
+ *    the Audible tag present and the tag gone. ONE full scan → the tag back, Audible tag kept. A match
+ *    without override flags and a finished ABS `scan?force=1` leave it (whether either saved the item is
+ *    recorded: in practice neither does).
+ * 3. john.smith<r>'s artemis (manual import of generated audio, unnamed) → available, no shared tag;
+ *    log `Not tagging with req:johnsmith<r>`; the settings warnings list the shared tag and the CJK name.
  * 4. Tagging off; bob's made-up book delivered (manual import) untagged. On → the backfill job tags it
  *    (`tagged` >= 1). Off and on again → `tagged` 0, `alreadyTagged` >= 2, the item's updatedAt unchanged.
- * 5. An ABS user limited to `req:alice` lists only alice's book and gets the same library-wide filterdata as
- *    root. Not covered: `req:` tags in that list (ABS caches it per library for 30 min from the first scan).
+ * 5. An ABS user limited to alice's tag lists only alice's book; the filterdata endpoint answers it (200).
+ *    Not covered: `req:` tags in the filterdata tag list (ABS caches it per library for 30 min from the
+ *    first scan, so within a run both users get the list built before any tag existed; recorded only).
  * 6. carol (approval required) requests a made-up book, the admin denies it, then manual-imports that book
  *    without naming the request (POST /api/admin/manual-import): `available`, recorded
- *    `manual_import:denied`, no `req:carol` after the recently-added check, a full scan, or a backfill
+ *    `manual_import:denied`, no `req:carol<r>` after the recently-added check, a full scan, or a backfill
  *    (`skippedUnapproved` >= 1).
+ * 7. The admin manual-imports phm by ASIN with no request: the import creates the admin's own request (no
+ *    download record) → `available`, no `req:` tag after the recently-added check, a full scan, or a
+ *    backfill (`skippedImported` >= 1).
  * Values read first, then expect.soft; exec bridge required.
  */
 
@@ -29,14 +37,24 @@ import { Abs, authState, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rm
 import { dbNow, markJobs, psql, sqlStr, waitOrganized } from './242-helpers';
 import { disableSchedules, FAKE_PROXY, printenv, session, waitStartupSettled, type FixtureBook } from './284-helpers';
 import {
-  absItemFor, backfillAfter, bypassMark, importGenerated, itemTags, madeUpBook, registerUser, requestStatus, runJob,
-  setAudibleTags, setTagging, waitSettled,
+  absItemFor, absLastScan, backfillAfter, bypassMark, clearEarlierRun, importGenerated, importUnrequested, itemTags, madeUpBook,
+  registerUser, requestStatus, runJob, setAudibleTags, setTagging, waitSettled,
 } from './232-tag-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 
 const DIR = '232-tags';
 const AUDIBLE_TAG = 'E2E Audible Tag';
+// This run's suffix: names, made-up ASINs and titles differ from any earlier run on the stack
+const RUN = Date.now().toString(36).slice(-5);
+const NAME = {
+  alice: `alice${RUN}`, bob: `bob${RUN}`, js1: `john.smith${RUN}`, js2: `johnsmith${RUN}`, carol: `carol${RUN}`,
+  // CJK letters only: a name that leaves no tag
+  cjk: [...RUN].map((c) => String.fromCodePoint(0x4e00 + parseInt(c, 36) * 37 + 11)).join(''),
+};
+const tag = (name: string) => `req:${name}`;
+const SHARED = tag(`johnsmith${RUN}`);
+const madeUpAsin = (end: string) => `B0E${RUN.toUpperCase()}${end}`;
 const disabledJobs: string[] = [];
 let martianAsin = '';
 
@@ -61,14 +79,16 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   await disableSchedules(admin, disabledJobs);
   await waitStartupSettled();
 
-  // 0. Users
+  // 0. A rerun on this stack: take the fixture books an earlier run delivered back out; users
+  const cleared = await clearEarlierRun(abs, [martian.asin, books.artemis.asin, books.phm.asin]);
+  writeEvidence(`${DIR}/step0-run.json`, { run: RUN, names: NAME, clearedFromEarlierRun: cleared });
   expect((await admin.raw('PUT', '/api/admin/settings/registration', { enabled: true, requireAdminApproval: false })).status).toBe(200);
-  const alice = await registerUser(admin, 'alice', true);
-  const bob = await registerUser(admin, 'bob', true);
-  const js1 = await registerUser(admin, 'john.smith', true);
-  await registerUser(admin, 'johnsmith', true);
-  await registerUser(admin, '李小雷', true);
-  const carol = await registerUser(admin, 'carol', false);
+  const alice = await registerUser(admin, NAME.alice, true);
+  const bob = await registerUser(admin, NAME.bob, true);
+  const js1 = await registerUser(admin, NAME.js1, true);
+  await registerUser(admin, NAME.js2, true);
+  await registerUser(admin, NAME.cjk, true);
+  const carol = await registerUser(admin, NAME.carol, false);
 
   // 1a. Tagging on through the checkbox; the amber box at 1280 light and 375 dark
   const ui: Record<string, unknown> = {};
@@ -84,8 +104,8 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
     const warnings = page.getByTestId('requester-tag-warnings');
     await expect(warnings).toBeVisible();
     ui.warningText = (await warnings.textContent())?.replace(/\s+/g, ' ');
-    await box.scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, -80));
+    await box.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await page.evaluate(() => window.scrollBy(0, -96));
     await settled(DIR, 'setting-1280-light');
     const putP = page.waitForRequest((r) => r.method() === 'PUT' && new URL(r.url()).pathname === '/api/admin/settings/audiobookshelf');
     const resP = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === '/api/admin/settings/audiobookshelf');
@@ -99,7 +119,11 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
     await page.goto('/admin/settings');
     const box = page.getByRole('checkbox', { name: /Tag items with the requester's username/ });
     await expect(box).toBeChecked({ timeout: 30_000 });
-    await page.getByTestId('requester-tag-warnings').scrollIntoViewIfNeeded();
+    // The checkbox, its title and text at the top of the shot, the amber box below
+    await box.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await page.evaluate(() => window.scrollBy(0, -96));
+    const helpBox = await page.locator(`[id="${await box.getAttribute('aria-describedby')}"]`).boundingBox();
+    ui.inView375 = { checkboxTop: (await box.boundingBox())?.y ?? null, helpBottom: helpBox ? helpBox.y + helpBox.height : null, viewport: 812 };
     await settled(DIR, 'setting-375-dark');
     ui.overflowX = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     await ctx.close();
@@ -126,7 +150,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const s1Before = await itemTags(abs, aliceItem.id);
   const s1Job = await runJob(admin, 'plex_recently_added_check');
   const s1 = { status: requestStatus(aliceReq), job: s1Job, ...(await itemTags(abs, aliceItem.id)) };
-  const taggedLog = stackLogsSync('rmab').match(new RegExp(`Tagged "[^"]*" \\(Audiobookshelf item ${aliceItem.id}\\) with req:alice`, 'g')) || [];
+  const taggedLog = stackLogsSync('rmab').match(new RegExp(`Tagged "[^"]*" \\(Audiobookshelf item ${aliceItem.id}\\) with ${tag(NAME.alice)}`, 'g')) || [];
   writeEvidence(`${DIR}/step1-delivery.json`, { aliceReq, aliceStatusBefore, itemId: aliceItem.id, before: s1Before, after: s1, taggedLog });
 
   // 2. ABS re-match with override drops the tag; one full scan puts it back
@@ -136,25 +160,32 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const s2Job = await runJob(admin, 'plex_library_scan');
   const s2Repaired = await itemTags(abs, aliceItem.id);
   await abs.req('POST', `/api/items/${aliceItem.id}/match`, { provider: 'audible', asin: martian.asin });
-  const s2Plain = await itemTags(abs, aliceItem.id);
+  const s2Plain = { itemSaved: false, ...(await itemTags(abs, aliceItem.id)) };
+  s2Plain.itemSaved = s2Plain.updatedAt !== s2Repaired.updatedAt;
+  // A forced scan is done when the library's lastScan moves (the item itself may not be saved)
+  const lastScanBefore = await absLastScan(abs, libraryId);
   const forced = await fetch(`${urls.abs()}/api/libraries/${libraryId}/scan?force=1`, { method: 'POST', headers: { Authorization: `Bearer ${abs.token}` } });
-  await waitFor('ABS forced scan saved the item', async () => ((await itemTags(abs, aliceItem.id)).updatedAt > s2Plain.updatedAt ? true : null), { timeoutMs: 120_000, intervalMs: 2_000 }).catch(() => undefined);
-  const s2Forced = { scanStatus: forced.status, ...(await itemTags(abs, aliceItem.id)) };
+  const lastScanAfter = await waitFor('ABS forced scan finished', async () => {
+    const t = await absLastScan(abs, libraryId);
+    return t !== null && t !== lastScanBefore ? t : null;
+  }, { timeoutMs: 120_000, intervalMs: 2_000 }).catch(() => null);
+  const s2ForcedTags = await itemTags(abs, aliceItem.id);
+  const s2Forced = { scanStatus: forced.status, lastScanBefore, lastScanAfter, itemSaved: s2ForcedTags.updatedAt !== s2Plain.updatedAt, ...s2ForcedTags };
   writeEvidence(`${DIR}/step2-rematch.json`, { matched: s2Matched, fullScan: s2Job, repaired: s2Repaired, plainMatch: s2Plain, forcedScan: s2Forced });
 
-  // 3. john.smith and johnsmith share req:johnsmith: neither is tagged
+  // 3. john.smith<r> and johnsmith<r> share one tag: neither is tagged
   const jsReq = (await js1.rmab.requestBook(books.artemis)).request.id;
   const jsSettled = await waitSettled(jsReq);
   const jsItem = await absItemFor(abs, await importGenerated(admin, jsReq, 'johnsmith'));
   const s3Job = await runJob(admin, 'plex_recently_added_check');
   const s3 = { settled: jsSettled, status: requestStatus(jsReq), job: s3Job, ...(await itemTags(abs, jsItem.id)) };
-  const sharedLog = stackLogsSync('rmab').match(/Not tagging with req:johnsmith: shared by [^\n]*/g) || [];
+  const sharedLog = stackLogsSync('rmab').match(new RegExp(`Not tagging with ${SHARED}: shared by [^\\n]*`, 'g')) || [];
   const s3Warnings = (await admin.get<{ audiobookshelf: Record<string, unknown> }>('/api/admin/settings')).audiobookshelf.requesterTagWarnings;
   writeEvidence(`${DIR}/step3-shared.json`, { jsReq, itemId: jsItem.id, item: s3, sharedLog, warnings: s3Warnings });
 
   // 4. Backfill: bob's book delivered while off, then on (tags it), then off/on again (writes nothing)
   await setTagging(admin, false);
-  const bobReq = (await bob.rmab.requestBook(madeUpBook('B0E2E232B1', 'Bobwords'))).request.id;
+  const bobReq = (await bob.rmab.requestBook(madeUpBook(madeUpAsin('B1'), `Bobwords${RUN}`))).request.id;
   const bobSettled = await waitSettled(bobReq);
   const bobItem = await absItemFor(abs, await importGenerated(admin, bobReq, 'bob'));
   await runJob(admin, 'plex_recently_added_check');
@@ -170,12 +201,12 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const s4Again = await itemTags(abs, bobItem.id);
   writeEvidence(`${DIR}/step4-backfill.json`, { bobReq, itemId: bobItem.id, off: s4Off, backfill1, on: s4On, backfill2, again: s4Again });
 
-  // 5. Exposure: a user limited to req:alice sees only alice's book; filterdata lists every req: tag
-  const absUser = { username: 'reader232', password: 'e2e-reader-232-pass' };
+  // 5. Exposure: a user limited to alice's tag sees only alice's book; the filterdata endpoint answers it
+  const absUser = { username: `reader${RUN}`, password: 'e2e-reader-232-pass' };
   await abs.req('POST', '/api/users', {
     ...absUser, type: 'user', isActive: true,
     permissions: { download: true, update: false, delete: false, upload: false, accessAllLibraries: true, accessAllTags: false, accessExplicitContent: true },
-    librariesAccessible: [], itemTagsSelected: ['req:alice'],
+    librariesAccessible: [], itemTagsSelected: [tag(NAME.alice)],
   });
   const login = await (await fetch(`${urls.abs()}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(absUser) })).json();
   const reader = new Abs(login.user.accessToken || login.user.token);
@@ -189,11 +220,11 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   };
   const readerFilter = await fdOf(reader.token);
   const rootFilter = await fdOf(abs.token);
-  test.info().annotations.push({ type: 'not covered', description: 'step 5: req: tags in the filterdata tag list (ABS caches it per library for 30 min); same list for reader and root recorded' });
+  test.info().annotations.push({ type: 'not covered', description: 'step 5: req: tags in the filterdata tag list (ABS caches it per library for 30 min); both lists recorded, not checked' });
   writeEvidence(`${DIR}/step5-exposure.json`, { readerItems, aliceItem: aliceItem.id, readerFilter, rootFilter });
 
   // 6. carol's denied request, imported by the admin without naming it: never tagged
-  const carolReq = (await carol.rmab.requestBook(madeUpBook('B0E2E232C6', 'Carolwords'))).request.id;
+  const carolReq = (await carol.rmab.requestBook(madeUpBook(madeUpAsin('C6'), `Carolwords${RUN}`))).request.id;
   const carolWaiting = await waitSettled(carolReq, ['awaiting_approval']);
   const deny = await admin.post<{ success: boolean }>(`/api/admin/requests/${carolReq}/approve`, { action: 'deny' });
   const carolDenied = requestStatus(carolReq);
@@ -209,41 +240,66 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const s6Backfill = await itemTags(abs, carolItem.id);
   writeEvidence(`${DIR}/step6-unapproved.json`, { carolReq, carolWaiting, deny, carolDenied, itemId: carolItem.id, delivered: s6Delivered, fullScan: s6Scan, backfill3, afterBackfill: s6Backfill });
 
+  // 7. A book nobody requested, imported by the admin by ASIN: the import's own admin request is never tagged
+  const unrequested = await importUnrequested(admin, books.phm.asin);
+  const owner = psql(`select concat_ws('|', u.role, (select count(*) from download_history d where d.request_id = r.id)) from requests r join users u on u.id = r.user_id where r.id = ${sqlStr(unrequested.requestId)}`);
+  const phmItem = await absItemFor(abs, unrequested.filePath);
+  const s7Job = await runJob(admin, 'plex_recently_added_check');
+  const s7Delivered = { status: requestStatus(unrequested.requestId), owner, job: s7Job, ...(await itemTags(abs, phmItem.id)) };
+  await runJob(admin, 'plex_library_scan');
+  const s7Scan = await itemTags(abs, phmItem.id);
+  await setTagging(admin, false);
+  t0 = dbNow();
+  await setTagging(admin, true);
+  const backfill4 = await backfillAfter(t0);
+  const s7Backfill = await itemTags(abs, phmItem.id);
+  writeEvidence(`${DIR}/step7-admin-import.json`, { requestId: unrequested.requestId, itemId: phmItem.id, delivered: s7Delivered, fullScan: s7Scan, backfill4, afterBackfill: s7Backfill });
+  const reqTags = (tags: string[]) => tags.filter((t) => t.startsWith('req:'));
+
   // Checks
+  const ALICE = tag(NAME.alice);
   expect.soft(ui.checkedBefore, 'off by default').toBe(false);
   expect.soft(ui.putTagRequester, 'the page sends tagRequester').toBe(true);
   expect.soft(ui.putStatus).toBe(200);
-  expect.soft(String(ui.warningText), 'amber box: shared tag').toContain('req:johnsmith is shared by "john.smith", "johnsmith"');
-  expect.soft(String(ui.warningText), 'amber box: untaggable').toContain('"李小雷" has no letters or digits');
+  expect.soft(String(ui.warningText), 'amber box: shared tag, two names').toContain(`${SHARED} is shared by "${NAME.js1}", "${NAME.js2}": neither is tagged.`);
+  expect.soft(String(ui.warningText), 'amber box: untaggable').toContain(`"${NAME.cjk}" has no letters or digits`);
+  expect.soft(String(ui.warningText), 'amber box: a tag of your own, not the shared one').toContain('a tag of your own in Audiobookshelf, not the shared one');
   expect.soft(ui.overflowX, '375: no horizontal overflow').toBe(0);
+  const inView = ui.inView375 as { checkboxTop: number | null; helpBottom: number | null; viewport: number };
+  expect.soft(inView.checkboxTop !== null && inView.checkboxTop >= 0 && inView.helpBottom !== null && inView.helpBottom <= inView.viewport, `375: checkbox and its text in the shot ${JSON.stringify(inView)}`).toBe(true);
   expect.soft(settingsAfterUi.tagRequester, 'saved').toBe(true);
   expect.soft(aliceStatusBefore, 'precondition: delivered, not yet available').toBe('downloaded');
   expect.soft(s1Before.tags, 'precondition: the manual tag is on the item before RMAB writes').toEqual(['keepme']);
-  expect.soft(s1, 'step 1: available, keepme kept, req:alice added').toMatchObject({ status: 'available', job: 'completed', tags: ['keepme', 'req:alice'] });
+  expect.soft(s1, 'step 1: available, keepme kept, alice tagged').toMatchObject({ status: 'available', job: 'completed', tags: ['keepme', ALICE] });
   expect.soft(taggedLog.length, 'step 1: one Tagged log line').toBe(1);
   expect.soft(s2Matched.tags, 'step 2 precondition: the override match brought the Audible tag').toContain(AUDIBLE_TAG);
-  expect.soft(s2Matched.tags, 'step 2 precondition: and dropped req:alice').not.toContain('req:alice');
-  expect.soft(s2Repaired.tags, 'step 2: the full scan put req:alice back').toEqual(expect.arrayContaining([AUDIBLE_TAG, 'req:alice']));
-  expect.soft(s2Plain.tags, 'step 2: a plain match keeps it').toContain('req:alice');
-  expect.soft(s2Forced.tags, 'step 2: a forced ABS scan keeps it').toContain('req:alice');
+  expect.soft(s2Matched.tags, 'step 2 precondition: and dropped alice\'s tag').not.toContain(ALICE);
+  expect.soft(s2Repaired.tags, 'step 2: the full scan put alice\'s tag back').toEqual(expect.arrayContaining([AUDIBLE_TAG, ALICE]));
+  expect.soft(s2Plain.tags, 'step 2: the tag is still there after a plain match').toContain(ALICE);
+  expect.soft(s2Forced.lastScanAfter, 'step 2: the forced ABS scan finished').not.toBeNull();
+  expect.soft(s2Forced.tags, 'step 2: the tag is still there after the forced scan').toContain(ALICE);
   expect.soft(s3.status, 'step 3: delivered').toBe('available');
-  expect.soft(s3.tags, 'step 3: no shared tag written').not.toContain('req:johnsmith');
+  expect.soft(s3.tags, 'step 3: no shared tag written').not.toContain(SHARED);
   expect.soft(sharedLog.length, 'step 3: the shared-tag warning').toBeGreaterThanOrEqual(1);
   expect.soft(s4Off, 'step 4: delivered while off, untagged').toMatchObject({ status: 'available' });
-  expect.soft(s4Off.tags, 'step 4: no tag while off').not.toContain('req:bob');
+  expect.soft(s4Off.tags, 'step 4: no tag while off').not.toContain(tag(NAME.bob));
   expect.soft(backfill1.status).toBe('completed');
   expect.soft(Number(backfill1.result?.tagged), 'step 4: the backfill tagged bob\'s book').toBeGreaterThanOrEqual(1);
-  expect.soft(s4On.tags, 'step 4: req:bob').toContain('req:bob');
+  expect.soft(s4On.tags, 'step 4: bob tagged').toContain(tag(NAME.bob));
   expect.soft(backfill2.result, 'step 4: a second backfill writes nothing').toMatchObject({ tagged: 0 });
   expect.soft(Number(backfill2.result?.alreadyTagged), 'step 4: alice and bob already tagged').toBeGreaterThanOrEqual(2);
   expect.soft(s4Again.updatedAt, 'step 4: the item was not saved again').toBe(s4On.updatedAt);
   expect.soft(readerItems, 'step 5: the limited user lists only alice\'s book').toEqual([aliceItem.id]);
-  expect.soft(readerFilter, 'step 5: the limited user gets the library-wide filterdata, the same as root').toEqual(rootFilter);
-  expect.soft(readerFilter.status, 'step 5: filterdata answers the limited user').toBe(200);
+  expect.soft(readerFilter.status, 'step 5: the filterdata endpoint answers the limited user').toBe(200);
   expect.soft([carolWaiting, deny.success, carolDenied], 'step 6 precondition: denied').toEqual(['awaiting_approval', true, 'denied']);
   expect.soft(s6Delivered, 'step 6: delivered, recorded').toMatchObject({ status: 'available', mark: 'manual_import:denied' });
-  expect.soft(s6Delivered.tags, 'step 6: no req:carol on delivery').not.toContain('req:carol');
-  expect.soft(s6Scan.tags, 'step 6: none after a full scan').not.toContain('req:carol');
+  expect.soft(s6Delivered.tags, 'step 6: no carol tag on delivery').not.toContain(tag(NAME.carol));
+  expect.soft(s6Scan.tags, 'step 6: none after a full scan').not.toContain(tag(NAME.carol));
   expect.soft(Number(backfill3.result?.skippedUnapproved), 'step 6: the backfill counts it').toBeGreaterThanOrEqual(1);
-  expect.soft(s6Backfill.tags, 'step 6: none after the backfill').not.toContain('req:carol');
+  expect.soft(s6Backfill.tags, 'step 6: none after the backfill').not.toContain(tag(NAME.carol));
+  expect.soft(s7Delivered, 'step 7 precondition: delivered; the admin\'s request, no download record').toMatchObject({ status: 'available', owner: 'admin|0' });
+  expect.soft(reqTags(s7Delivered.tags), 'step 7: no req: tag on delivery').toEqual([]);
+  expect.soft(reqTags(s7Scan.tags), 'step 7: none after a full scan').toEqual([]);
+  expect.soft(Number(backfill4.result?.skippedImported), 'step 7: the backfill counts it').toBeGreaterThanOrEqual(1);
+  expect.soft(reqTags(s7Backfill.tags), 'step 7: none after the backfill').toEqual([]);
 });
