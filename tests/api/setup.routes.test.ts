@@ -35,9 +35,14 @@ vi.mock('@/lib/utils/jwt', () => ({
   generateRefreshToken: generateRefreshTokenMock,
 }));
 
+vi.mock('@/lib/services/scheduler.service', () => ({
+  getSchedulerService: () => ({ enableJob: vi.fn() }),
+}));
+
 describe('Setup routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.scheduledJob.findMany.mockResolvedValue([]);
   });
 
   it('returns setup status from configuration', async () => {
