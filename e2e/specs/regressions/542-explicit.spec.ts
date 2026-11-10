@@ -4,9 +4,10 @@
  *
  * Run with: --offline-fixtures --overrides abs-fake-metadata (real ABS; fake Audible/Audnexus answers;
  * generated audio). Schedules off (back on at the end). Names and made-up ASINs carry this run's suffix <r>.
- * 0. The Explicit mark setting (542-setting-leg.ts): off on the fresh stack, so no control anywhere (details
- *    modal, My Requests, admin table and menu), explicit on create ignored, a direct PUT refused (403); the
- *    admin turns it on in Settings (switch shots); its request Z is deleted. Legs 1-8 run with it on.
+ * 0. The Explicit mark setting (542-setting-leg.ts): off at the start (no key stored when this spec runs
+ *    alone on a fresh stack), explicit on create ignored, a direct PUT refused (403); with Z then stored
+ *    marked, no control anywhere (details modal, My Requests, admin table and menu); the admin turns it on
+ *    in Settings (switch shots); Z is deleted. Legs 1-8 run with it on.
  * 1. Requester tagging OFF (the default). eve<r> (local, auto-approve) opens book A (fixture phm) from
  *    Search (search and details answers replayed in the browser: the proxy refuses RMAB's catalog calls):
  *    the Explicit row and its confirm at 375 dark; at 1280 light the tick asks first (confirm shot), then

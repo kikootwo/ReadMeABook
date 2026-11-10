@@ -2,10 +2,12 @@
  * Component: E2E first leg of the #542 spec: the Explicit mark setting (off by default, then on)
  * Documentation: documentation/testing/e2e-harness.md
  *
- * On the fresh stack the setting is off: no key stored, the settings and providers responses say false;
- * a request sent with explicit: true is stored unmarked; a direct PUT is refused (403 FeatureDisabled) for
- * the requester and the admin; the details modal, My Requests and the admin table (row and actions menu)
- * show no Explicit control and not the word. Then the admin turns it on in Settings (switch shots at
+ * The setting is off at the start: no key stored when the spec runs alone on a fresh stack (asserted
+ * then), or saved off by an earlier spec on the same stack; the settings and providers responses say
+ * false. A request sent with explicit: true is stored unmarked; a direct PUT is refused (403
+ * FeatureDisabled) for the requester and the admin. The request is then stored marked in the database,
+ * and the details modal, My Requests and the admin table (row and actions menu) still show no Explicit
+ * control and not the word. Then the admin turns it on in Settings (switch shots at
  * 1280 light, off and on, and 375 dark), and the request made here is deleted so later legs see the
  * stack as before.
  */
@@ -17,6 +19,11 @@ import { waitSettled } from './232-tag-helpers';
 import { browse, putExplicit, type UserSession } from './542-helpers';
 
 export const EXPLICIT_KEY = 'audiobookshelf.explicit_mark_enabled';
+/** True when 542-explicit is the only spec in this runner phase (E2E_RUN_SPECS, set by the harness) */
+const runsAlone = () => {
+  const specs = (process.env.E2E_RUN_SPECS ?? '').split(',').filter(Boolean);
+  return specs.length === 1 && specs[0].includes('542-explicit');
+};
 const SWITCH = { name: 'Explicit mark on requests' };
 
 const storedKey = () => psql(`select coalesce((select value from configuration where key = ${sqlStr(EXPLICIT_KEY)}), '<absent>')`);
@@ -70,6 +77,9 @@ export async function settingLeg(opts: {
   r.requesterPut = await putExplicit(eve.rmab, zReq, true);
   r.adminPut = await putExplicit(admin, zReq, false);
   r.zSettled = await waitSettled(zReq);
+  // Stored marked, as a mark saved while the setting was on would be: the pages get explicit: true and must still show nothing
+  psql(`update requests set "explicit" = true where id = ${sqlStr(zReq)}`);
+  r.zStoredMarked = psql(`select "explicit"::text from requests where id = ${sqlStr(zReq)}`);
 
   // The details modal (eve): Request is there, no Explicit row
   {
@@ -146,12 +156,14 @@ export async function settingLeg(opts: {
 /** The leg's checks (soft). */
 export function expectSettingLeg(r: Record<string, unknown>) {
   const none = { pageFlag: false, boxes: 0, menuItems: 0, word: false };
-  // No key on a stack this spec opens; 'false' when an earlier spec saved the settings page (it sends the field)
-  expect.soft(['<absent>', 'false'], 'leg 0: off at the start (no key stored, or saved off)').toContain(r.storedBefore);
+  // Alone on a fresh stack the key is absent (as after an upgrade); after an earlier spec saved the settings page it is 'false'
+  if (runsAlone()) expect.soft(r.storedBefore, 'leg 0: alone on a fresh stack, no key stored').toBe('<absent>');
+  else expect.soft(['<absent>', 'false'], 'leg 0: off at the start (no key stored, or saved off by an earlier spec)').toContain(r.storedBefore);
   expect.soft([r.settingBefore, r.providersBefore], 'leg 0: the settings and providers responses say off').toEqual([false, false]);
   expect.soft([r.postStatus, r.storedMark], 'leg 0: explicit on create ignored while off').toEqual([201, 'false']);
   expect.soft(r.requesterPut, 'leg 0: the requester PUT is refused').toEqual({ status: 403, body: { error: 'FeatureDisabled', message: 'The Explicit mark is turned off in Settings' } });
   expect.soft((r.adminPut as { status: number }).status, 'leg 0: the admin PUT is refused').toBe(403);
+  expect.soft(r.zStoredMarked, 'leg 0: the request is then stored marked, so the pages below get a marked row').toBe('true');
   expect.soft(r.modal, 'leg 0: no Explicit control in the details modal').toEqual(none);
   expect.soft(r.myRequests, 'leg 0: none on My Requests').toEqual(none);
   expect.soft({ ...(r.adminTable as Record<string, unknown>), menuItemsShown: undefined }, 'leg 0: no pill and no menu item in the admin table').toEqual({ ...none, menuItemsShown: undefined });
