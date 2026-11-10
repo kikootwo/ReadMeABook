@@ -51,6 +51,10 @@ describe('NZBGet categories', () => {
     expect(nzbgetCategoryFolder([...plain, { Name: 'AppendCategoryDir', Value: 'no' }], 'books')).toBe('/dst/');
     expect(nzbgetCategoryFolder(plain, 'movies')).toBeNull();
     expect(nzbgetCategoryFolder([{ Name: 'DestDir', Value: '${MainDir}/dst' }, plain[1]], 'books')).toBeNull();
+    // Only an absolute folder can be compared with the job's
+    expect(nzbgetCategoryFolder([{ Name: 'DestDir', Value: 'dst' }, plain[1]], 'books')).toBeNull();
+    expect(nzbgetCategoryFolder([plain[0], plain[1], { Name: 'Category1.DestDir', Value: '../shared' }], 'books')).toBeNull();
+    expect(nzbgetCategoryFolder([plain[0], plain[1], { Name: 'Category1.DestDir', Value: 'D:\\Shared' }], 'books')).toBe('D:\\Shared');
     clientMock.post.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     await expect(nzbget('readmeabook').getCategoryFolder('books')).rejects.toThrow('ECONNREFUSED');
   });

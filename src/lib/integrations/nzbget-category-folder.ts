@@ -4,10 +4,12 @@
  *
  * The folder an NZBGet category writes jobs to, as NZBGet sees it, from its `config` list:
  * `CategoryN.DestDir`, else the main `DestDir` (plus the category name unless AppendCategoryDir
- * is off). Null when the category isn't listed or the folder can't be told (a `${...}` variable).
+ * is off). Null when the category isn't listed or the folder can't be told (a `${...}` variable,
+ * or a path that is not absolute).
  */
 
 import { sameCategory } from '@/lib/utils/download-category';
+import { isAbsoluteClientPath } from '@/lib/utils/client-path';
 
 export function nzbgetCategoryFolder(config: ReadonlyArray<{ Name: string; Value: string }>, name: string): string | null {
   const value = (key: string) => config.find((entry) => entry.Name.toLowerCase() === key.toLowerCase())?.Value?.trim() ?? '';
@@ -21,5 +23,5 @@ export function nzbgetCategoryFolder(config: ReadonlyArray<{ Name: string; Value
     if (!main) return null;
     folder = value('AppendCategoryDir').toLowerCase() === 'no' ? main : `${main.replace(/[/\\]+$/, '')}/${entry.Value.trim()}`;
   }
-  return folder.includes('${') ? null : folder;
+  return folder.includes('${') || !isAbsoluteClientPath(folder) ? null : folder;
 }

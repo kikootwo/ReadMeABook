@@ -15,6 +15,7 @@ import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
 const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.fn() }));
+const clientJob = vi.hoisted(() => ({ path: '' }));
 const libraryServiceMock = vi.hoisted(() => ({ triggerLibraryScan: vi.fn() }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
 const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }));
@@ -87,7 +88,7 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
     getAllClients: async () => clientState.clients,
     // The job is in ReadMeABook's own category, as SABnzbd reports it (shared-category-cleanup.ts)
     getClientForProtocol: async () => ({ type: 'sabnzbd', category: 'readmeabook' }),
-    createFreshService: async () => ({ getDownload: async () => ({ category: 'readmeabook', downloadPath: '/client/job' }) }),
+    createFreshService: async () => ({ getDownload: async () => ({ category: 'readmeabook', downloadPath: clientJob.path }) }),
     getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess: clientState.postProcess }),
   }),
 }));
@@ -120,6 +121,7 @@ function historyRow(overrides: Record<string, unknown> = {}) {
 
 /** Newest row by request (what older code read) and the row by id return the same record. */
 function useHistory(row: Record<string, unknown> | null) {
+  clientJob.path = typeof row?.downloadPath === 'string' ? row.downloadPath : ''; // the client reports the same job
   prismaMock.downloadHistory.findFirst.mockResolvedValue(row);
   prismaMock.downloadHistory.findUnique.mockImplementation(async ({ where }: { where?: { id?: string } }) =>
     row && where?.id === row.id ? row : null

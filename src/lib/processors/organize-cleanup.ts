@@ -124,7 +124,9 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
     }
 
     // Decided from the job as the client reports it now; fails closed (shared-category-cleanup.ts)
-    const cleanup = await chooseCleanupMode(downloadHistory.downloadClient, downloadHistory.downloadClientId, configService);
+    const cleanup = await chooseCleanupMode(
+      downloadHistory.downloadClient, downloadHistory.downloadClientId, downloadHistory.downloadPath ?? '', configService
+    );
     if (cleanup.mode === 'skip') {
       logger.info(`Download cleanup skipped: ${cleanup.reason}; download kept`);
       return;

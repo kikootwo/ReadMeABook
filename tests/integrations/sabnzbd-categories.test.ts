@@ -63,6 +63,17 @@ describe('SABnzbd categories', () => {
       expect(sabCategoryFolder('/downloads', parsed, 'movies')).toBeNull();
       expect(sabCategoryFolder('', parsed, 'books')).toBeNull();
     });
+    it('is null unless the folder is an absolute path (SABnzbd\'s default complete_dir is relative)', () => {
+      const parsed = parseSabCategories(sabArray(
+        { name: 'books', dir: 'books*' }, { name: 'up', dir: '../shared*' }, { name: 'here', dir: './books' }, { name: 'root', dir: '' }
+      ));
+      expect(sabCategoryFolder('Downloads/complete', parsed, 'books')).toBeNull();
+      expect(sabCategoryFolder('Downloads/complete', parsed, 'root')).toBeNull();
+      expect(sabCategoryFolder('/data/complete', parsed, 'up')).toBe('/data/complete/../shared');
+      expect(sabCategoryFolder('/data/complete', parsed, 'here')).toBe('/data/complete/./books');
+      expect(sabCategoryFolder('C:\\Data\\Complete\\', parsed, 'books')).toBe('C:\\Data\\Complete/books');
+      expect(sabCategoryFolder('\\\\nas\\complete', parsed, 'books')).toBe('\\\\nas\\complete/books');
+    });
     it('getCategoryFolder reads SABnzbd and throws when it cannot', async () => {
       const service = new SABnzbdService('http://sab', 'key');
       clientMock.get.mockResolvedValueOnce(realConfig(cats));

@@ -7,6 +7,8 @@
  * misread list would make every category look missing, and set_config creates OR updates.
  */
 
+import { isAbsoluteClientPath } from '@/lib/utils/client-path';
+
 export interface SabCategory {
   name: string;
   dir: string;
@@ -39,13 +41,16 @@ export function parseSabCategories(raw: unknown): SabCategory[] {
 /**
  * The folder a SABnzbd category writes jobs to, as SABnzbd sees it: its `dir` (absolute, or
  * relative to complete_dir; a trailing `*` only turns off job folders), else complete_dir.
- * Null when the category isn't listed or the folder is unknown.
+ * Null when the category isn't listed or the folder is not an absolute path (complete_dir defaults
+ * to the relative `Downloads/complete`, which can't be compared with a job's absolute folder).
  */
 export function sabCategoryFolder(completeDir: string, categories: SabCategory[], name: string): string | null {
   const entry = categories.find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
   if (!entry) return null;
   const dir = entry.dir.trim().replace(/\*$/, '');
-  if (/^([a-zA-Z]:)?[/\\]/.test(dir)) return dir;
-  if (!completeDir) return null;
-  return dir ? `${completeDir.replace(/[/\\]+$/, '')}/${dir}` : completeDir;
+  if (isAbsoluteClientPath(dir)) return dir;
+  const base = completeDir.trim();
+  if (!base) return null;
+  const folder = dir ? `${base.replace(/[/\\]+$/, '')}/${dir}` : base;
+  return isAbsoluteClientPath(folder) ? folder : null;
 }

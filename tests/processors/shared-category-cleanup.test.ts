@@ -14,6 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
+import { parseSabCategories, sabCategoryFolder } from '@/lib/integrations/sabnzbd-categories';
 
 const prismaMock = createPrismaMock();
 const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.fn() }));
@@ -230,5 +231,62 @@ describe('cleanup in a usenet category ReadMeABook did not create', () => {
 
     expect(fs.existsSync(parts[0])).toBe(true);
     expect(postProcess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ReadMeABook\'s own category (whole folder)', 'readmeabook'],
+    ['another app\'s category (careful)', 'books'],
+  ])('a reused job id that now points at another job removes nothing: %s', async (_label, category) => {
+    const folder = path.join(downloads, 'books', 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    reports(category, path.join(downloads, 'books', 'Some.Other.Job'), path.join(downloads, 'books'));
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(parts[0])).toBe(true);
+    expect(postProcess).not.toHaveBeenCalled();
+  });
+});
+
+describe('chooseCleanupMode: the folders compared', () => {
+  const sab = (completeDir: string, dir: string) =>
+    sabCategoryFolder(completeDir, parseSabCategories([{ name: '*', dir: '' }, { name: 'books', dir }]), 'books');
+  const decide = async (jobPath: string, categoryFolder: string | null | Error) => {
+    usenet.config = { type: 'sabnzbd', category: 'books' };
+    usenet.job = { category: 'books', downloadPath: jobPath };
+    usenet.categoryFolder = categoryFolder;
+    const { chooseCleanupMode } = await import('@/lib/processors/shared-category-cleanup');
+    return chooseCleanupMode('sabnzbd', 'nzo_1', jobPath, configMock as never);
+  };
+
+  it.each([
+    ['SABnzbd\'s default relative complete_dir', '/config/Downloads/complete/books', () => sab('Downloads/complete', 'books*')],
+    ['a category dir of ../shared', '/data/shared', () => sab('/data/complete', '../shared*')],
+    ['a category dir of ./books', '/data/complete/books', () => sab('/data/complete', './books*')],
+    ['a Windows drive path in another case', 'c:/data/complete/books', () => sab('C:\\Data\\Complete', 'books*')],
+    ['a trailing slash on the job folder', '/data/complete/books/', () => sab('/data/complete', 'books*')],
+    ['the plain absolute layout', '/data/complete/books', () => sab('/data/complete', 'books*')],
+    ['a job folder reported as a relative path', 'complete/books/Book.Name', () => '/data/complete/books'],
+  ])('no folder of its own, or one that can\'t be told: skip (%s)', async (_label, jobPath, folder) => {
+    expect((await decide(jobPath, folder())).mode).toBe('skip');
+  });
+
+  it('a real job folder under an absolute category folder still gets the careful removal', async () => {
+    expect(await decide('/data/complete/books/Book.Name', sab('/data/complete', 'books'))).toEqual({ mode: 'careful' });
+    expect(await decide('D:\\Complete\\Books\\Book.Name\\', sab('D:\\Complete', 'books'))).toEqual({ mode: 'careful' });
+  });
+
+  it('the skip names the cause, with no query string or credentials from the error', async () => {
+    usenet.config = { type: 'sabnzbd', category: 'books' };
+    usenet.job = new Error('connect ECONNREFUSED 10.0.0.5:8080 at http://user:pw@sab:8080/api?apikey=SECRETKEY&mode=history');
+    const { chooseCleanupMode } = await import('@/lib/processors/shared-category-cleanup');
+    const read = await chooseCleanupMode('sabnzbd', 'nzo_1', '/data/complete/books/Book.Name', configMock as never);
+    expect(read).toMatchObject({ mode: 'skip', reason: expect.stringContaining('ECONNREFUSED 10.0.0.5:8080') });
+    expect(JSON.stringify(read)).not.toMatch(/SECRETKEY|apikey|user:pw/);
+
+    const folder = await decide('/data/complete/books/Book.Name', new Error('Failed to get SABnzbd categories: timeout of 30000ms exceeded'));
+    expect(folder).toMatchObject({ mode: 'skip', reason: expect.stringContaining('timeout of 30000ms exceeded') });
   });
 });

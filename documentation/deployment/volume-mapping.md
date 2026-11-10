@@ -120,7 +120,7 @@ Files will be found correctly because all paths align.
 
 - Picking a SABnzbd/NZBGet category that already exists (another app's) means RMAB never changes it: jobs land in **that category's folder**, with its settings (sorter, post-processing script)
 - RMAB imports from the path the client reports, and takes every audio file in it, so that folder must be visible to RMAB at the same path (or through remote path mapping). Otherwise the job log shows `Organization failed: ENOENT: no such file or directory, stat '<path>'` and, after the import retries, the request is left at `warn` with `File organization failed: ENOENT: no such file or directory, stat '<path>'. Max retries (N) exceeded. Manual retry available.` (the release is then blocklisted as "Organize failed")
-- After import, cleanup removes only the imported files there, never the folder's other contents, and nothing at all when the job has no folder of its own (it reports the category's folder itself)
+- After import, cleanup removes only the imported files there, never the folder's other contents, and nothing at all when the job has no folder of its own (it reports the category's folder itself) or the folders can't be worked out as absolute paths (SABnzbd's default relative `complete_dir`)
 - qBittorrent is different: a shared category's torrents still download to RMAB's folder (Manual mode)
 
 ## Remote Path Mapping (Advanced)
