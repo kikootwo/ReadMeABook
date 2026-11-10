@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { ebookSourcesEnabled } from '@/lib/services/ebook-sources';
 
 const logger = RMABLogger.create('API.Audiobooks.EbookStatus');
 
@@ -43,21 +44,8 @@ export async function GET(
         );
       }
 
-      // Check which ebook sources are enabled
-      const [annasArchiveConfig, indexerSearchConfig, legacyConfig] = await Promise.all([
-        prisma.configuration.findUnique({ where: { key: 'ebook_annas_archive_enabled' } }),
-        prisma.configuration.findUnique({ where: { key: 'ebook_indexer_search_enabled' } }),
-        prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_enabled' } }),
-      ]);
-
-      // Legacy migration: check old key if new keys don't exist
-      const isAnnasArchiveEnabled = annasArchiveConfig?.value === 'true' ||
-        (annasArchiveConfig === null && legacyConfig?.value === 'true');
-      const isIndexerSearchEnabled = indexerSearchConfig?.value === 'true';
-      const ebookSourcesEnabled = isAnnasArchiveEnabled || isIndexerSearchEnabled;
-
       // If no ebook sources enabled, return early
-      if (!ebookSourcesEnabled) {
+      if (!(await ebookSourcesEnabled())) {
         return NextResponse.json({
           ebookSourcesEnabled: false,
           hasActiveEbookRequest: false,

@@ -56,6 +56,29 @@ export const EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
   'awaiting_search',
 ] as const;
 
+/** Statuses POST /api/requests/[id]/manual-search accepts (owner or admin). */
+export const SEARCHABLE_STATUSES = [
+  'pending',
+  'failed',
+  'awaiting_search',
+  'awaiting_release',
+] as const;
+
+/** Audiobook request statuses POST /api/requests/[id]/fetch-ebook accepts (admin). */
+export const EBOOK_FETCHABLE_STATUSES = ['downloaded', 'available'] as const;
+
+/**
+ * Library live set (documentation/features/library-view.md): requests in these statuses are
+ * always polled by GET /api/library?live=1.
+ */
+export const LIVE_ALWAYS_STATUSES = ['pending', 'searching', 'downloading', 'processing'] as const;
+
+/** Live only while the request's updatedAt is within LIVE_RECENT_WINDOW_MS. */
+export const LIVE_RECENT_STATUSES = ['downloaded', 'awaiting_import'] as const;
+
+/** How long a downloaded/awaiting_import request stays live after its last update. */
+export const LIVE_RECENT_WINDOW_MS = 15 * 60 * 1000;
+
 /**
  * errorMessage of an audiobook request the library scan failed because the book
  * left the library and no audio is left in its organized folder (#214). Users

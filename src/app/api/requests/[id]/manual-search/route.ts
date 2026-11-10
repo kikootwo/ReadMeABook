@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
+import { SEARCHABLE_STATUSES } from '@/lib/constants/request-statuses';
 
 const logger = RMABLogger.create('API.ManualSearch');
 
@@ -55,8 +56,7 @@ export async function POST(
       }
 
       // Only allow manual search for pending, failed, awaiting_search, awaiting_release statuses
-      const searchableStatuses = ['pending', 'failed', 'awaiting_search', 'awaiting_release'];
-      if (!searchableStatuses.includes(requestRecord.status)) {
+      if (!(SEARCHABLE_STATUSES as readonly string[]).includes(requestRecord.status)) {
         return NextResponse.json(
           {
             error: 'ValidationError',
