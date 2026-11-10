@@ -3,7 +3,7 @@
  * Documentation: documentation/backend/services/jobs.md
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -546,6 +546,22 @@ describe('JobQueueService', () => {
       });
     });
 
+    it('puts an organize request cut twice (stall limit) back to awaiting_import', async () => {
+      prismaMock.request.findFirst.mockResolvedValue({ importAttempts: 0, maxImportRetries: 5 });
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      new JobQueueService();
+      const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+
+      const data = { requestId: 'req-1', audiobookId: 'book-1', downloadPath: '/downloads/x', downloadHistoryId: 'hist-1' };
+      await handlers.failed({ id: 'bull-12', name: 'organize_files', data, attemptsMade: 0 }, new Error('job stalled more than allowable limit'));
+
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: { id: 'req-1', status: 'processing', deletedAt: null, importAttempts: 0 },
+        data: expect.objectContaining({ status: 'awaiting_import', importAttempts: 1 }),
+      });
+    });
+
     it('leaves a cancelled or deleted request alone when download_torrent fails', async () => {
       prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
 
@@ -693,6 +709,78 @@ describe('JobQueueService', () => {
 
     expect(queueMock.pause).toHaveBeenCalled();
     expect(queueMock.resume).toHaveBeenCalled();
+  });
+
+  describe('shutdown support', () => {
+    const stoppingSlot = Symbol.for('rmab.process.stopping');
+    const store = globalThis as unknown as Record<symbol, unknown>;
+
+    afterEach(() => {
+      delete store[stoppingSlot];
+    });
+
+    it('starts no processors when the queue is created while the app is stopping', async () => {
+      const { markProcessStopping } = await import('@/lib/utils/process-stopping');
+      markProcessStopping();
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      new JobQueueService();
+
+      expect(queueMock.process).not.toHaveBeenCalled();
+      expect(queueMock.on).toHaveBeenCalledWith('failed', expect.any(Function));
+    });
+
+    it('tracks jobs running in this process through the local active event', async () => {
+      prismaMock.job.updateMany.mockResolvedValue({ count: 1 });
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      const service = new JobQueueService();
+      const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+
+      let finish!: () => void;
+      const running = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      await handlers.active({ id: 'bull-20', name: 'organize_files', data: { requestId: 'req-9' } }, running);
+
+      const target = service.shutdownTarget();
+      expect(target.activeJobs()).toEqual([{ id: 'bull-20', name: 'organize_files', requestId: 'req-9' }]);
+
+      finish();
+      await running;
+      await Promise.resolve();
+      expect(target.activeJobs()).toEqual([]);
+    });
+
+    it('flushes job-row writes started by queue events', async () => {
+      let release!: () => void;
+      prismaMock.job.updateMany.mockReturnValue(new Promise((resolve) => {
+        release = () => resolve({ count: 1 });
+      }));
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      const service = new JobQueueService();
+      const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+
+      void handlers.completed({ id: 'bull-21' }, { ok: true });
+      let flushed = false;
+      const flush = service.shutdownTarget().flushJobWrites().then(() => {
+        flushed = true;
+      });
+      await Promise.resolve();
+      expect(flushed).toBe(false);
+
+      release();
+      await flush;
+      expect(flushed).toBe(true);
+    });
+
+    it('ignores a failed event without a job (removed before the stall check read it)', async () => {
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      new JobQueueService();
+      const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+
+      await expect(handlers.failed(null, new Error('job stalled more than allowable limit'))).resolves.toBeUndefined();
+      expect(prismaMock.job.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+    });
   });
 
   it('closes the queue and disconnects redis', async () => {
