@@ -87,7 +87,7 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
       await openPaths(page);
       const section = page.getByTestId('library-files-section');
       await expect(section).toBeVisible();
-      await expect(page.getByRole('radio', { name: 'Copy' })).toBeChecked();
+      await expect(page.getByRole('radio', { name: 'Copy', exact: true })).toBeChecked();
       await expect(page.getByRole('radio', { name: 'Hard link (copy if not possible)' })).toBeDisabled();
       await expect(section.getByText('Hard links need Metadata set to OPF file or None.')).toBeVisible();
       await sectionShot(page, `paths-default-${view.name}`);
@@ -365,6 +365,7 @@ test('6: Manual Import from outside the download folders, and a failure in the m
     'Only files in a download folder can be hard-linked: set File placement to Hard link (copy if not possible), then run the import again.';
   const srcRoot = `${MEDIA}/_e2e-68-import`;
   const results: Record<string, unknown> = {};
+  let template: string | null = null;
   await disableSchedules(rmab, disabledSchedules);
   try {
     // a. Hard link (copy if not possible): copied as Copy mode does, with the reason
@@ -393,8 +394,10 @@ test('6: Manual Import from outside the download folders, and a failure in the m
     if (bLeg.message === OUTSIDE_ONLY) await requestRowShot(browser, OUTSIDE_ONLY, 'request-not-in-download-folder-hardlink-only');
 
     // c. File 3 of 3 can't be linked (an interrupted copy of it is in the library): links 1 and 2 are removed again
-    const template = psql(`select coalesce((select value from configuration where key = 'audiobook_path_template'), '{author}/{title} {asin}')`);
-    expect(template, 'the default folder template (the book folder is computed below)').toBe('{author}/{title} {asin}');
+    // The default folder template for this import, so the book folder is known before it runs (put back below)
+    template = psql(`select coalesce((select value from configuration where key = 'audiobook_path_template'), '')`);
+    psql(`insert into configuration (id, key, value, updated_at) values (gen_random_uuid()::text, 'audiobook_path_template', '{author}/{title} {asin}', now())
+          on conflict (key) do update set value = excluded.value`);
     const midDir = `${SHARED_DOWNLOADS}/e2e-68-mid`;
     const mid = generateTones(midDir, ['01.mp3', '02.mp3', '03.mp3']);
     const cFolder = `${MEDIA}/Test Author/Fixture Book 68 Mid B0E2E68C00`;
@@ -417,6 +420,9 @@ test('6: Manual Import from outside the download folders, and a failure in the m
     expect.soft(cCopy.folder.map((f) => f.sha)).toEqual(cCopy.sources.map((f) => f.sha));
   } finally {
     writeEvidence('68/leg6-outside-and-mid-pass.json', results);
+    if (template !== null) {
+      psql(template ? `update configuration set value = ${sqlStr(template)} where key = 'audiobook_path_template'` : `delete from configuration where key = 'audiobook_path_template'`);
+    }
     await reenableSchedules();
     sh(`rm -rf ${q(srcRoot)} ${q(`${SHARED_DOWNLOADS}/e2e-68-mid`)}`);
   }
