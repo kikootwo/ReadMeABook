@@ -7,6 +7,7 @@
 - **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
 - **Admin-generated login token per user (URL-login)** → [backend/services/auth.md](backend/services/auth.md)
 - **Deleting users (any provider), returning user gets a new account** → [backend/services/auth.md](backend/services/auth.md#deleting-users), [admin-dashboard.md](admin-dashboard.md)
+- **Local accounts: self-registration and admin Add User (#77), shared creator, local login enabled** → [backend/services/auth.md](backend/services/auth.md#local-accounts-registration-and-admin-added), [admin-dashboard.md](admin-dashboard.md)
 - **Request file download link (token check, single file or zip, streaming backpressure #500)** → [backend/services/auth.md](backend/services/auth.md#request-file-download-link)
 - **API tokens, allowlist, GET /api/requests/:id (field list, BigInt sizes #261)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
