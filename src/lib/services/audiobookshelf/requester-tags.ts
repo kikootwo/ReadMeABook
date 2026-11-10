@@ -19,6 +19,7 @@ import { addABSItemTags } from './api';
 import { loadRequesterTagMap, logRunWarning } from './requester-tag-users';
 import {
   REQUESTER_TAG_FAILURE_LIMIT,
+  REQUESTER_TAG_ITEM_IDS_PER_READ,
   REQUESTER_TAG_RECHECK_EVERY,
   REQUESTER_TAG_REPAIR_CAP,
   REQUESTER_TAG_SETTING_KEY,
@@ -70,9 +71,6 @@ const CANDIDATE_SELECT = {
   _count: { select: { downloadHistory: true } },
 } as const;
 
-/** Listed item ids per candidate read (keeps each query's IN list small on a large library). */
-const ITEM_IDS_PER_READ = 1000;
-
 interface Candidate {
   id: string;
   userId: string;
@@ -84,9 +82,9 @@ interface Candidate {
 /** The available requests of the delivered books and the listed items; nothing else is read. */
 async function loadCandidates(deliveredBookIds: string[], listedItemIds: string[]): Promise<Candidate[]> {
   const found = new Map<string, Candidate>();
-  for (let start = 0; start === 0 || start < listedItemIds.length; start += ITEM_IDS_PER_READ) {
+  for (let start = 0; start === 0 || start < listedItemIds.length; start += REQUESTER_TAG_ITEM_IDS_PER_READ) {
     const bookIds = start === 0 ? deliveredBookIds : [];
-    const itemIds = listedItemIds.slice(start, start + ITEM_IDS_PER_READ);
+    const itemIds = listedItemIds.slice(start, start + REQUESTER_TAG_ITEM_IDS_PER_READ);
     const OR = [
       ...(bookIds.length > 0 ? [{ audiobookId: { in: bookIds } }] : []),
       ...(itemIds.length > 0 ? [{ audiobook: { absItemId: { in: itemIds } } }] : []),

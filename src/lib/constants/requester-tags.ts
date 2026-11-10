@@ -13,3 +13,5 @@ export const REQUESTER_TAG_REPAIR_CAP = 25;
 export const REQUESTER_TAG_FAILURE_LIMIT = 3;
 /** The backfill re-reads the setting every this many items. */
 export const REQUESTER_TAG_RECHECK_EVERY = 25;
+/** Listed item ids per candidate read (keeps each query's IN list small on a large library). */
+export const REQUESTER_TAG_ITEM_IDS_PER_READ = 1000;
