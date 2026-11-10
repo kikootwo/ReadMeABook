@@ -32,6 +32,15 @@ export async function handleControl(state, req, res, url) {
       const scenario = params.definition ? state.loadScenario(params.definition) : state.loadScenarioByName(params.name);
       return sendJson(res, 200, { ok: true, scenario: scenario.name, releases: [...state.releases.keys()] });
     }
+    if (p === '/metadata-tags' && req.method === 'POST') {
+      const { params } = await readParams(req, url);
+      const asin = String(params.asin || '').toUpperCase();
+      if (!/^[A-Z0-9]{10}$/.test(asin)) throw new Error('asin must be 10 letters or digits');
+      const tags = Array.isArray(params.tags) ? params.tags.map(String) : [];
+      if (tags.length) state.metadataTags.set(asin, tags);
+      else state.metadataTags.delete(asin);
+      return sendJson(res, 200, { ok: true, asin, tags });
+    }
     if (p === '/qbit-seed' && req.method === 'POST') {
       const { params } = await readParams(req, url);
       return sendJson(res, 200, { ok: true, torrent: seedTorrent(state, params) });

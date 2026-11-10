@@ -61,6 +61,7 @@ export interface ABSLibraryItem {
   media: {
     metadata: ABSBookMetadata;
     coverPath?: string;
+    tags?: unknown;
     audioFiles: ABSAudioFile[];
     duration: number;
     size: number;

@@ -184,6 +184,21 @@ describe('AudiobookshelfLibraryService', () => {
     expect(item.isMissing).toBeUndefined();
   });
 
+  it('maps media tags only when the listing carries a list of strings (#232)', async () => {
+    const tagged = makeAudiobookItem({ id: 'item-t' });
+    tagged.media = { ...tagged.media, tags: ['keepme', 'req:alice'] } as typeof tagged.media;
+    const odd = makeAudiobookItem({ id: 'item-o' });
+    odd.media = { ...odd.media, tags: ['ok', 7] } as typeof odd.media;
+    apiMock.getABSLibraryItems.mockResolvedValue([tagged, odd, makeAudiobookItem({ id: 'item-n' })]);
+
+    const [t, o, n] = await new AudiobookshelfLibraryService().getLibraryItems('lib-1');
+
+    expect(t.tags).toEqual(['keepme', 'req:alice']);
+    expect(t.tags).not.toBe((tagged.media as { tags: string[] }).tags);
+    expect('tags' in o).toBe(false);
+    expect('tags' in n).toBe(false);
+  });
+
   it('returns null when item fetch fails', async () => {
     apiMock.getABSItem.mockRejectedValue(new Error('missing'));
 

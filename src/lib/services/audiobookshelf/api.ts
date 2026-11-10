@@ -22,8 +22,15 @@ function mapRegionToABSProvider(region: AudibleRegion): string {
   return region === 'us' ? 'audible' : `audible.${region}`;
 }
 
+/** A non-2xx ABS answer; `status` is the HTTP status. */
+export class ABSApiError extends Error {
+  constructor(readonly status: number, statusText: string) {
+    super(`ABS API error: ${status} ${statusText}`);
+  }
+}
+
 interface ABSRequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: any;
   /** Abort the request after this many ms (default: Node fetch's own 300 s headers timeout) */
   timeoutMs?: number;
@@ -54,7 +61,7 @@ export async function absRequest<T>(endpoint: string, options: ABSRequestOptions
   });
 
   if (!response.ok) {
-    throw new Error(`ABS API error: ${response.status} ${response.statusText}`);
+    throw new ABSApiError(response.status, response.statusText);
   }
 
   return response.json();
@@ -212,6 +219,54 @@ export async function triggerABSItemMatch(itemId: string, asin?: string): Promis
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Failed to trigger match for item ${itemId}`, { error: message });
     return { status: 'error', error: message };
+  }
+}
+
+/** Per-call bound for the tag read and write (#232). */
+export const ABS_TAG_TIMEOUT_MS = 15_000;
+
+export type ABSTagWriteResult =
+  | { status: 'added'; tags: string[] }
+  | { status: 'present' }
+  | { status: 'unreadable' }
+  | { status: 'failed'; error: string; httpStatus?: number };
+
+const isTagList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((t) => typeof t === 'string');
+
+/**
+ * Add tags to an item and keep its others (#232). ABS's PATCH /items/:id/media replaces the whole
+ * tags array, so the current list is read first; a list that can't be read is never written.
+ * Merged = current (order kept) + missing; PATCH only when something is missing; the response's
+ * item must hold every tag. Never throws.
+ */
+export async function addABSItemTags(itemId: string, tags: string[]): Promise<ABSTagWriteResult> {
+  try {
+    const item = await absRequest<{ media?: { tags?: unknown } }>(`/items/${itemId}`, { timeoutMs: ABS_TAG_TIMEOUT_MS });
+    const current = item?.media?.tags;
+    if (!isTagList(current)) {
+      logger.warn(`Item ${itemId} has no readable tag list; not writing tags`);
+      return { status: 'unreadable' };
+    }
+    const missing = [...new Set(tags)].filter((t) => !current.includes(t));
+    if (missing.length === 0) return { status: 'present' };
+    const merged = [...current, ...missing];
+    if (!current.every((t) => merged.includes(t))) throw new Error('merged tag list lost an existing tag');
+
+    const result = await absRequest<{ libraryItem?: { media?: { tags?: unknown } } }>(`/items/${itemId}/media`, {
+      method: 'PATCH',
+      body: { tags: merged },
+      timeoutMs: ABS_TAG_TIMEOUT_MS,
+    });
+    const saved = result?.libraryItem?.media?.tags;
+    if (isTagList(saved) && !tags.every((t) => saved.includes(t))) {
+      logger.warn(`Item ${itemId}: Audiobookshelf did not keep the tags ${missing.join(', ')}`);
+      return { status: 'failed', error: 'tags not saved' };
+    }
+    return { status: 'added', tags: missing };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: 'failed', error: message, ...(error instanceof ABSApiError ? { httpStatus: error.status } : {}) };
   }
 }
 

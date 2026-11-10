@@ -58,6 +58,7 @@ export class State {
     this.sabPaused = false;
     this.plexRefreshes = 0;
     this.plexSeen = new Map(); // ratingKey -> album last seen on disk (with its audio files), like Plex's database
+    this.metadataTags = new Map(); // ASIN -> tag genres the fake Audnexus returns (POST /__control/metadata-tags, #232)
     this.resetScenario();
   }
 

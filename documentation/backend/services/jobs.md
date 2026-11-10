@@ -46,6 +46,8 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 
 **check_watched_lists:** scheduled run (no payload ASIN) checks every watched series and author; a targeted run (payload `userId` + `seriesAsin` or `authorAsin`, queued when a watch is added) runs only that series or author, never the user's other watched lists (#429). See [features/watched-lists.md](../../features/watched-lists.md).
 
+**backfill_requester_tags:** queued only by the ABS settings PUT on a saved off → on change of `audiobookshelf.tag_requester`; attempts 1, at most one waiting or active (`addBackfillRequesterTagsJob`). Tags every eligible available request's ABS item; result counts in the job record. See [features/requester-tags.md](../../features/requester-tags.md).
+
 **cleanup_seeded_torrents:** pages through every candidate, strict probe, ownership check before any remove; see [scheduler.md](scheduler.md).
 
 **monitor_download:**
@@ -199,7 +201,7 @@ queue.on('stalled', async (job) => {
 ## Concurrency Settings
 
 - **Registered with 2:** search_indexers, download_torrent, monitor_download, organize_files, send_notification, search_ebook, start_direct_download, monitor_direct_download
-- **Registered with 1:** scan_plex, plex_library_scan, plex_recently_added_check, monitor_rss_feeds, audible_refresh, retry_missing_torrents, retry_failed_imports, find_missing_ebooks, cleanup_seeded_torrents, sync_reading_shelves, check_watched_lists
+- **Registered with 1:** scan_plex, plex_library_scan, plex_recently_added_check, monitor_rss_feeds, audible_refresh, retry_missing_torrents, retry_failed_imports, find_missing_ebooks, cleanup_seeded_torrents, sync_reading_shelves, check_watched_lists, backfill_requester_tags
 - **Not a per-type limit:** Bull 4.16.5 sums the concurrency of every named processor on the queue and any free worker takes any job type, so two jobs of one type can overlap (e.g. two scans; ASIN writes are idempotent per `plexGuid`)
 
 ## Fixed Issues ✅

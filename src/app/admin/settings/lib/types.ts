@@ -3,6 +3,8 @@
  * Documentation: documentation/settings-pages.md
  */
 
+import type { RequesterTagWarnings } from '@/lib/services/audiobookshelf/requester-tag-users';
+
 /**
  * Main settings object structure
  */
@@ -44,6 +46,10 @@ export interface AudiobookshelfSettings {
   /** Library scanned after an ebook import; empty scans the audiobook library */
   ebookLibraryId: string;
   triggerScanAfterImport: boolean;
+  /** Tag delivered items with req:<username> (audiobookshelf.tag_requester, #232) */
+  tagRequester: boolean;
+  /** Read-only, from the settings GET: names that share, lack or overlap a tag */
+  requesterTagWarnings?: RequesterTagWarnings;
 }
 
 /**

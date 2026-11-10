@@ -70,6 +70,19 @@ test('audnexus book is synthetic and image-free; unknown ASIN is 404', async () 
   assert.deepEqual((await viaProxy('https://api.audnex.us/authors?name=Test%20Author')).body, []);
 });
 
+test('Audnexus genres: none by default, type tag entries for an ASIN given tags (#232)', async () => {
+  assert.deepEqual((await viaProxy('https://api.audnex.us/books/B082BHJMFF')).body.genres, []);
+  state.metadataTags = new Map([['B082BHJMFF', ['E2E Audible Tag', 'Second Tag']]]);
+  try {
+    const genres = (await viaProxy('https://api.audnex.us/books/b082bhjmff')).body.genres;
+    assert.deepEqual(genres.map((g) => [g.name, g.type]), [['E2E Audible Tag', 'tag'], ['Second Tag', 'tag']]);
+    assert.ok(genres.every((g) => /^[A-Z0-9]{10}$/.test(g.asin)));
+    assert.deepEqual((await viaProxy('https://api.audnex.us/books/B08G9PRS1K')).body.genres, [], 'other books keep none');
+  } finally {
+    delete state.metadataTags;
+  }
+});
+
 test('records the target host and path of every proxied request', async () => {
   records.length = 0;
   await viaProxy('https://api.audnex.us/books/B08G9PRS1K');

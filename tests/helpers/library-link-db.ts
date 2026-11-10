@@ -3,7 +3,7 @@
  * Documentation: documentation/fixes/file-hash-matching.md
  *
  * A plain holder wired into the prisma mock in beforeEach (never a vi.mock factory implementation):
- * plex_library, audiobooks and requests, with the subset of Prisma's where clause the scan jobs use
+ * plex_library, audiobooks, requests and users, with the subset of Prisma's where clause the scan jobs use
  * (the library ASIN follow's `requests: { some }` included).
  */
 
@@ -22,6 +22,8 @@ export interface LibraryDb {
   plex: Row[];
   audiobooks: Row[];
   requests: Row[];
+  /** users rows (requester tags, #232); a request whose user isn't here reads as `reader` */
+  users: Row[];
   /** When set, each matchable-request read waits until this many callers have read (forces the race). */
   barrier: number;
   /** Runs once right after the first matchable-request read (another job completing the request). */
@@ -29,19 +31,22 @@ export interface LibraryDb {
 }
 
 export function createLibraryDb(): LibraryDb {
-  return { plex: [], audiobooks: [], requests: [], barrier: 0, afterRead: null };
+  return { plex: [], audiobooks: [], requests: [], users: [], barrier: 0, afterRead: null };
 }
 
 export function resetLibraryDb(db: LibraryDb): void {
   Object.assign(db, createLibraryDb());
 }
 
-/** Equality, notIn, in, contains, not, OR. */
+const isPlainObject = (v: unknown): v is Row => v !== null && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v);
+
+/** Equality, notIn, in, contains, not, OR, and a nested where on a to-one relation row. */
 function matches(row: Row, where: Where | undefined): boolean {
   if (!where) return true;
   return Object.entries(where).every(([key, cond]) => {
     if (key === 'OR') return (cond as Where[]).some((c) => matches(row, c));
     const value = row[key] ?? null;
+    if (isPlainObject(cond) && isPlainObject(value)) return matches(value, cond);
     if (cond !== null && typeof cond === 'object' && !(cond instanceof Date)) {
       const op = cond as { notIn?: unknown[]; in?: unknown[]; contains?: string; not?: unknown };
       if (op.notIn) return !op.notIn.includes(value);
@@ -101,12 +106,22 @@ export function wireLibraryDb(prismaMock: ReturnType<typeof createPrismaMock>, d
     return { count: rows.length };
   });
 
-  const withRequest = (r: Row): Row => ({ ...r, audiobook: { ...db.audiobooks.find((a) => a.id === r.audiobookId) }, user: { plexUsername: 'reader' } });
+  const userOf = (r: Row): Row => {
+    const user = db.users.find((u) => u.id === r.userId);
+    return user ? { ...user } : { plexUsername: 'reader' };
+  };
+  // `downloads` on a request row = its download history count (`_count.downloadHistory`, #232)
+  const withRequest = (r: Row): Row => ({
+    ...r,
+    audiobook: { ...db.audiobooks.find((a) => a.id === r.audiobookId) },
+    user: userOf(r),
+    _count: { downloadHistory: Number(r.downloads ?? 0) },
+  });
   let readers = 0;
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   prismaMock.request.findMany.mockImplementation(async (a?: Args) => {
-    const rows = db.requests.filter((r) => matches(r, a?.where)).map(withRequest);
+    const rows = db.requests.map(withRequest).filter((r) => matches(r, a?.where));
     if (db.barrier > 0) {
       readers++;
       if (readers >= db.barrier) release();
@@ -123,6 +138,8 @@ export function wireLibraryDb(prismaMock: ReturnType<typeof createPrismaMock>, d
     rows.forEach((r) => assign(r, a.data));
     return { count: rows.length };
   });
+
+  prismaMock.user.findMany.mockImplementation(async (a?: Args) => db.users.filter((r) => matches(r, a?.where)).map((r) => pick(r, a?.select)));
 
   prismaMock.configuration.findUnique.mockImplementation(async (a: Args) => (a.where?.key === 'media_dir' ? { key: 'media_dir', value: mediaDir } : null));
 }

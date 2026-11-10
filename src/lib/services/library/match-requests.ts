@@ -12,7 +12,8 @@
  * (full scan, recently-added checks) notify once, and only the winner writes the book's item id.
  * An ASIN match never overwrites a link made in the same run, and an item linked or ASIN-matched
  * earlier in the run is not handed to a later book. Ebook requests are never matched (they end at
- * `downloaded`).
+ * `downloaded`). After the loop, the delivery steps (Audiobookshelf only, own try/catch) tag the
+ * requesters of the books this run completed and repair listed items (requester-tags, #232).
  */
 
 import { prisma } from '@/lib/db';
@@ -45,7 +46,7 @@ export interface MatchRequestsResult {
 /** Statuses a request is matched from; a request in any other status was completed meanwhile. */
 const MATCHABLE_STATUS = { notIn: ['available', 'cancelled', 'denied'] };
 /** The ASIN match's guard for a request loaded in an approved status (not awaiting approval). */
-const APPROVED_MATCHABLE_STATUS = { notIn: ['available', 'cancelled', 'denied', 'awaiting_approval'] };
+const APPROVED_MATCHABLE_STATUS = { notIn: [...MATCHABLE_STATUS.notIn, 'awaiting_approval'] };
 
 type MatchableRequest = Awaited<ReturnType<typeof loadMatchableRequests>>[number];
 
@@ -153,7 +154,7 @@ async function matchByAsin(request: MatchableRequest, backendMode: string, keepI
     data: { ...AVAILABLE_DATA(), ...(bypass ? { approvalBypassedBy: bypass } : {}) },
   });
   if (count !== 1) {
-    logger.debug(`Request ${request.id} was completed by another job; no second notification`);
+    logger.debug(`Request ${request.id} changed since it was read (completed by another job, or its approval changed); not completed this run`);
     return null;
   }
   if (!keepItem) {
@@ -185,6 +186,7 @@ export async function matchRequestsToLibrary(opts: {
   let linkUnavailable = false;
   const links = new Map<string, LinkResult>(); // per audiobook and delivery time, once per run
   const linkedBooks = new Map<string, string>(); // audiobook id → the item this run linked it to
+  const delivered = new Set<string>(); // audiobook ids whose request this run completed
 
   for (const request of requests) {
     try {
@@ -222,6 +224,7 @@ export async function matchRequestsToLibrary(opts: {
         }
         if (link.status === 'linked') {
           if (await completeLinked(request, link.plexGuid, link.via, logger)) {
+            delivered.add(audiobook.id);
             result.matched++;
             if (link.via === 'path') result.linkedByPath++;
             else result.linkedByHash++;
@@ -233,6 +236,7 @@ export async function matchRequestsToLibrary(opts: {
       const keepItem = linkedBooks.has(audiobook.id);
       const item = await matchByAsin(request, backendMode, keepItem, logger);
       if (item) {
+        delivered.add(audiobook.id);
         result.matched++;
         if (ctx && !keepItem) markLinked(ctx, item, audiobook.id); // later fallbacks in this run skip it
       }
@@ -245,6 +249,17 @@ export async function matchRequestsToLibrary(opts: {
       `Library link: ${result.linkedByPath} by path, ${result.linkedByHash} by hash, ` +
       `${result.ambiguous} ambiguous, ${result.unknown} left for the next run (item not readable)`
     );
+  }
+
+  // Delivery steps (Audiobookshelf): matching, item ids and notifications are done, so a failure
+  // here never blocks or undoes a delivery.
+  if (backendMode === 'audiobookshelf') {
+    try {
+      const { runRequesterTagStep } = await import('@/lib/services/audiobookshelf/requester-tags');
+      await runRequesterTagStep({ deliveredBookIds: delivered, listedItems, logger });
+    } catch (error) {
+      logger.error(`Requester tagging failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return result;
 }
