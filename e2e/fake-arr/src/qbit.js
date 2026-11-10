@@ -74,10 +74,12 @@ export function torrentInfo(state, t, now = Date.now()) {
 }
 
 /** New torrent record, or null when the client already has this hash (a duplicate add). */
-function addTorrentRecord(state, { hash, release, name, category, tags, savePathParam, paused }) {
+function addTorrentRecord(state, { hash, release, name, category, tags, savePathParam, autoTMM, paused }) {
   if (state.torrents.has(hash)) return null;
   const cat = state.qbitCategories[category];
-  const savePath = (cat && cat.savePath) || savePathParam || state.config.downloadsDir;
+  // Like qBittorrent: autoTMM=false plus savepath wins over the category's path (#326 Manual mode)
+  const manual = autoTMM === 'false' && savePathParam;
+  const savePath = manual ? savePathParam : (cat && cat.savePath) || savePathParam || state.config.downloadsDir;
   const record = {
     hash,
     name,
@@ -135,12 +137,14 @@ export async function handleQbit(state, req, res, url, recordEntry) {
       return sendJson(res, 200, state.qbitCategories);
     case '/torrents/createCategory':
     case '/torrents/editCategory': {
+      recordEntry.body = { category: params.category || '', savePath: params.savePath || '' };
       if (!params.category) return sendText(res, 400, 'Bad Request');
       if (route === '/torrents/createCategory' && state.qbitCategories[params.category]) return sendText(res, 409, 'Conflict');
       state.qbitCategories[params.category] = { name: params.category, savePath: params.savePath || '' };
       return sendText(res, 200, '');
     }
     case '/torrents/add':
+      recordEntry.body = { category: params.category || '', autoTMM: params.autoTMM, savepath: params.savepath };
       return addTorrents(state, res, params, files, recordEntry);
     case '/torrents/info': {
       const wanted = hashesParam(params.hashes);
@@ -243,7 +247,7 @@ function selectTorrents(state, hashes) {
 function addTorrents(state, res, params, files, recordEntry) {
   const added = [];
   const duplicates = [];
-  const common = { category: params.category, tags: params.tags, savePathParam: params.savepath, paused: params.paused === 'true' || params.stopped === 'true' };
+  const common = { category: params.category, tags: params.tags, savePathParam: params.savepath, autoTMM: params.autoTMM, paused: params.paused === 'true' || params.stopped === 'true' };
   for (const line of String(params.urls || '').split(/\r?\n/).filter(Boolean)) {
     const hash = /xt=urn:btih:([0-9a-fA-F]{40})/.exec(line)?.[1]?.toLowerCase();
     if (!hash) return sendText(res, 200, 'Fails.');

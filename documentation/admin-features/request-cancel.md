@@ -46,7 +46,7 @@ Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLo
 - `otherActiveRequestsUsingNzb` non-empty: `kept_shared`.
 - Both clients: `deleteQueuedDownload(id, {name: torrentName, category})`; never a history delete. `not_queued` = `kept_finished`, `mismatch` = `kept_not_owned`, `unconfirmed` = `not_removed` (no row write).
   - SABnzbd: `mode=queue&name=delete&del_files=1`. `deleted` only when the answer's `nzo_ids` name the job, or (answer without ids) a re-read finds it nowhere; still queued = `unconfirmed`; ids name other jobs, or the job is now in history = `not_queued`. `status:false` without ids throws (`not_removed`).
-  - NZBGet: `GroupFinalDelete` only while queued and name or category matches.
+  - NZBGet: `GroupFinalDelete` only while queued and name or category matches. The category is passed only when it is RMAB's own; in a category RMAB did not create the match is the name alone, so when NZBGet's NZB name differs from the release title RMAB's own queued job is kept (`kept_not_owned`).
 - Never retried later (no strict probe; NZBGet reuses ids).
 
 ## Response

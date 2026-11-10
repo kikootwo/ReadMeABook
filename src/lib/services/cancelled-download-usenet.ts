@@ -12,6 +12,7 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { getClientDisplayName, type DownloadInfo } from '../interfaces/download-client.interface';
 import { otherActiveRequestsUsingNzb } from '../utils/shared-torrent';
+import { ownsCategory } from '../utils/download-category';
 import { CancelDeadline, withinDeadline } from './cancel-deadline';
 import type { CancelStepResult } from './cancelled-download';
 
@@ -61,8 +62,11 @@ export async function cancelUsenetDownload(
   try {
     // Queue only (a finished job in history is never touched); 'deleted' only when the client confirms it
     if (!client.deleteQueuedDownload) return done('not_removed', 'no queue-only delete');
-    const category = (await manager.getClientForProtocol('usenet'))?.category || 'readmeabook';
-    const deleted = await client.deleteQueuedDownload(clientId, { name: row.torrentName, category });
+    // A category that already existed in the client (another app's) proves nothing: match by name only
+    const config = await manager.getClientForProtocol('usenet');
+    const category = config?.category || 'readmeabook';
+    const owned = ownsCategory(category, config?.ownedCategory);
+    const deleted = await client.deleteQueuedDownload(clientId, { name: row.torrentName, ...(owned && { category }) });
     if (deleted === 'not_queued') return done('kept_finished', 'job left the queue');
     if (deleted === 'mismatch') return done('kept_not_owned', 'queued job does not match');
     if (deleted === 'unconfirmed') return done('not_removed', `${clientName} did not confirm the delete`);

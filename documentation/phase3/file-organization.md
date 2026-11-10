@@ -367,6 +367,24 @@ When user deletes and re-requests the same audiobook:
 - Windows drive roots normalize to `C:/` (`normalizeGuardPath`), never `C:.` (the drive's current directory).
 - `media_dir` resolution shared via `src/lib/utils/media-dir.ts` (`media_dir` → `MEDIA_DIR` → `/media/audiobooks`).
 
+### Download cleanup in a category RMAB did not create
+**Code:** `src/lib/processors/shared-category-cleanup.ts`
+- ReadMeABook imports every audio file in the folder the client reports for the job, so a folder shared with another app must never be swept
+- Usenet jobs only (torrent cleanup unchanged). After the provenance gate, blocker re-walk and guard, `chooseCleanupMode()` asks the usenet client through a fresh, uncached service for the job (`getDownload(downloadClientId)`: its `category` and `downloadPath`), never the setting alone, and fails closed:
+
+| Job as the client reports it | Mode |
+|---|---|
+| its `downloadPath`, mapped (`PathMapper.transform` with the client's mapping, as at completion), is not the stored `DownloadHistory.downloadPath` (a reused job id, e.g. NZBGet after cleared history) | skip, info `the client's job <id> is another download now (at <path>)`; checked before every mode below |
+| category is RMAB's own (`ownsCategory(jobCategory, config.ownedCategory)`: `readmeabook` or the current `ownedCategory`) | full: whole-folder removal, parent sweep (as before) |
+| any other category, the job in a folder of its own | careful (below) |
+| any other category, the job folder is (or holds) the category's own folder (SABnzbd `complete_dir` + the category's `dir`, a trailing `*` ignored; NZBGet `CategoryN.DestDir`, else `DestDir` [+ `/<name>` unless `AppendCategoryDir=no`]) | skip: nothing removed, no history archive; info `Download cleanup skipped: the job has no folder of its own (...); download kept` |
+| either folder not an absolute path (`/`, a drive letter or UNC): SABnzbd's default relative `complete_dir` (`Downloads/complete`), a relative NZBGet `DestDir`, a job path reported relative | skip: `sabCategoryFolder` / `nzbgetCategoryFolder` return null for a relative result |
+| no enabled usenet client, a different type, the job or its category unreadable or empty, the category's folder unreadable or unknown (`${...}` in NZBGet) | skip, info line says which and appends the error's message (query strings, `user:pass@` and `apikey=`/`password=`/`token=` values cut) |
+
+- Careful: unlink each verified imported file (audio records and the cover record with `verified: true`, mapped onto the guard's canonical path; a name like `...And Then.mp3` is inside, only `..` or `../x` is outside), then `rmdir` each folder they left empty, deepest first, up to and including the job folder; a non-empty folder stays (extras such as `.nfo` stay). Never sweeps above the job folder (the other app's category folder stays). Info `Category is not ReadMeABook's own: removed N imported file(s) from <folder>...`. The client's history archive still runs
+- Covers the admin switching the category back to `readmeabook` while a job sits in another app's category, and the usenet client removed, disabled or replaced before import
+- Folder comparison is in the client's own paths (unmapped; `src/lib/utils/client-path.ts`): separators unified, `path.posix.normalize` (`./` and `../` resolved), trailing `/` dropped, Windows drive paths case-insensitive; only when both are absolute
+
 **Same-file copies:** `copyFile` is a no-op when source and destination are the same file (`isSameFile`: realpath equal, or same dev + non-zero inode); the organizer skips audio and cover art already in place.
 
 ## Verified Import (delete only what reached the library)

@@ -50,9 +50,36 @@ interface DownloadClientConfig {
   remotePath?: string;
   localPath?: string;
   category?: string;             // Default: 'readmeabook'
+  ownedCategory?: string;        // The category RMAB created in this client (see Download Categories)
   customPath?: string;           // Relative sub-path appended to download_dir
 }
 ```
+
+### Download Categories (#46, #579)
+**Rule:** RMAB creates, or sets the save path of, only its own category: `readmeabook` (any case, always RMAB's) or `ownedCategory` (any case). A category that already existed in the client is used as is: never created, never re-pathed. `ownedCategory` is only ever the category RMAB created and uses now (cleared when the stored category moves off it). No schema change.
+**Helper:** `src/lib/utils/download-category.ts` (client-safe; services, routes, modal, card). Path clients: qBittorrent, SABnzbd, NZBGet. Deluge/Transmission are labels (no path; ownership n/a).
+**Decided on save only** (`resolveCategoryChoice`), from the client's own list via `manager.listCategories(config)` (fresh service, never the id-keyed cache):
+
+| Input | Lists | Stored |
+|---|---|---|
+| any client: `/`, `\`, a control character, or `*` | no | field error (modal and server) |
+| empty / `readmeabook` (any case) | no | `readmeabook`; `ownedCategory` cleared |
+| Deluge | no | lower-cased; field error unless `[a-z0-9_.-]` |
+| Transmission | no | as typed |
+| unchanged from saved (any case) | no | saved category; `ownedCategory` kept only when it is that category |
+| new, missing in client | yes | as typed (SABnzbd lower-cased); `ownedCategory` = name |
+| new, present (any case) | yes | client's spelling; `ownedCategory` cleared |
+| list throws | yes | 400 `Couldn't read <Client>'s categories: <reason>`; nothing written |
+
+- **Where:** POST add (after the connection test), PUT edit (only when `category` is sent; the list comes from the new URL), setup complete (validation block, before any write; the wizard's display-only `categoryInClient` and any sent `ownedCategory` are dropped). The legacy single-client route carries `ownedCategory` over. A URL change alone never re-decides
+- **`*`:** SABnzbd's default category; left out of lists, refused as a name. A list without `*` (array or object form) is unreadable; a qBittorrent list that isn't a plain object is unreadable
+- **At add time:** owned → today's behaviour (missing → created, path differs → updated; qBittorrent's lookup is the exact name only (names are case-sensitive, RMAB creates that spelling); NZBGet/SABnzbd look up any case and act on the client's key). Not owned → no create/edit/`set_config`/`saveconfig`; qBittorrent adds in Manual mode (`autoTMM=false` + `savepath` = RMAB's folder, the #326 branch); SABnzbd/NZBGet send the name and the job lands in that category's folder (its settings, sorter and script apply); RMAB imports from the reported path, which must be reachable through the mapping ([volume-mapping.md](../deployment/volume-mapping.md))
+- **In flight:** a change applies to the next grab; RMAB never renames, moves or deletes a category. The old owned category stays in the client
+- **NZBGet cancel:** passes `category` to `deleteQueuedDownload` only when owned; otherwise name only
+- **Usenet cleanup:** decided from the job's category as the client reports it, not the setting; anything but RMAB's own → imported files only, folder only when empty, nothing when the job has no folder of its own, either folder isn't an absolute path, the client's job id now points at another download, or the client can't be read ([file-organization.md](file-organization.md#download-cleanup-in-a-category-rmab-did-not-create))
+- **UI:** "Category" field (`DownloadCategoryField.tsx`) after "Enabled": required, suggestions after a passed Test (every client type; only the newest answer is shown), amber note when the name is in the client and not RMAB's own (settings edit: a saved not-owned category shows it before any Test; wizard edit: only when the client's saved `categoryInClient` preview says the name was in its list, since ownership is set at setup complete). Card: `Category: x` only for a non-default name; amber `(existing, left as is)` on a path client when not owned (wizard: the modal's `categoryInClient` preview); the name truncates, the suffix never does
+- **Ownership is never re-checked** (accepted): deleted in the client and re-created by another app; a restored or hand-edited config; a URL moved to another instance with the same name; re-adding a client in RMAB (forgets its old custom category); moving the category off RMAB's own forgets it too, so a return trip reads the client again and, if the name is still there (RMAB's old category included), stores it as existing (fails safe: Manual mode on qBittorrent, amber on the card); another RMAB using `readmeabook`. A custom category set through the API before this change reads as not owned (Manual mode on qBittorrent, no folder sync on usenet)
+- **Deluge labels carry options:** "Move completed" and "remove at ratio" on an existing label apply on `label.set_torrent` (modal note: "Already in Deluge; its label settings apply.")
 
 ### Transmission Service
 **File:** `src/lib/integrations/transmission.service.ts`
@@ -94,7 +121,7 @@ interface DownloadClientConfig {
 
 - **RPC endpoint:** `POST /jsonrpc` (JSON-RPC with Basic Auth)
 - **Auth:** HTTP Basic Auth (username + password)
-- **Categories:** Config-based (`Category1.Name`, `Category1.DestDir`), managed via `config()` + `saveconfig()`
+- **Categories:** Config-based (`Category1.Name`, `Category1.DestDir`), managed via `config()` + `saveconfig()` (RMAB's own only); `getCategories()` lists `CategoryN.Name` in slot order, throws on failure
 - **Adding NZBs:** Downloads NZB content from Prowlarr, base64-encodes, uploads via `append()`
 - **Queue status:** `listgroups(0)` — QUEUED, PAUSED, DOWNLOADING, FETCHING, PP_* (processing states)
 - **History status:** `history(false)` — SUCCESS/*, WARNING/* → completed; FAILURE/*, DELETED/* → failed
@@ -126,7 +153,7 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - Service constructors (`defaultSavePath` / `defaultDownloadDir`)
 - Category creation (qBittorrent `ensureCategory`, SABnzbd `ensureCategory`)
 - Torrent/NZB addition (save path / download-dir)
-  - qBittorrent (#326): every add sends `category` + `autoTMM=true` and no `savepath`, so the category's path applies even when qBittorrent's default Torrent Management Mode is Manual. Category not ensured (`ensureCategory()` → `false`) → `autoTMM=false` + `savepath` = resolved path (remote-mapped). `autoTMM` on add needs qBittorrent 4.1.5+ (Web API 2.2.0); 4.1.0 to 4.1.4 ignore it
+  - qBittorrent (#326): every add sends `category` + `autoTMM=true` and no `savepath`, so the category's path applies even when qBittorrent's default Torrent Management Mode is Manual. Category not ensured, or not RMAB's own (`ensureCategory()` → `null`) → `autoTMM=false` + `savepath` = resolved path (remote-mapped). `autoTMM` on add needs qBittorrent 4.1.5+ (Web API 2.2.0); 4.1.0 to 4.1.4 ignore it
 - Remote path mapping (applied after customPath resolution)
 - Singleton getters (`getQBittorrentService`, `getSABnzbdService`)
 - Retry fallback path construction (`retry-failed-imports.processor.ts`)
@@ -273,6 +300,7 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 **PUT /api/admin/settings/download-clients/[id]** - Update client by ID
 **DELETE /api/admin/settings/download-clients/[id]** - Delete client by ID
 **POST /api/admin/settings/download-clients/test** - Test connection
+**POST /api/admin/settings/download-clients/categories** - The client's category names (400 on failure); wizard: `POST /api/setup/download-client-categories` (500 on failure)
 
 **Validation:**
 - Only 1 client per protocol allowed (enforced on add via `CLIENT_PROTOCOL_MAP`)
@@ -318,8 +346,9 @@ Replaced single-client form with `<DownloadClientManagement mode="wizard" />`
 **File:** `src/app/api/setup/complete/route.ts`
 
 Accepts both legacy single client and new array format:
-- Legacy: Converts to array on save
-- New: Saves directly as `download_clients` JSON
+- Legacy: Converts to array on save (keeps the sent `category`)
+- New: Saves as `download_clients` JSON
+- Both: category ownership decided first (`src/lib/services/setup-download-categories.ts`, see Download Categories)
 
 ## Edge Cases
 

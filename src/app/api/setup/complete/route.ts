@@ -16,6 +16,7 @@ import { getSchedulerService } from '@/lib/services/scheduler.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { resolveSetupCategories, withSetupCategory } from '@/lib/services/setup-download-categories';
 
 const logger = RMABLogger.create('API.Setup.Complete');
 
@@ -163,6 +164,13 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+    }
+
+    // Category ownership, decided here before anything is written (a sent ownedCategory or
+    // display-only categoryInClient is ignored)
+    const categoryChoices = await resolveSetupCategories(clients);
+    if (!categoryChoices.ok) {
+      return NextResponse.json({ success: false, error: categoryChoices.error }, { status: 400 });
     }
 
     // Create admin user (for Plex mode or ABS + Manual auth)
@@ -441,7 +449,9 @@ export async function POST(request: NextRequest) {
 
     if (Array.isArray(downloadClient)) {
       // New format: array of clients
-      downloadClientsArray = downloadClient;
+      downloadClientsArray = downloadClient.map((client: Record<string, unknown>, i: number) =>
+        withSetupCategory(client, categoryChoices.choices[i])
+      );
     } else if (downloadClient && typeof downloadClient === 'object') {
       // Legacy format: convert single client to array
       downloadClientsArray = [{
@@ -456,8 +466,7 @@ export async function POST(request: NextRequest) {
         remotePathMappingEnabled: downloadClient.remotePathMappingEnabled || false,
         remotePath: downloadClient.remotePath,
         localPath: downloadClient.localPath,
-        category: 'readmeabook',
-      }];
+      }].map((client) => withSetupCategory(client, categoryChoices.choices[0]));
     } else {
       throw new Error('Invalid download client configuration');
     }

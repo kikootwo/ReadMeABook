@@ -64,10 +64,16 @@ Service uses singleton pattern. When settings change, singleton invalidated to f
 
 ## Category Management
 
-**Category:** `readmeabook` (auto-created for all downloads)
+**Category:** `readmeabook` by default (RMAB's own: created and kept at RMAB's path); an admin can pick another ([download-clients.md](download-clients.md#download-categories-46-579))
+
+**Category list (#579):** `get_config` returns `categories` as an array of `{name, dir, ...}` with `*` first; `parseSabCategories()` (`src/lib/integrations/sabnzbd-categories.ts`) reads it by `name` (object form kept as a fallback) and throws on an unrecognised shape or a list (array or object) without `*`, so `ensureCategory` sends no `set_config` on a misread list. Before the fix the array read as `"0","1",…`, so RMAB re-sent `set_config` on every grab. `getCategories()` leaves out `*` and throws on failure. SABnzbd lower-cases category names; RMAB stores them lower-case and looks them up in any case.
+
+**Category folder:** `getCategoryFolder(name)` = the category's `dir` (absolute, or under `complete_dir`; a trailing `*` only turns off job folders), else `complete_dir`; `sabCategoryFolder()`. Null unless the result is absolute (`complete_dir` defaults to the relative `Downloads/complete`). Used by the usenet cleanup ([file-organization.md](file-organization.md#download-cleanup-in-a-category-rmab-did-not-create)).
+
+**Ownership:** only RMAB's own category (`readmeabook` or `ownedCategory`) is created or re-pathed; one that already existed gets no `set_config`, and the job lands in that category's folder with its settings ([download-clients.md](download-clients.md#download-categories-46-579)).
 
 **Save Path Synchronization:**
-- Category created/updated on every download (matches qBittorrent behavior)
+- Category created/updated on every download (matches qBittorrent behavior); an existing one at the right folder is left alone
 - Fetches SABnzbd's `complete_dir` setting via API to understand download location
 - Applies remote path mapping to translate RMAB's resolved download path to SABnzbd's perspective
 - Calculates optimal category path (relative, absolute, or root)

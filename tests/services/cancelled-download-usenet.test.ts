@@ -122,9 +122,24 @@ describe('NZBGet', () => {
 
   it('deletes through the queue-only call with the row\'s name and category, never deleteDownload', async () => {
     const c = client('nzbget');
+    managerMock.getClientForProtocol.mockResolvedValue({ category: 'audiobooks', ownedCategory: 'audiobooks' });
     expect((await cancelStep(nzbRow())).outcome).toBe('removed');
     expect(c.deleteQueuedDownload).toHaveBeenCalledWith('42', { name: 'Book.Release', category: 'audiobooks' });
     expect(c.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('passes the default category: readmeabook is always ReadMeABook\'s own', async () => {
+    const c = client('nzbget');
+    managerMock.getClientForProtocol.mockResolvedValue({ category: 'readmeabook' });
+    await cancelStep(nzbRow());
+    expect(c.deleteQueuedDownload).toHaveBeenCalledWith('42', { name: 'Book.Release', category: 'readmeabook' });
+  });
+
+  it('a category that already existed in NZBGet (another app\'s) is not passed: the job must match by name', async () => {
+    // 'audiobooks' with no ownedCategory: ReadMeABook did not create it, so it proves nothing
+    const c = client('nzbget');
+    await cancelStep(nzbRow());
+    expect(c.deleteQueuedDownload).toHaveBeenCalledWith('42', { name: 'Book.Release' });
   });
 
   it('a job that moved to history between the lookup and the delete stays', async () => {

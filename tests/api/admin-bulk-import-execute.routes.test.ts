@@ -88,6 +88,8 @@ describe('Admin bulk-import execute route: request size limit (32 MB)', () => {
     prismaMock.audiobook.findFirst.mockResolvedValue({ id: 'ab-1', audibleAsin: 'B000000409' });
     prismaMock.request.findFirst.mockResolvedValue({ id: 'req-old', status: 'failed', autoRerequestCount: 4 });
     prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]); // not in the library
+    prismaMock.request.findMany.mockResolvedValue([]); // no active request
     const { POST } = await import('@/app/api/admin/bulk-import/execute/route');
 
     const response = await POST(post(JSON.stringify({

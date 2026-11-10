@@ -13,6 +13,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { MASKED_PASSWORD, resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedClientCredential } from '@/lib/services/saved-credentials.service';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { CategoryChoiceError, resolveCategoryChoice } from '@/lib/utils/download-category';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients.ID');
 
@@ -127,6 +128,21 @@ export async function PUT(
               { status: 400 }
             );
           }
+        }
+
+        // Ownership is decided again only when the name changes, from the client at the new URL
+        if (category !== undefined) {
+          const choice = await resolveCategoryChoice(
+            { type: existingClient.type, category, previous: existingClient },
+            () => manager.listCategories(updatedClient)
+          ).catch((error) => error as Error);
+          if (choice instanceof Error) {
+            if (!(choice instanceof CategoryChoiceError)) throw choice;
+            return NextResponse.json({ error: choice.message }, { status: 400 });
+          }
+          updatedClient.category = choice.category;
+          updatedClient.ownedCategory = choice.ownedCategory;
+          if (!updatedClient.ownedCategory) delete updatedClient.ownedCategory;
         }
 
         // Update clients array; passwords are encrypted when serialised
