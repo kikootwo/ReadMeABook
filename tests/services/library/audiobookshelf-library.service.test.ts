@@ -172,7 +172,33 @@ describe('AudiobookshelfLibraryService', () => {
       updatedAt: new Date(1700000100000),
       path: '/audiobooks/Author/Title',
       isMissing: false,
+      explicit: false,
     });
+  });
+
+  // The Explicit repair reads it (#542): set only when the listing carries the key; ABS has no default
+  it.each([
+    [true, true],
+    [false, false],
+    [null, false],
+  ])('maps a listed explicit %s to %s', async (listedValue, expected) => {
+    const listedItem = makeAudiobookItem({ id: 'item-x' });
+    listedItem.media.metadata.explicit = listedValue as boolean;
+    apiMock.getABSLibraryItems.mockResolvedValue([listedItem]);
+
+    const [item] = await new AudiobookshelfLibraryService().getLibraryItems('lib-1');
+
+    expect(item.explicit).toBe(expected);
+  });
+
+  it('leaves explicit unset when the listing has no such key', async () => {
+    const listedItem = makeAudiobookItem({ id: 'item-y' });
+    delete (listedItem.media.metadata as { explicit?: unknown }).explicit;
+    apiMock.getABSLibraryItems.mockResolvedValue([listedItem]);
+
+    const [item] = await new AudiobookshelfLibraryService().getLibraryItems('lib-1');
+
+    expect(item).not.toHaveProperty('explicit');
   });
 
   it('leaves path fields undefined when ABS sends none', async () => {

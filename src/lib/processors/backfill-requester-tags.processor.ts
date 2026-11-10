@@ -3,21 +3,22 @@
  * Documentation: documentation/features/requester-tags.md
  *
  * Queued when the admin turns requester tagging on. Lists the configured Audiobookshelf library
- * once and runs the shared tagger in backfill mode: every eligible available request of a taggable
- * user whose item is listed, sequentially, uncapped. Stops when tagging is turned off or after
- * consecutive ABS failures. Idempotent.
+ * once and runs the shared item step in backfill mode: every eligible available request of a taggable
+ * user whose item is listed, sequentially, uncapped; the items of marked requests also get the
+ * Explicit flag (#542). Stops when tagging is turned off or after consecutive ABS failures.
+ * Idempotent.
  */
 
 import { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { getLibraryService } from '../services/library';
-import { applyRequesterTags, isRequesterTaggingOn, REQUESTER_TAG_SETTING_KEY, type RequesterTagResult } from '../services/audiobookshelf/requester-tags';
+import { applyItemMarks, isRequesterTaggingOn, REQUESTER_TAG_SETTING_KEY, type ItemMarkResult } from '../services/audiobookshelf/requester-tags';
 
 export interface BackfillRequesterTagsPayload {
   jobId?: string;
 }
 
-export type BackfillRequesterTagsResult = RequesterTagResult | { skipped: true; reason: string };
+export type BackfillRequesterTagsResult = ItemMarkResult | { skipped: true; reason: string };
 
 export async function processBackfillRequesterTags(payload: BackfillRequesterTagsPayload): Promise<BackfillRequesterTagsResult> {
   const logger = RMABLogger.forJob(payload.jobId, 'RequesterTagBackfill');
@@ -39,10 +40,11 @@ export async function processBackfillRequesterTags(payload: BackfillRequesterTag
 
   const listedItems = await (await getLibraryService()).getLibraryItems(libraryId);
   logger.info(`Backfilling requester tags over ${listedItems.length} library items`);
-  const result = await applyRequesterTags({
+  const result = await applyItemMarks({
     deliveredBookIds: [],
     listedItems,
     logger,
+    tagging: true,
     mode: 'backfill',
     shouldContinue: async () => {
       configService.clearCache(REQUESTER_TAG_SETTING_KEY);
@@ -52,7 +54,8 @@ export async function processBackfillRequesterTags(payload: BackfillRequesterTag
   logger.info(
     `Requester tag backfill: ${result.tagged} tagged, ${result.alreadyTagged} already tagged, ${result.failed} failed; ` +
     `skipped ${result.skippedShared} shared, ${result.skippedNoTag} without a tag, ${result.skippedUser} users, ` +
-    `${result.skippedUnapproved} without approval, ${result.skippedImported} admin imports${result.stoppedEarly ? ' (stopped early)' : ''}`
+    `${result.skippedUnapproved} without approval, ${result.skippedImported} admin imports; ${result.markedExplicit} marked explicit` +
+    `${result.stoppedEarly ? ' (stopped early)' : ''}`
   );
   return result;
 }

@@ -15,6 +15,7 @@ import { authenticatedFetcher, fetchWithAuth } from '@/lib/utils/api';
 import { useToast } from '@/components/ui/Toast';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { BlockedReleasesChip } from './BlockedReleasesChip';
+import { useIsAudiobookshelf } from '@/lib/hooks/useExplicitMark';
 
 interface RecentRequest {
   requestId: string;
@@ -34,6 +35,7 @@ interface RecentRequest {
   downloadAttempts?: number;
   customSearchTerms?: string | null;
   blockedCount?: number;
+  explicit?: boolean; // #542
 }
 
 interface User {
@@ -182,6 +184,7 @@ function getInitialParams(): {
 
 export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
   const toast = useToast();
+  const isABS = useIsAudiobookshelf(); // the Explicit pill and menu item (#542)
 
   // Get initial filter state from URL (only evaluated once due to lazy init)
   const [initialParams] = useState(getInitialParams);
@@ -741,6 +744,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                               Custom Search
                             </span>
                           )}
+                          {isABS && request.explicit && request.type !== 'ebook' && (
+                            <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+                              Explicit
+                            </span>
+                          )}
                           {(request.blockedCount ?? 0) > 0 && (
                             <BlockedReleasesChip
                               requestId={request.requestId}
@@ -790,7 +798,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                           torrentUrl: request.torrentUrl,
                           downloadAttempts: request.downloadAttempts,
                           customSearchTerms: request.customSearchTerms,
+                          explicit: request.explicit,
                         }}
+                        showExplicit={isABS}
                         onDelete={handleDeleteClick}
                         onManualSearch={handleManualSearch}
                         onCancel={handleCancel}

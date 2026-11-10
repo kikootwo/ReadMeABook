@@ -6,7 +6,7 @@
  * or a bulk import) is never tagged on delivery, repair or backfill, while another eligible request
  * of the same book still is. A named manual import (marker NULL) and a legacy row are tagged.
  * Real: match-requests, request-library-link, requester-tags. Mocked: prisma (in-memory holder),
- * the ASIN matcher, the job queue, config, addABSItemTags.
+ * the ASIN matcher, the job queue, config, writeABSItem.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ import type { RMABLogger } from '@/lib/utils/logger';
 import type { LibraryItem } from '@/lib/services/library/ILibraryService';
 
 const prismaMock = createPrismaMock();
-const state = vi.hoisted(() => ({ tagCalls: [] as Array<{ itemId: string; tags: string[] }> }));
+const state = vi.hoisted(() => ({ tagCalls: [] as Array<{ itemId: string; tags?: string[] }> }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn() }));
 const findPlexMatchMock = vi.hoisted(() => vi.fn());
 
@@ -28,9 +28,9 @@ vi.mock('@/lib/services/config.service', () => ({
 }));
 vi.mock('@/lib/services/audiobookshelf/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/services/audiobookshelf/api')>()),
-  addABSItemTags: async (itemId: string, tags: string[]) => {
-    state.tagCalls.push({ itemId, tags });
-    return { status: 'added', tags };
+  writeABSItem: async (itemId: string, want: { tags?: string[] }) => {
+    state.tagCalls.push({ itemId, ...want });
+    return { tags: 'added', addedTags: want.tags ?? [], explicit: 'none' };
   },
 }));
 
@@ -64,8 +64,8 @@ async function scan(listedItems: LibraryItem[] = []) {
   return matchRequestsToLibrary({ backendMode: 'audiobookshelf', libraryId: 'lib-1', listedItems, logger });
 }
 async function backfill(listedItems: LibraryItem[]) {
-  const { applyRequesterTags } = await import('@/lib/services/audiobookshelf/requester-tags');
-  return applyRequesterTags({ deliveredBookIds: [], listedItems, logger, mode: 'backfill' });
+  const { applyItemMarks } = await import('@/lib/services/audiobookshelf/requester-tags');
+  return applyItemMarks({ deliveredBookIds: [], listedItems, logger, tagging: true, mode: 'backfill' });
 }
 
 describe('requester tag eligibility by path and step (#232)', () => {
@@ -237,9 +237,9 @@ describe('requester tag eligibility by path and step (#232)', () => {
       book('b2', { absItemId: 'item-b2' });
       request('r-carol', 'b1', 'u-carol', 'available');
       request('r-bob', 'b2', 'u-bob', 'available');
-      const { applyRequesterTags } = await import('@/lib/services/audiobookshelf/requester-tags');
+      const { applyItemMarks } = await import('@/lib/services/audiobookshelf/requester-tags');
 
-      const result = await applyRequesterTags({ deliveredBookIds: ['b9'], listedItems: [listed('item-b1')], logger, mode: 'backfill' });
+      const result = await applyItemMarks({ deliveredBookIds: ['b9'], listedItems: [listed('item-b1')], logger, tagging: true, mode: 'backfill' });
 
       const reads = prismaMock.request.findMany.mock.calls.map((c) => c[0]);
       expect(reads).toHaveLength(1);
@@ -255,9 +255,9 @@ describe('requester tag eligibility by path and step (#232)', () => {
         book(`b${i}`, { absItemId: itemId });
         request(`r-${i}`, `b${i}`, 'u-carol', 'available');
       });
-      const { applyRequesterTags } = await import('@/lib/services/audiobookshelf/requester-tags');
+      const { applyItemMarks } = await import('@/lib/services/audiobookshelf/requester-tags');
 
-      const result = await applyRequesterTags({ deliveredBookIds: ['b0'], listedItems: ids.map((id) => listed(id)), logger, mode: 'backfill' });
+      const result = await applyItemMarks({ deliveredBookIds: ['b0'], listedItems: ids.map((id) => listed(id)), logger, tagging: true, mode: 'backfill' });
 
       type Clause = { audiobookId?: { in: string[] }; audiobook?: { absItemId: { in: string[] } } };
       const ors = prismaMock.request.findMany.mock.calls.map((c) => c[0].where.OR as Clause[]);

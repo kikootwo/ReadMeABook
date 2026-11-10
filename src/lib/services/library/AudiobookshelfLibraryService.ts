@@ -182,6 +182,8 @@ export class AudiobookshelfLibraryService implements ILibraryService {
       isMissing: typeof item.isMissing === 'boolean' ? item.isMissing : undefined,
       // Only when the listing carries tags (the requester tagger reads them; no key otherwise)
       ...(Array.isArray(item.media.tags) && item.media.tags.every((t) => typeof t === 'string') ? { tags: [...item.media.tags] } : {}),
+      // Only when the listing carries the key (the Explicit repair reads it, #542); ABS has no default, so null is off
+      ...(metadata && 'explicit' in metadata ? { explicit: metadata.explicit === true } : {}),
     };
   }
 }

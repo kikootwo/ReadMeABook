@@ -49,6 +49,7 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
   type: true,
   parentRequestId: true,
   deletedAt: true,
+  explicit: true, // #542
   // Same fields as the admin view minus the library file path (GET /api/requests strips it too)
   audiobook: {
     select: {

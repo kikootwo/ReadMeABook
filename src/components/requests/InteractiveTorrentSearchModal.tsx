@@ -57,6 +57,7 @@ interface InteractiveTorrentSearchModalProps {
   searchMode?: 'audiobook' | 'ebook'; // Search mode - defaults to audiobook
   replaceIssueId?: string; // Optional - when set, confirm handler calls replace endpoint instead
   onConfirm?: (torrent: TorrentResult) => Promise<void>; // Optional - overrides default confirm handler
+  explicit?: boolean; // Optional - new request from the details modal is marked Explicit (#542)
 }
 
 // Format relative time from publish date
@@ -111,6 +112,7 @@ export function InteractiveTorrentSearchModal({
   searchMode = 'audiobook',
   replaceIssueId,
   onConfirm,
+  explicit,
 }: InteractiveTorrentSearchModalProps) {
   // Hooks for existing audiobook request flow
   const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError, searchFailures: byRequestFailures } = useInteractiveSearch();
@@ -317,7 +319,7 @@ export function InteractiveTorrentSearchModal({
         await selectTorrent(requestId, confirmTorrent);
       } else {
         if (!fullAudiobook) throw new Error('Audiobook data required to create request');
-        await requestWithTorrent(fullAudiobook, confirmTorrent);
+        await requestWithTorrent(fullAudiobook, confirmTorrent, { explicit });
       }
       onSuccess?.(outcome);
       setConfirmTorrent(null);

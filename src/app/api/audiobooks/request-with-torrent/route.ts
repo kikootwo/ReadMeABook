@@ -13,6 +13,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
+import { RequestWithTorrentSchema } from '@/lib/utils/request-with-torrent-body';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
@@ -34,37 +35,6 @@ const IN_FLIGHT_REPLIES: Record<string, { error: string; message: string }> = {
   awaiting_approval: { error: 'AwaitingApproval', message: 'A request for this audiobook is already awaiting admin approval' },
 };
 
-const RequestWithTorrentSchema = z.object({
-  audiobook: z.object({
-    asin: z.string(),
-    title: z.string(),
-    author: z.string(),
-    narrator: z.string().optional(),
-    description: z.string().optional(),
-    coverArtUrl: z.string().optional(),
-    durationMinutes: z.number().optional(),
-    releaseDate: z.string().optional(),
-    rating: z.number().nullable().optional(),
-  }),
-  torrent: z.object({
-    guid: z.string(),
-    title: z.string(),
-    size: z.number(),
-    seeders: z.number().optional(), // Optional for NZB/Usenet results
-    leechers: z.number().optional(), // Optional for NZB/Usenet results
-    indexer: z.string(),
-    indexerId: z.number().optional(), // Prowlarr indexer ID
-    downloadUrl: z.string(),
-    infoUrl: z.string().optional(), // Link to indexer's info page
-    publishDate: z.string().transform((str) => new Date(str)),
-    infoHash: z.string().optional(),
-    format: z.enum(['M4B', 'M4A', 'MP3', 'OTHER']).optional(),
-    bitrate: z.string().optional(),
-    hasChapters: z.boolean().optional(),
-    protocol: z.enum(['torrent', 'usenet']).optional(), // Protocol from Prowlarr API
-  }),
-});
-
 /**
  * POST /api/audiobooks/request-with-torrent
  * Create a request and download a specific torrent in one operation
@@ -85,7 +55,7 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { audiobook, torrent: pickedTorrent } = RequestWithTorrentSchema.parse(body);
+      const { audiobook, torrent: pickedTorrent, explicit } = RequestWithTorrentSchema.parse(body);
 
       // Only magnet links or Prowlarr download links may be fetched on the user's behalf
       const torrentCheck = await guardTorrentSelection(pickedTorrent);
@@ -273,6 +243,8 @@ export async function POST(request: NextRequest) {
                 status,
                 type: 'audiobook', // Explicit type for user-created requests
                 progress: 0,
+                // Only an admin clears a mark (#542): a re-request can add one, never drop one
+                explicit: explicit === true || existingRequest?.explicit === true,
                 ...extra,
                 ...(existingRequest?.customSearchTerms && { customSearchTerms: existingRequest.customSearchTerms }),
               },

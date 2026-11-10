@@ -6,7 +6,7 @@
  * tagged; a CAS loser, tagging off and Plex mode make no ABS call; a failing tag step leaves the
  * delivery and its notification alone; repair acts only on a listed tag list that lacks a tag,
  * capped at 25 items a run. Real: match-requests, request-library-link, requester-tags.
- * Mocked: prisma (in-memory holder), the ASIN matcher, the job queue, config, addABSItemTags.
+ * Mocked: prisma (in-memory holder), the ASIN matcher, the job queue, config, writeABSItem.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,8 +18,9 @@ import type { LibraryItem } from '@/lib/services/library/ILibraryService';
 const prismaMock = createPrismaMock();
 const state = vi.hoisted(() => ({
   config: {} as Record<string, string>,
-  tagCalls: [] as Array<{ itemId: string; tags: string[] }>,
-  tagResult: (_itemId: string, tags: string[]): unknown => ({ status: 'added', tags }),
+  tagCalls: [] as Array<{ itemId: string; tags?: string[]; explicit?: true }>,
+  tagResult: (_itemId: string, want: { tags?: string[]; explicit?: true }): unknown =>
+    ({ tags: want.tags ? 'added' : 'none', addedTags: want.tags ?? [], explicit: want.explicit ? 'set' : 'none' }),
 }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn() }));
 const findPlexMatchMock = vi.hoisted(() => vi.fn());
@@ -32,10 +33,11 @@ vi.mock('@/lib/services/config.service', () => ({
 }));
 vi.mock('@/lib/services/audiobookshelf/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/services/audiobookshelf/api')>()),
-  addABSItemTags: async (itemId: string, tags: string[]) => {
-    state.tagCalls.push({ itemId, tags });
-    return state.tagResult(itemId, tags);
+  writeABSItem: async (itemId: string, want: { tags?: string[]; explicit?: true }) => {
+    state.tagCalls.push({ itemId, ...want });
+    return state.tagResult(itemId, want);
   },
+  canKeyUserSeeExplicit: async () => true,
 }));
 
 const db = createLibraryDb();
@@ -98,7 +100,7 @@ describe('requester tags after delivery (#232)', () => {
     wireLibraryDb(prismaMock, db, MEDIA);
     state.config = { 'audiobookshelf.tag_requester': 'true' };
     state.tagCalls = [];
-    state.tagResult = (_itemId, tags) => ({ status: 'added', tags });
+    state.tagResult = (_itemId, want) => ({ tags: want.tags ? 'added' : 'none', addedTags: want.tags ?? [], explicit: want.explicit ? 'set' : 'none' });
     jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
     findPlexMatchMock.mockImplementation(async ({ asin }: { asin: string }) =>
       (asin.startsWith('B0asin') ? { plexGuid: `item-${asin.slice(2)}`, title: 'Matched' } : null));
@@ -166,7 +168,7 @@ describe('requester tags after delivery (#232)', () => {
     expect(result.matched).toBe(1);
     expect(req('r1').status).toBe('available');
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith('request_available', 'r1', 'Book asin1', 'A', 'alice', undefined, 'audiobook');
-    expect(logger.error).toHaveBeenCalledWith('Requester tagging failed: db down');
+    expect(logger.error).toHaveBeenCalledWith('Audiobookshelf item step (requester tags, Explicit flag) failed: db down');
   });
 
   it('a listed item already holding its tag: no ABS call', async () => {
@@ -207,7 +209,7 @@ describe('requester tags after delivery (#232)', () => {
     const ids = state.tagCalls.map((c) => c.itemId);
     expect(ids.slice(0, 2).sort()).toEqual(['item-asin1', 'item-asin2']);
     expect(ids.filter((id) => id.startsWith('item-old'))).toHaveLength(25);
-    expect(logger.info).toHaveBeenCalledWith('5 more items need their requester tag; the next scan continues');
+    expect(logger.info).toHaveBeenCalledWith('5 more items need their requester tag or Explicit flag; the next scan continues');
   });
 
   it('a deleted request is never tagged', async () => {
@@ -242,14 +244,14 @@ describe('requester tags after delivery (#232)', () => {
   });
 
   it('3 failures in a row stop the run with one error line (403 hint)', async () => {
-    state.tagResult = () => ({ status: 'failed', error: 'ABS API error: 403 Forbidden', httpStatus: 403 });
+    state.tagResult = () => ({ tags: 'failed', addedTags: [], explicit: 'none', error: 'ABS API error: 403 Forbidden', httpStatus: 403 });
     for (let i = 0; i < 5; i++) available(`r${i}`, `b${i}`, 'u-alice');
 
     await run([0, 1, 2, 3, 4].map((i) => listed(`item-b${i}`, [])));
 
     expect(state.tagCalls).toHaveLength(3);
     expect(logger.error).toHaveBeenCalledWith(
-      "Requester tagging stopped for this run after 3 failures in a row: the Audiobookshelf API key's user needs permission to update items"
+      "Audiobookshelf item writes stopped for this run after 3 failures in a row: the Audiobookshelf API key's user needs permission to update items"
     );
   });
 });

@@ -16,6 +16,9 @@ import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsM
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { COMPLETED_STATUSES, CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
+import { useAuth } from '@/contexts/AuthContext';
+import { useIsAudiobookshelf } from '@/lib/hooks/useExplicitMark';
+import { RequestExplicitControl } from './ExplicitCheckbox';
 
 interface RequestCardProps {
   request: {
@@ -31,6 +34,7 @@ interface RequestCardProps {
     completedAt?: string;
     downloadAvailable?: boolean;
     releaseDate?: string | Date | null;
+    explicit?: boolean; // #542
     audiobook: {
       id: string;
       audibleAsin?: string;
@@ -61,6 +65,9 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const canCancel = (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
+  const { user } = useAuth();
+  // Explicit mark (#542): Audiobookshelf only, audiobook requests, not on denied ones (never delivered)
+  const showExplicit = useIsAudiobookshelf() && !isEbook && request.status !== 'denied';
 
   const releaseDateLabel = React.useMemo(() => {
     if (request.status !== 'awaiting_release' || !request.releaseDate) return null;
@@ -250,7 +257,10 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
 
             {/* Action Buttons */}
             {showActions && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {showExplicit && (
+                  <RequestExplicitControl requestId={request.id} explicit={request.explicit === true} isAdmin={user?.role === 'admin'} />
+                )}
                 {canCancel && (
                   <Button
                     onClick={() => setConfirmCancelOpen(true)}
@@ -279,6 +289,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           requestId={request.id}
           requestedByUserId={request.userId ?? null}
           requestType={requestType}
+          requestExplicit={request.explicit === true}
         />
       )}
 

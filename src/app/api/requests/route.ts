@@ -29,6 +29,8 @@ const CreateRequestSchema = z.object({
     releaseDate: z.string().optional(),
     rating: z.number().nullable().optional(),
   }),
+  /** Mark the request Explicit (#542): Audiobookshelf mode flags the book when it arrives */
+  explicit: z.boolean().optional(),
 });
 
 /**
@@ -48,7 +50,7 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { audiobook } = CreateRequestSchema.parse(body);
+      const { audiobook, explicit } = CreateRequestSchema.parse(body);
 
       const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';
 
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
         narrator: audiobook.narrator,
         description: audiobook.description,
         coverArtUrl: audiobook.coverArtUrl,
-      }, { skipAutoSearch, bypassIgnore: true });
+      }, { skipAutoSearch, bypassIgnore: true, explicit });
 
       if (!result.success) {
         const statusMap: Record<string, { error: string; status: number }> = {

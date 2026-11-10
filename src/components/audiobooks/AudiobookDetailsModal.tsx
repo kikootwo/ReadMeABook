@@ -25,6 +25,8 @@ import { EyeSlashIcon as EyeSlashSolidIcon } from '@heroicons/react/24/solid';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { useIsIgnored, useToggleIgnore } from '@/lib/hooks/useIgnoredAudiobooks';
 import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-statuses';
+import { ExplicitCheckbox } from '@/components/requests/ExplicitCheckbox';
+import { useIsAudiobookshelf } from '@/lib/hooks/useExplicitMark';
 
 interface AudiobookDetailsModalProps {
   asin: string;
@@ -43,6 +45,8 @@ interface AudiobookDetailsModalProps {
   requestedByUserId?: string | null;
   /** Type of the request behind requestId. 'ebook' (My Requests ebook card) makes Interactive Search search ebooks for it. */
   requestType?: 'audiobook' | 'ebook';
+  /** The request behind requestId is marked Explicit (#542): a re-request keeps it, so the box starts checked */
+  requestExplicit?: boolean;
   hideRequestActions?: boolean;
   hasReportedIssue?: boolean;
   aiReason?: string | null;
@@ -90,6 +94,7 @@ export function AudiobookDetailsModal({
   requestId = null,
   requestedByUserId = null,
   requestType = 'audiobook',
+  requestExplicit = false,
   hideRequestActions = false,
   hasReportedIssue = false,
   aiReason = null,
@@ -119,6 +124,9 @@ export function AudiobookDetailsModal({
   const [isDownloading, setIsDownloading] = useState(false);
   const [coverError, setCoverError] = useState(false);
   const [isTogglingIgnore, setIsTogglingIgnore] = useState(false);
+  const [explicit, setExplicit] = useState(requestExplicit);
+  useEffect(() => setExplicit(requestExplicit), [requestExplicit, isOpen]);
+  const isABS = useIsAudiobookshelf();
 
   // Sync local status when the prop changes (e.g. page data refreshes)
   useEffect(() => {
@@ -129,6 +137,9 @@ export function AudiobookDetailsModal({
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
   const summaryText = audiobook?.description?.trim() ?? '';
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
+  // Explicit mark (#542): wherever Request shows, Audiobookshelf only, never on a denied request
+  const showExplicit = isABS && !!user && status.canRequest && effectiveStatus !== 'denied' && requestType !== 'ebook';
+  const sendExplicit = showExplicit && explicit;
 
   // Advance the existing request via select-torrent (instead of creating a new one)
   // only when the viewer owns the request, or is admin, AND the status is one we route on.
@@ -172,7 +183,7 @@ export function AudiobookDetailsModal({
     }
 
     try {
-      await createRequest(audiobook);
+      await createRequest(audiobook, { explicit: sendExplicit });
       setLocalRequestStatus('pending');
       onStatusChange?.('pending');
       showNotification('Request created!');
@@ -656,6 +667,9 @@ export function AudiobookDetailsModal({
             className="sticky bottom-0 z-20 p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-t border-gray-200/50 dark:border-gray-700/50"
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
           >
+            {showExplicit && (
+              <ExplicitCheckbox checked={explicit} onChange={setExplicit} isAdmin={user?.role === 'admin' && !requestExplicit} className="-mt-2 mb-1" />
+            )}
             <div className="flex items-center gap-3">
               {/* Main Action */}
               <div className="flex-1">
@@ -834,6 +848,7 @@ export function AudiobookDetailsModal({
               author: audiobook.author,
             }}
             fullAudiobook={audiobook}
+            explicit={sendExplicit}
           />
         </div>,
         document.body
