@@ -19,6 +19,8 @@ export interface TagUser {
   plexUsername: string;
   deletedAt: Date | null;
   registrationStatus: string | null;
+  /** 'admin' or 'user'; an admin's request that RMAB never downloaded is not tagged */
+  role?: string;
 }
 
 export interface RequesterTagWarnings {
@@ -46,7 +48,8 @@ export interface RequesterTagMap {
 /**
  * `req:<username>` for a username, or '' when nothing usable remains: NFKD, combining marks
  * dropped, trimmed, lowercased, whitespace runs → `_`, everything outside `[a-z0-9_-]` dropped.
- * A name with letters none of which survive gives '' (not `req:_1` for "Дочь 1").
+ * A result with no letter or digit gives '' (`---`, `_`, emoji only), and so does a name with
+ * letters none of which survive (not `req:_1` for "Дочь 1").
  */
 export function requesterTag(username: string | null | undefined): string {
   if (typeof username !== 'string') return '';
@@ -57,7 +60,7 @@ export function requesterTag(username: string | null | undefined): string {
     .toLowerCase()
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9_-]/g, '');
-  if (!suffix) return '';
+  if (!/[a-z0-9]/.test(suffix)) return '';
   if (/\p{L}/u.test(username) && !/[a-z]/.test(suffix)) return '';
   return `${REQUESTER_TAG_PREFIX}${suffix}`;
 }
@@ -124,7 +127,7 @@ export function buildRequesterTagMap(users: TagUser[]): RequesterTagMap {
 
 export async function loadRequesterTagMap(): Promise<RequesterTagMap> {
   const users = await prisma.user.findMany({
-    select: { id: true, plexUsername: true, deletedAt: true, registrationStatus: true },
+    select: { id: true, plexUsername: true, deletedAt: true, registrationStatus: true, role: true },
   });
   return buildRequesterTagMap(users);
 }

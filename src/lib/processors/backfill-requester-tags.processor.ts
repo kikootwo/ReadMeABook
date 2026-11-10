@@ -52,7 +52,7 @@ export async function processBackfillRequesterTags(payload: BackfillRequesterTag
   logger.info(
     `Requester tag backfill: ${result.tagged} tagged, ${result.alreadyTagged} already tagged, ${result.failed} failed; ` +
     `skipped ${result.skippedShared} shared, ${result.skippedNoTag} without a tag, ${result.skippedUser} users, ` +
-    `${result.skippedUnapproved} without approval${result.stoppedEarly ? ' (stopped early)' : ''}`
+    `${result.skippedUnapproved} without approval, ${result.skippedImported} admin imports${result.stoppedEarly ? ' (stopped early)' : ''}`
   );
   return result;
 }

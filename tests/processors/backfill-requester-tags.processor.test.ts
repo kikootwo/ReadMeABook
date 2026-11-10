@@ -82,6 +82,7 @@ describe('backfill_requester_tags (#232)', () => {
       { id: 'u-alice', plexUsername: 'alice', deletedAt: null, registrationStatus: 'approved' },
       { id: 'u-gone', plexUsername: 'gone', deletedAt: new Date(), registrationStatus: 'approved' },
       { id: 'u-pat', plexUsername: 'pat', deletedAt: null, registrationStatus: 'pending_approval' },
+      { id: 'u-admin', plexUsername: 'admin', deletedAt: null, registrationStatus: null, role: 'admin' },
     );
   });
 
@@ -105,15 +106,17 @@ describe('backfill_requester_tags (#232)', () => {
     item(3, 'u-gone');
     item(4, 'u-pat');
     item(5, 'u-alice', { approvalBypassedBy: 'manual_import:denied' });
+    item(6, 'u-admin'); // an admin's import nobody requested (no download record)
 
     const first = await runJob();
 
     expect(first).toEqual({
-      considered: 5, tagged: 2, alreadyTagged: 0, failed: 0,
-      skippedNoTag: 0, skippedShared: 0, skippedUser: 2, skippedUnapproved: 1, stoppedEarly: false,
+      considered: 6, tagged: 2, alreadyTagged: 0, failed: 0,
+      skippedNoTag: 0, skippedShared: 0, skippedUser: 2, skippedUnapproved: 1, skippedImported: 1, stoppedEarly: false,
     });
     expect(abs.tags.get('item-1')).toEqual(['keep', 'req:alice']);
     expect(abs.tags.get('item-5')).toEqual(['keep']);
+    expect(abs.tags.get('item-6')).toEqual(['keep']);
     expect(abs.writes.sort()).toEqual(['item-1', 'item-2']);
 
     abs.writes = [];

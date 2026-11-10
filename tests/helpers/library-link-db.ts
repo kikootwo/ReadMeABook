@@ -110,7 +110,13 @@ export function wireLibraryDb(prismaMock: ReturnType<typeof createPrismaMock>, d
     const user = db.users.find((u) => u.id === r.userId);
     return user ? { ...user } : { plexUsername: 'reader' };
   };
-  const withRequest = (r: Row): Row => ({ ...r, audiobook: { ...db.audiobooks.find((a) => a.id === r.audiobookId) }, user: userOf(r) });
+  // `downloads` on a request row = its download history count (`_count.downloadHistory`, #232)
+  const withRequest = (r: Row): Row => ({
+    ...r,
+    audiobook: { ...db.audiobooks.find((a) => a.id === r.audiobookId) },
+    user: userOf(r),
+    _count: { downloadHistory: Number(r.downloads ?? 0) },
+  });
   let readers = 0;
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });

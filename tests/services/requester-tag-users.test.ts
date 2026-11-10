@@ -38,7 +38,7 @@ describe('requesterTag format (#232)', () => {
     expect(requesterTag(name)).toBe(tag);
   });
 
-  it.each([['李雷'], ['Дочь 1'], ['   '], [''], ['!!!']])('%j gives no tag (never a bare req:)', (name) => {
+  it.each([['李雷'], ['Дочь 1'], ['   '], [''], ['!!!'], ['---'], ['_'], ['- -'], ['😀 😀'], ['٣ ٤']])('%j gives no tag (never a bare req: or one without a letter or digit)', (name) => {
     expect(requesterTag(name)).toBe('');
   });
 
@@ -88,6 +88,15 @@ describe('buildRequesterTagMap (#232)', () => {
     expect(map.tagByUser.size).toBe(0);
     expect(map.refusedUsers.get('1')).toBe('no_tag');
     expect(map.warnings.untaggable).toEqual(['李雷', 'Дочь 1']);
+  });
+
+  it('names with no letter or digit are untaggable, never tagged or shared', () => {
+    const map = buildRequesterTagMap([u('1', '---'), u('2', '_'), u('3', '😀 😀'), u('4', '٣ ٤'), u('5', '- -')]);
+
+    expect(map.tagByUser.size).toBe(0);
+    expect(map.warnings.shared).toEqual([]);
+    expect([...map.refusedUsers.values()]).toEqual(['no_tag', 'no_tag', 'no_tag', 'no_tag', 'no_tag']);
+    expect(map.warnings.untaggable).toEqual(['---', '_', '😀 😀', '٣ ٤', '- -']);
   });
 
   it('a live user sharing a deleted user\'s tag is tagged and warned', () => {
@@ -152,7 +161,7 @@ describe('loadRequesterTagWarnings (#232)', () => {
     const warnings = await loadRequesterTagWarnings();
 
     expect(prismaMock.user.findMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.user.findMany.mock.calls[0][0]).toEqual({ select: { id: true, plexUsername: true, deletedAt: true, registrationStatus: true } });
+    expect(prismaMock.user.findMany.mock.calls[0][0]).toEqual({ select: { id: true, plexUsername: true, deletedAt: true, registrationStatus: true, role: true } });
     expect(warnings.shared).toEqual([{ tag: 'req:johnsmith', usernames: ['john.smith', 'johnsmith'] }]);
     expect(warnings.untaggable).toEqual(['李雷']);
   });

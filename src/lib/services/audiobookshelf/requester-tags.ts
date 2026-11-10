@@ -3,10 +3,12 @@
  * Documentation: documentation/features/requester-tags.md
  *
  * One tagger for every path: delivery (books the scan just made available), repair (listed items
- * whose tag list lost a requester tag, capped per run) and the backfill job. Candidates come from
- * one query that requires `approvalBypassedBy` NULL, so a request completed without approval is
- * never tagged on any path. Writes go through addABSItemTags (read, merge, write). Never throws
- * for an ABS failure; stops a run after consecutive failures.
+ * whose tag list lost a requester tag, capped per run) and the backfill job. Candidates are the
+ * available requests of this run's delivered books and listed items (one read per 1,000 item ids).
+ * A request completed without approval (`approvalBypassedBy` set) and an admin's request that RMAB
+ * never downloaded (a manual or bulk import made for the importing admin) are never tagged on any
+ * path. Writes go through addABSItemTags (read, merge, write). Never throws for an ABS failure;
+ * stops a run after consecutive failures.
  */
 
 import { prisma } from '@/lib/db';
@@ -31,11 +33,15 @@ export interface RequesterTagResult {
   tagged: number;
   alreadyTagged: number;
   failed: number;
-  /** requests not tagged: name leaves no tag, shared tag, user deleted or not approved, completed without approval */
+  /**
+   * requests not tagged: name leaves no tag, shared tag, user deleted or not approved, completed
+   * without approval, an admin's request RMAB never downloaded (an import nobody asked for)
+   */
   skippedNoTag: number;
   skippedShared: number;
   skippedUser: number;
   skippedUnapproved: number;
+  skippedImported: number;
   stoppedEarly: boolean;
 }
 
@@ -61,7 +67,44 @@ const CANDIDATE_SELECT = {
   userId: true,
   approvalBypassedBy: true,
   audiobook: { select: { id: true, absItemId: true, title: true } },
+  _count: { select: { downloadHistory: true } },
 } as const;
+
+/** Listed item ids per candidate read (keeps each query's IN list small on a large library). */
+const ITEM_IDS_PER_READ = 1000;
+
+interface Candidate {
+  id: string;
+  userId: string;
+  approvalBypassedBy: string | null;
+  audiobook: { id: string; absItemId: string | null; title: string };
+  _count: { downloadHistory: number };
+}
+
+/** The available requests of the delivered books and the listed items; nothing else is read. */
+async function loadCandidates(deliveredBookIds: string[], listedItemIds: string[]): Promise<Candidate[]> {
+  const found = new Map<string, Candidate>();
+  for (let start = 0; start === 0 || start < listedItemIds.length; start += ITEM_IDS_PER_READ) {
+    const bookIds = start === 0 ? deliveredBookIds : [];
+    const itemIds = listedItemIds.slice(start, start + ITEM_IDS_PER_READ);
+    const OR = [
+      ...(bookIds.length > 0 ? [{ audiobookId: { in: bookIds } }] : []),
+      ...(itemIds.length > 0 ? [{ audiobook: { absItemId: { in: itemIds } } }] : []),
+    ];
+    if (OR.length === 0) continue;
+    const rows = await prisma.request.findMany({ where: { ...CANDIDATE_WHERE, OR }, select: CANDIDATE_SELECT });
+    for (const row of rows) found.set(row.id, row);
+  }
+  return [...found.values()];
+}
+
+/**
+ * A manual or bulk import with no request to recycle creates one for the importing admin; no user
+ * asked for that book. Told apart by owner and history: an admin's request with no download record
+ * (an import never writes one; every RMAB download does). Also matches an admin's own request that
+ * reached the library without an RMAB download, which is not tagged either.
+ */
+const importedForAdmin = (r: Candidate, role: string | undefined) => role === 'admin' && r._count.downloadHistory === 0;
 
 /**
  * Tags the requesters of `deliveredBookIds` and repairs listed items. `mode: 'backfill'` tags
@@ -79,22 +122,15 @@ export async function applyRequesterTags(opts: {
   const listed = new Map(listedItems.map((item) => [item.externalId, item]));
   const result: RequesterTagResult = {
     considered: 0, tagged: 0, alreadyTagged: 0, failed: 0,
-    skippedNoTag: 0, skippedShared: 0, skippedUser: 0, skippedUnapproved: 0, stoppedEarly: false,
+    skippedNoTag: 0, skippedShared: 0, skippedUser: 0, skippedUnapproved: 0, skippedImported: 0, stoppedEarly: false,
   };
   if (delivered.size === 0 && listed.size === 0) return result;
 
-  type Candidate = { id: string; userId: string; audiobook: { id: string; absItemId: string | null; title: string } };
-  const inRun = (r: Candidate) => delivered.has(r.audiobook.id) || listed.has(r.audiobook.absItemId ?? '');
-  const eligible = (await prisma.request.findMany({
-    where: { ...CANDIDATE_WHERE, approvalBypassedBy: null },
-    select: CANDIDATE_SELECT,
-  })).filter(inRun);
-  const unapproved = (await prisma.request.findMany({
-    where: { ...CANDIDATE_WHERE, approvalBypassedBy: { not: null } },
-    select: CANDIDATE_SELECT,
-  })).filter(inRun);
+  const candidates = await loadCandidates([...delivered], [...listed.keys()]);
+  const eligible = candidates.filter((r) => r.approvalBypassedBy === null);
+  const unapproved = candidates.filter((r) => r.approvalBypassedBy !== null);
 
-  result.considered = eligible.length + unapproved.length;
+  result.considered = candidates.length;
   result.skippedUnapproved = unapproved.length;
   if (unapproved.length > 0) {
     logger.info(`${unapproved.length} requests delivered without approval are not tagged`);
@@ -109,6 +145,11 @@ export async function applyRequesterTags(opts: {
     const user = map.usersById.get(r.userId);
     if (!user || map.excludedUsers.has(r.userId)) {
       result.skippedUser++;
+      continue;
+    }
+    if (importedForAdmin(r, user.role)) {
+      result.skippedImported++;
+      logger.debug(`Not tagging request ${r.id}: an admin's import nobody requested`);
       continue;
     }
     logRunWarning(map, user, seen, logger);

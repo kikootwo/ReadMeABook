@@ -161,4 +161,91 @@ describe('requester tag eligibility by path and step (#232)', () => {
       expect(result).toMatchObject({ considered: 1, tagged: 1, skippedUnapproved: 0 });
     });
   });
+
+  // An import with no request to recycle creates one for the importing admin: no user asked for it.
+  // Told apart by owner and history: an admin's request with no download record.
+  describe('an admin\'s import nobody requested', () => {
+    beforeEach(() => {
+      db.users.push({ id: 'u-admin', plexUsername: 'admin', deletedAt: null, registrationStatus: null, role: 'admin' });
+    });
+
+    it('delivery: the admin\'s import is not tagged; a user\'s request of the book is', async () => {
+      linkedBook();
+      linkedRequest('r-admin', 'u-admin');
+      linkedRequest('r-bob', 'u-bob');
+
+      await scan([{ ...LINK_ITEM }]);
+
+      expect(state.tagCalls).toEqual([{ itemId: 'abs-link', tags: ['req:bob'] }]);
+    });
+
+    it('delivery: alone, no ABS call', async () => {
+      linkedBook();
+      linkedRequest('r-admin', 'u-admin');
+
+      await scan([{ ...LINK_ITEM }]);
+
+      expect(state.tagCalls).toEqual([]);
+    });
+
+    it('repair: a listed tag list without req:admin is left alone', async () => {
+      book('b1', { absItemId: 'item-b1' });
+      request('r-admin', 'b1', 'u-admin', 'available');
+
+      await scan([listed('item-b1', ['Fiction'])]);
+
+      expect(state.tagCalls).toEqual([]);
+    });
+
+    it('backfill: no ABS call, counted skippedImported', async () => {
+      book('b1', { absItemId: 'item-b1' });
+      request('r-admin', 'b1', 'u-admin', 'available');
+
+      const result = await backfill([listed('item-b1')]);
+
+      expect(state.tagCalls).toEqual([]);
+      expect(result).toMatchObject({ considered: 1, skippedImported: 1, tagged: 0 });
+    });
+
+    it('an admin\'s request that RMAB downloaded is tagged on every path', async () => {
+      book('b1', { absItemId: 'item-b1' });
+      request('r-admin', 'b1', 'u-admin', 'available', { downloads: 1 });
+
+      const result = await backfill([listed('item-b1')]);
+      await scan([listed('item-b1', ['Fiction'])]);
+
+      expect(result).toMatchObject({ tagged: 1, skippedImported: 0 });
+      expect(state.tagCalls).toEqual([
+        { itemId: 'item-b1', tags: ['req:admin'] },
+        { itemId: 'item-b1', tags: ['req:admin'] },
+      ]);
+    });
+
+    it('a user\'s request with no download record (a named import) is still tagged', async () => {
+      book('b1', { absItemId: 'item-b1' });
+      request('r-carol', 'b1', 'u-carol', 'available');
+
+      const result = await backfill([listed('item-b1')]);
+
+      expect(result).toMatchObject({ tagged: 1, skippedImported: 0 });
+    });
+  });
+
+  describe('the candidate read', () => {
+    it('one read, filtered to the delivered books and the listed items', async () => {
+      book('b1', { absItemId: 'item-b1' });
+      book('b2', { absItemId: 'item-b2' });
+      request('r-carol', 'b1', 'u-carol', 'available');
+      request('r-bob', 'b2', 'u-bob', 'available');
+      const { applyRequesterTags } = await import('@/lib/services/audiobookshelf/requester-tags');
+
+      const result = await applyRequesterTags({ deliveredBookIds: ['b9'], listedItems: [listed('item-b1')], logger, mode: 'backfill' });
+
+      const reads = prismaMock.request.findMany.mock.calls.map((c) => c[0]);
+      expect(reads).toHaveLength(1);
+      expect(reads[0].where.OR).toEqual([{ audiobookId: { in: ['b9'] } }, { audiobook: { absItemId: { in: ['item-b1'] } } }]);
+      expect(result.considered).toBe(1);
+      expect(state.tagCalls).toEqual([{ itemId: 'item-b1', tags: ['req:carol'] }]);
+    });
+  });
 });
