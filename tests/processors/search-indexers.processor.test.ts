@@ -8,8 +8,8 @@ import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
 
 const prismaMock = createPrismaMock();
-// Writes after the indexer queries also keep a pick or download made during the search (#591)
-const KEEP_PICK_WHERE = { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval'] };
+// Every status write of the job also refuses a download, a pick, approval-waiting or denied (#591)
+const KEEP_PICK_WHERE = { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] };
 const configMock = vi.hoisted(() => ({ get: vi.fn(), getAudibleRegion: vi.fn().mockResolvedValue('us') }));
 const jobQueueMock = createJobQueueMock();
 const prowlarrMock = vi.hoisted(() => ({ search: vi.fn(), searchWithVariations: vi.fn() }));
@@ -232,8 +232,8 @@ describe('processSearchIndexers', () => {
     expect(prismaMock.request.update).not.toHaveBeenCalled();
     expect(result).toMatchObject({ success: true, requestId: 'req-c' });
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      // also refuses requests past searching (#591)
-      where: { id: 'req-c', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available'] } },
+      // also refuses a download, a pick, approval-waiting or denied (#591)
+      where: { id: 'req-c', deletedAt: null, status: KEEP_PICK_WHERE },
       data: expect.objectContaining({ status: 'searching' }),
     }));
     expect(prowlarrMock.searchWithVariations).not.toHaveBeenCalled();

@@ -80,14 +80,14 @@ describe('processSearchIndexers on a request past searching (#591)', () => {
     });
   });
 
-  it.each(['downloading', 'processing', 'downloaded', 'available'])(
+  it.each(['downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'])(
     'skips a %s request: writes nothing, searches nothing, queues nothing',
     async (status) => {
       row.status = status;
 
       const result = await runSearch();
 
-      expect(result).toEqual({ success: true, message: `Request is already ${status}, search skipped`, requestId: 'req-591' });
+      expect(result).toEqual({ success: true, message: `Request is ${status}, search skipped`, requestId: 'req-591' });
       expect(row.status).toBe(status);
       expect(writes).toEqual([]);
       expect(prowlarrMock.searchWithVariations).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe('processSearchIndexers on a request past searching (#591)', () => {
     }
   );
 
-  it.each(['downloading', 'awaiting_approval', 'cancelled'])(
+  it.each(['downloading', 'awaiting_approval', 'denied', 'cancelled'])(
     'queues no download when the request turns %s during the search',
     async (status) => {
       row.status = 'awaiting_search';
@@ -145,6 +145,21 @@ describe('processSearchIndexers on a request past searching (#591)', () => {
     expect(result).toEqual(expect.objectContaining({ success: true, message: 'Request moved to downloading during the search, not re-queued' }));
     expect(row.status).toBe('downloading');
     expect(writes).toHaveLength(1); // only the `searching` claim
+    expectNothingQueued();
+  });
+
+  it('keeps a request denied while the search finds nothing: no awaiting_search write', async () => {
+    row.status = 'awaiting_search';
+    prowlarrMock.searchWithVariations.mockImplementation(async () => {
+      row.status = 'denied';
+      return [];
+    });
+
+    const result = await runSearch();
+
+    expect(result.message).toBe('Request moved to denied during the search, not re-queued');
+    expect(row.status).toBe('denied');
+    expect(writes).toHaveLength(1);
     expectNothingQueued();
   });
 

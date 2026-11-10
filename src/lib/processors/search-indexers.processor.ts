@@ -15,12 +15,12 @@ import { filterBlockedResults } from '../utils/filter-blocked-results';
 import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { isLastAttempt, notifyChainEndedFailed, notifyRequestError, type BullAttempt } from './client-failure';
-import { PAST_SEARCH_STATUSES, PICKED_DURING_SEARCH_STATUSES } from '../constants/request-statuses';
+import { SEARCH_JOB_REFUSED_STATUSES } from '../constants/request-statuses';
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
-/** This job's writes after the indexer queries keep a pick or download made meanwhile (#591) */
-const KEEP_PICK = { notIn: PICKED_DURING_SEARCH_STATUSES };
+/** Every status write of this job (claim and later) refuses a download, a pick, approval-waiting or denied (#591) */
+const KEEP_PICK = { notIn: SEARCH_JOB_REFUSED_STATUSES };
 
 /**
  * A search for the next release after a download-client failure (#332) that found nothing
@@ -69,15 +69,15 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
   logger.info(`Processing request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching, unless it was cancelled or deleted, or is past
+    // Update request status to searching, unless cancelled, deleted, waiting for approval, denied or past
     // searching: a search queued before an Interactive Search pick adds no second download (#591)
     if (!(await updateRequestUnlessStopped(
-      requestId, { status: 'searching', searchAttempts: { increment: 1 } }, { notIn: PAST_SEARCH_STATUSES }
+      requestId, { status: 'searching', searchAttempts: { increment: 1 } }, KEEP_PICK
     ))) {
       const status = await movedOnStatus(requestId);
       if (status) {
-        logger.info(`Request ${requestId} is already ${status}, skipping search`);
-        return { success: true, message: `Request is already ${status}, search skipped`, requestId };
+        logger.info(`Request ${requestId} is ${status}, skipping search`);
+        return { success: true, message: `Request is ${status}, search skipped`, requestId };
       }
       logger.info(`Request ${requestId} is cancelled or deleted, skipping search`);
       return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };

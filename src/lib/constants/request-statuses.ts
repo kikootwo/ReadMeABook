@@ -75,18 +75,14 @@ export const SEARCHABLE_STATUSES = [
 ] as const;
 
 /**
- * Past searching: a download is under way or done (#591). A queued automatic search skips a
- * request in one of these (no `searching` write, nothing queued). Not COMPLETED_STATUSES:
- * that list lacks the two in-flight statuses, where a search would add a second download.
+ * Statuses no `search_indexers` write may move a request out of (#591), for its `searching`
+ * claim and for every write after the indexer queries alike: a download under way or done, a
+ * pick waiting for approval, a denied request. Nothing queues a search from these on purpose
+ * (approve writes `pending` first). Any other status (`pending` after Manual Search) is written.
  */
-export const PAST_SEARCH_STATUSES = ['downloading', 'processing', 'downloaded', 'available'] as const;
-
-/**
- * Statuses a search's own writes after the indexer queries refuse (#591): a pick made during
- * the search (`downloading`, or `awaiting_approval` for a pick that needs approval) or a
- * download that finished meanwhile. Any other status (`pending` after Manual Search) is written.
- */
-export const PICKED_DURING_SEARCH_STATUSES = [...PAST_SEARCH_STATUSES, 'awaiting_approval'] as const;
+export const SEARCH_JOB_REFUSED_STATUSES = [
+  'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied',
+] as const;
 
 /** Audiobook request statuses POST /api/requests/[id]/fetch-ebook accepts (admin). */
 export const EBOOK_FETCHABLE_STATUSES = ['downloaded', 'available'] as const;
