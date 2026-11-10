@@ -154,6 +154,83 @@ describe('rate limiter namespaces', () => {
     expect(one('signin-known-browser', 'new-4').ok).toBe(true);
   });
 
+  describe('all or nothing', () => {
+    /** `entries` keys at `count` each */
+    const fill = (namespace: RateLimitNamespace, entries: number, count: number, prefix = 'live') => {
+      for (let i = 0; i < entries; i += 1) {
+        for (let n = 0; n < count; n += 1) one(namespace, `${prefix}-${i}`);
+      }
+    };
+
+    it('counts the same bucket asked for twice as two slots', () => {
+      expect(reserve([{ namespace: 'password-change', key: 'k' }, { namespace: 'password-change', key: 'k' }]).ok).toBe(true);
+      expect(_getBucketUsage('password-change', 'k')).toBe(2);
+
+      for (let i = 0; i < 7; i += 1) one('password-change', 'k');
+      const refused = reserve([{ namespace: 'password-change', key: 'k' }, { namespace: 'password-change', key: 'k' }]);
+      expect(refused).toMatchObject({ ok: false, refusal: { reason: 'limit' } });
+      expect(_getBucketUsage('password-change', 'k')).toBe(9);
+    });
+
+    it('never drops a bucket of the same request to make room for another', () => {
+      const { maxEntries } = RATE_LIMITS['signin-known-browser'];
+      for (let n = 0; n < 3; n += 1) one('signin-known-browser', 'counted'); // 3 of 10: under half
+      fill('signin-known-browser', maxEntries - 1, 5);
+
+      const result = reserve([
+        { namespace: 'signin-known-browser', key: 'counted' },
+        { namespace: 'signin-known-browser', key: 'new' },
+      ]);
+
+      expect(result).toMatchObject({ ok: false, refusal: { key: 'new', reason: 'full' } });
+      expect(_getBucketUsage('signin-known-browser', 'counted')).toBe(3);
+    });
+
+    it('drops nothing when a later bucket refuses', () => {
+      const { maxEntries } = RATE_LIMITS['signin-account'];
+      one('signin-account', 'droppable');
+      fill('signin-account', maxEntries - 1, 5);
+      for (let i = 0; i < 20; i += 1) one('signin-address', 'addr');
+
+      const result = reserve([
+        { namespace: 'signin-account', key: 'new' },
+        { namespace: 'signin-address', key: 'addr' },
+      ]);
+
+      expect(result).toMatchObject({ ok: false, refusal: { namespace: 'signin-address', reason: 'limit' } });
+      expect(_getBucketUsage('signin-account', 'droppable')).toBe(1);
+      expect(_getBucketCount('signin-account')).toBe(maxEntries);
+    });
+
+    it('resumes the count of a dropped key that comes back within its window', () => {
+      const { maxEntries } = RATE_LIMITS['signin-known-browser'];
+      for (let n = 0; n < 4; n += 1) one('signin-known-browser', 'back');
+      fill('signin-known-browser', maxEntries - 1, 5);
+
+      expect(one('signin-known-browser', 'new').ok).toBe(true);
+      expect(_getBucketUsage('signin-known-browser', 'back')).toBe(0);
+
+      expect(one('signin-known-browser', 'back').ok).toBe(true);
+      expect(_getBucketUsage('signin-known-browser', 'back')).toBe(5);
+
+      vi.advanceTimersByTime(900_000);
+      expect(one('signin-known-browser', 'back').ok).toBe(true);
+      expect(_getBucketUsage('signin-known-browser', 'back')).toBe(1);
+    });
+
+    it('keeps the counts of the last maxEntries dropped keys only', () => {
+      const { maxEntries } = RATE_LIMITS['signin-known-browser'];
+      for (let n = 0; n < 4; n += 1) one('signin-known-browser', 'back');
+      fill('signin-known-browser', maxEntries - 1, 5);
+
+      // Each new key drops the one before it; the first drops 'back'
+      for (let i = 0; i <= maxEntries; i += 1) expect(one('signin-known-browser', `new-${i}`).ok).toBe(true);
+
+      expect(one('signin-known-browser', 'back').ok).toBe(true);
+      expect(_getBucketUsage('signin-known-browser', 'back')).toBe(1);
+    });
+  });
+
   it('shares counts between two copies of the module', async () => {
     for (let i = 0; i < 10; i += 1) one('password-change', 'user-1');
     vi.resetModules();

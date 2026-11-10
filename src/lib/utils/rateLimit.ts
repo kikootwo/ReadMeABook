@@ -6,10 +6,13 @@
  * own limit, window and entry cap. The store lives on globalThis (processSingleton), so
  * every copy of this module in the process shares one set of counters.
  *
- * - reserve() checks every requested bucket first, then counts all of them or none.
+ * - reserve() checks every requested bucket first (the same bucket twice needs two
+ *   slots), then counts all of them or none; room is made only once every check passed.
  * - refund() gives back one reservation, only within the window it was made in.
  * - A full namespace drops an expired entry or one under half its limit; an entry at
  *   or past half its limit is never dropped. With nothing to drop, the new key is refused.
+ * - The counts of the last maxEntries dropped entries are kept; a dropped key that comes
+ *   back within its window resumes its count.
  */
 
 import { processSingleton } from './process-singleton';
@@ -55,8 +58,12 @@ export type ReserveResult =
 
 type Bucket = { count: number; resetAt: number; refusalLogged: boolean };
 
+type DroppedCount = { count: number; resetAt: number };
+
 type NamespaceState = {
   buckets: Map<string, Bucket>;
+  /** Counts of dropped entries, oldest drop first, at most maxEntries */
+  dropped: Map<string, DroppedCount>;
   calls: number;
   lastExpiredSweepAt: number;
   noScanUntil: number;
@@ -79,7 +86,7 @@ function stateFor(namespace: RateLimitNamespace): NamespaceState {
   const { namespaces } = store();
   let state = namespaces.get(namespace);
   if (!state) {
-    state = { buckets: new Map(), calls: 0, lastExpiredSweepAt: 0, noScanUntil: 0, fullLoggedAt: 0 };
+    state = { buckets: new Map(), dropped: new Map(), calls: 0, lastExpiredSweepAt: 0, noScanUntil: 0, fullLoggedAt: 0 };
     namespaces.set(namespace, state);
   }
   return state;
@@ -89,30 +96,43 @@ function sweepExpired(state: NamespaceState, now: number): void {
   for (const [key, bucket] of state.buckets) {
     if (now >= bucket.resetAt) state.buckets.delete(key);
   }
+  for (const [key, dropped] of state.dropped) {
+    if (now >= dropped.resetAt) state.dropped.delete(key);
+  }
 }
 
 function secondsUntil(resetAt: number, now: number): number {
   return Math.max(1, Math.ceil((resetAt - now) / 1000));
 }
 
-/** Make room for one new key. Returns false when the namespace is full of live counters. */
-function makeRoom(namespace: RateLimitNamespace, state: NamespaceState, now: number): boolean {
+/**
+ * Keys to drop so `needed` new keys fit, or null when the namespace is full of live
+ * counters. Never picks a key in `keep`. Drops nothing itself (only expired entries go).
+ */
+function findRoom(
+  namespace: RateLimitNamespace,
+  state: NamespaceState,
+  now: number,
+  needed: number,
+  keep: ReadonlySet<string>
+): string[] | null {
   const { limit, maxEntries } = RATE_LIMITS[namespace];
-  if (state.buckets.size < maxEntries) return true;
-  if (now < state.noScanUntil) return false;
+  if (state.buckets.size + needed <= maxEntries) return [];
+  if (now < state.noScanUntil) return null;
 
   if (now - state.lastExpiredSweepAt >= SCAN_PAUSE_MS) {
     state.lastExpiredSweepAt = now;
     sweepExpired(state, now);
-    if (state.buckets.size < maxEntries) return true;
+    if (state.buckets.size + needed <= maxEntries) return [];
   }
 
   store().roomScans += 1;
+  const excess = state.buckets.size + needed - maxEntries;
+  const victims: string[] = [];
   for (const [key, bucket] of state.buckets) {
-    if (now >= bucket.resetAt || bucket.count * 2 < limit) {
-      state.buckets.delete(key);
-      return true;
-    }
+    if (keep.has(key) || (now < bucket.resetAt && bucket.count * 2 >= limit)) continue;
+    victims.push(key);
+    if (victims.length === excess) return victims;
   }
 
   state.noScanUntil = now + SCAN_PAUSE_MS;
@@ -120,7 +140,30 @@ function makeRoom(namespace: RateLimitNamespace, state: NamespaceState, now: num
     state.fullLoggedAt = now;
     logger.warn('Rate-limit store full; new keys refused', { namespace });
   }
-  return false;
+  return null;
+}
+
+/** Drop one entry, keeping its live count so the key resumes it if it comes back */
+function dropEntry(namespace: RateLimitNamespace, state: NamespaceState, key: string, now: number): void {
+  const bucket = state.buckets.get(key);
+  state.buckets.delete(key);
+  if (!bucket || now >= bucket.resetAt || bucket.count === 0) return;
+  state.dropped.delete(key);
+  state.dropped.set(key, { count: bucket.count, resetAt: bucket.resetAt });
+  if (state.dropped.size > RATE_LIMITS[namespace].maxEntries) {
+    const oldest = state.dropped.keys().next();
+    if (!oldest.done) state.dropped.delete(oldest.value);
+  }
+}
+
+/** The kept count of a dropped key, while its window lasts */
+function droppedCount(state: NamespaceState, key: string, now: number): DroppedCount | undefined {
+  const dropped = state.dropped.get(key);
+  if (dropped && now >= dropped.resetAt) {
+    state.dropped.delete(key);
+    return undefined;
+  }
+  return dropped;
 }
 
 /** Retry time for a refused new key: until the oldest entry in the namespace expires. */
@@ -136,47 +179,85 @@ function fullRetryAfter(state: NamespaceState, now: number): number {
  */
 export function reserve(requests: ReadonlyArray<{ namespace: RateLimitNamespace; key: string }>): ReserveResult {
   const now = Date.now();
-  const missing: boolean[] = [];
 
+  // One plan per bucket: the same bucket asked for twice needs two slots
+  type Plan = { namespace: RateLimitNamespace; key: string; uses: number; live?: Bucket; resumed?: DroppedCount };
+  const plans = new Map<string, Plan>();
   for (const { namespace, key } of requests) {
-    const state = stateFor(namespace);
+    const id = `${namespace}\u0000${key}`;
+    const plan = plans.get(id);
+    if (plan) plan.uses += 1;
+    else plans.set(id, { namespace, key, uses: 1 });
+  }
+
+  for (const plan of plans.values()) {
+    const state = stateFor(plan.namespace);
     state.calls += 1;
     if (state.calls >= SWEEP_INTERVAL) {
       state.calls = 0;
       sweepExpired(state, now);
     }
+    const bucket = state.buckets.get(plan.key);
+    if (bucket && now >= bucket.resetAt) state.buckets.delete(plan.key);
+    plan.live = bucket && now < bucket.resetAt ? bucket : undefined;
+    if (!plan.live) plan.resumed = droppedCount(state, plan.key, now);
+  }
 
-    const bucket = state.buckets.get(key);
-    if (bucket && now >= bucket.resetAt) state.buckets.delete(key);
-    const live = bucket && now < bucket.resetAt ? bucket : undefined;
-
-    if (live && live.count >= RATE_LIMITS[namespace].limit) {
-      const firstRefusal = !live.refusalLogged;
-      live.refusalLogged = true;
+  // Check every bucket, in the given order, before changing anything
+  const roomChecked = new Set<RateLimitNamespace>();
+  const victims: Array<{ namespace: RateLimitNamespace; keys: string[] }> = [];
+  for (const plan of plans.values()) {
+    const { namespace, key, uses, live, resumed } = plan;
+    const current = live ?? resumed;
+    if (current && current.count + uses > RATE_LIMITS[namespace].limit) {
+      const firstRefusal = live ? !live.refusalLogged : false;
+      if (live) live.refusalLogged = true;
       return {
         ok: false,
-        refusal: { namespace, key, retryAfterSeconds: secondsUntil(live.resetAt, now), reason: 'limit', firstRefusal },
+        refusal: { namespace, key, retryAfterSeconds: secondsUntil(current.resetAt, now), reason: 'limit', firstRefusal },
       };
     }
-    if (!live && !makeRoom(namespace, state, now)) {
+    if (live || roomChecked.has(namespace)) continue;
+
+    roomChecked.add(namespace);
+    const inNamespace = [...plans.values()].filter((other) => other.namespace === namespace);
+    const keep = new Set(inNamespace.filter((other) => other.live).map((other) => other.key));
+    const needed = inNamespace.length - keep.size;
+    const state = stateFor(namespace);
+    const keys = findRoom(namespace, state, now, needed, keep);
+    if (!keys) {
       return {
         ok: false,
         refusal: { namespace, key, retryAfterSeconds: fullRetryAfter(state, now), reason: 'full', firstRefusal: false },
       };
     }
-    missing.push(!live);
+    victims.push({ namespace, keys });
   }
 
-  const reservations = requests.map(({ namespace, key }, index) => {
+  for (const { namespace, keys } of victims) {
     const state = stateFor(namespace);
-    let bucket = state.buckets.get(key);
-    if (missing[index] || !bucket) {
-      bucket = { count: 0, resetAt: now + RATE_LIMITS[namespace].windowMs, refusalLogged: false };
-      state.buckets.set(key, bucket);
+    for (const key of keys) dropEntry(namespace, state, key, now);
+  }
+  for (const plan of plans.values()) {
+    if (plan.live) {
+      plan.live.count += plan.uses;
+      continue;
     }
-    bucket.count += 1;
-    return { namespace, key, resetAt: bucket.resetAt };
-  });
+    const state = stateFor(plan.namespace);
+    state.dropped.delete(plan.key);
+    plan.live = {
+      count: (plan.resumed?.count ?? 0) + plan.uses,
+      resetAt: plan.resumed?.resetAt ?? now + RATE_LIMITS[plan.namespace].windowMs,
+      refusalLogged: false,
+    };
+    state.buckets.set(plan.key, plan.live);
+  }
+
+  const reservations = requests.map(({ namespace, key }) => ({
+    namespace,
+    key,
+    resetAt: plans.get(`${namespace}\u0000${key}`)!.live!.resetAt,
+  }));
   return { ok: true, reservations };
 }
 
