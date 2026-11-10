@@ -108,7 +108,8 @@ export function VersionBadge({ compactAtLg = false }: VersionBadgeProps = {}) {
     : commit ? `${version} (${commit})` : version;
 
   const showUpdate = updateAvailable && !!latestVersion;
-  const compact = compactAtLg ? (showUpdate ? 'lg:px-1.5' : 'lg:hidden xl:inline-flex') : '';
+  // the bare dot at 1024-1279 stays a 24 px target, centred
+  const compact = compactAtLg ? (showUpdate ? 'lg:px-1.5 lg:min-w-6 lg:justify-center' : 'lg:hidden xl:inline-flex') : '';
 
   return (
     <a
