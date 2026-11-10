@@ -77,4 +77,23 @@ describe('PreferencesContext', () => {
 
     expect(screen.getByTestId('size')).toHaveTextContent('3');
   });
+
+  it('reports hydrated only after the stored preferences are read', async () => {
+    localStorage.setItem('preferences', JSON.stringify({ hideAvailable: true }));
+    const seen: [boolean, boolean][] = [];
+    const Probe = () => {
+      const { hydrated, hideAvailable } = usePreferences();
+      seen.push([hydrated, hideAvailable]);
+      return <span data-testid="hydrated">{String(hydrated)}</span>;
+    };
+    render(
+      <PreferencesProvider>
+        <Probe />
+      </PreferencesProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId('hydrated')).toHaveTextContent('true'));
+    // Never hydrated with the default value: a fetch keyed on hideAvailable waits for the stored one
+    expect(seen[0]).toEqual([false, false]);
+    expect(seen.filter(([h]) => h).every(([, hide]) => hide)).toBe(true);
+  });
 });
