@@ -12,6 +12,7 @@ import * as parseTorrentModule from 'parse-torrent';
 import FormData from 'form-data';
 import { RMABLogger } from '../utils/logger';
 import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from './download-source';
+import { INVALID_TORRENT_FILE, isWellFormedTorrentFile } from './torrent-file-check';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { ownsCategory, sameCategory } from '../utils/download-category';
@@ -513,6 +514,9 @@ export class QBittorrentService implements IDownloadClient {
     savePath?: string
   ): Promise<AddDownloadResult> {
     logger.info(` Processing torrent file: ${torrentBuffer.length} bytes`);
+
+    // Structure check first: only a well-formed file reaches parse-torrent
+    if (!isWellFormedTorrentFile(torrentBuffer)) throw new Error(INVALID_TORRENT_FILE);
 
     // Parse .torrent file to extract info_hash (deterministic)
     let parsedTorrent: any;

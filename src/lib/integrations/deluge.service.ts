@@ -11,6 +11,7 @@ import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import { RMABLogger } from '../utils/logger';
 import { fetchDownloadSource } from './download-source';
+import { INVALID_TORRENT_FILE, isWellFormedTorrentFile } from './torrent-file-check';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { delugeProbeStatus } from './torrent-probe';
@@ -219,6 +220,7 @@ export class DelugeService implements IDownloadClient {
 
   /** Shared by fetched and uploaded .torrent files: parse for the hashes, send the bytes unchanged under a fixed name */
   private async addTorrentBuffer(torrentBuffer: Buffer, category: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
+    if (!isWellFormedTorrentFile(torrentBuffer)) throw new Error(INVALID_TORRENT_FILE);
     let parsed: any;
     try { parsed = await parseTorrent(torrentBuffer); }
     catch { throw new Error('Invalid .torrent file - failed to parse'); }

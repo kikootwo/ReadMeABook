@@ -6,6 +6,7 @@
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QBittorrentService, getQBittorrentService, invalidateQBittorrentService } from '@/lib/integrations/qbittorrent.service';
+import { INVALID_TORRENT_FILE } from '@/lib/integrations/torrent-file-check';
 import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
 
 const clientMock = vi.hoisted(() => ({
@@ -596,7 +597,7 @@ describe('QBittorrentService', () => {
     (service as any).cookie = 'SID=dup';
     vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'hash-1' });
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
 
     const result = await service.addTorrent('http://example.com/file.torrent');
@@ -707,7 +708,7 @@ describe('QBittorrentService', () => {
     vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
@@ -764,7 +765,7 @@ describe('QBittorrentService', () => {
   it('throws when torrent file parsing fails directly', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockRejectedValueOnce(new Error('bad torrent'));
 
     await expect(
@@ -772,10 +773,22 @@ describe('QBittorrentService', () => {
     ).rejects.toThrow('Invalid .torrent file - failed to parse');
   });
 
+  it('a file that fails the check never reaches the parser', async () => {
+    const service = new QBittorrentService('http://qb', 'user', 'pass');
+
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('l4:spame') }); // a top-level list
+    const addTorrentFile = (service as unknown as { addTorrentFile: (url: string, category: string) => Promise<unknown> })
+      .addTorrentFile.bind(service);
+
+    await expect(addTorrentFile('http://example.com/file.torrent', 'readmeabook')).rejects.toThrow(INVALID_TORRENT_FILE);
+    expect(parseTorrentMock).not.toHaveBeenCalled();
+    expect(clientMock.post).not.toHaveBeenCalled();
+  });
+
   it('throws when torrent file has no info hash', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: null });
 
     await expect(
@@ -788,7 +801,7 @@ describe('QBittorrentService', () => {
     (service as any).cookie = 'SID=reject';
     clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-2', name: 'Book' });
     clientMock.post.mockResolvedValue({ data: 'Nope' });
 
@@ -802,7 +815,7 @@ describe('QBittorrentService', () => {
     (service as any).cookie = 'SID=parse';
     vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('not-a-torrent') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockRejectedValueOnce(new Error('bad torrent'));
 
     await expect(service.addTorrent('http://example.com/file.torrent')).rejects.toThrow(
