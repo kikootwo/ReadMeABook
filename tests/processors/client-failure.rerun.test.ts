@@ -67,7 +67,10 @@ describe('handleClientReportedFailure, second runs and notifications per chain (
       audiobook: { id: 'book-1', title: 'Book', author: 'Author', audibleAsin: null },
       user: { plexUsername: 'user' },
     }));
-    prismaMock.request.updateMany.mockImplementation(async ({ where, data }: { where: any; data: any }) => {
+    prismaMock.request.updateMany.mockImplementation(async ({ where, data }: {
+      where: { status?: { in?: string[]; not?: string } };
+      data: { status: string };
+    }) => {
       state.beforeRequestWrite?.();
       state.beforeRequestWrite = undefined;
       const allowed: string[] | undefined = where.status?.in;
@@ -81,7 +84,7 @@ describe('handleClientReportedFailure, second runs and notifications per chain (
       id: where.id, downloadStatus: state.history[where.id] ?? null,
       torrentName: `Release ${where.id}`, torrentHash: null, nzbId: `nzb-${where.id}`, indexerName: 'Indexer', indexerId: 1,
     }));
-    prismaMock.downloadHistory.update.mockImplementation(async ({ where, data }: { where: { id: string }; data: any }) => {
+    prismaMock.downloadHistory.update.mockImplementation(async ({ where, data }: { where: { id: string }; data: { downloadStatus: string } }) => {
       state.history[where.id] = data.downloadStatus;
       return {};
     });

@@ -246,8 +246,8 @@ describe('JobQueueService', () => {
     const service = new JobQueueService();
     await service.addSearchJob('req-1', book, { clientFailures: 1, jobId: 'next-release-dh-1' });
     await service.addSearchJob('req-1', book);
-    await service.addDownloadJob('req-1', book, { hash: 'h' } as any, [], { clientFailures: 0 });
-    await service.addDownloadJob('req-1', book, { hash: 'h' } as any);
+    await service.addDownloadJob('req-1', book, { hash: 'h' } as never, [], { clientFailures: 0 });
+    await service.addDownloadJob('req-1', book, { hash: 'h' } as never);
     await service.addMonitorJob('req-1', 'dh-1', 'c-1', 'qbittorrent', 3, undefined, undefined, undefined, undefined, { clientFailures: 2 });
     await service.addMonitorJob('req-1', 'dh-1', 'c-1', 'qbittorrent', 3);
 
