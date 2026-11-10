@@ -330,9 +330,13 @@ test('189: change a match by search and by typed ASIN, refusals listed, books im
   expect.soft(obs.requests.race, 'the late request is untouched').toEqual(['pending']);
   for (const k of ['search', 'typed', 'fix'] as const) {
     const folder = libraryFolder(BOOK[k].asin);
-    const file = folder ? sh(`find ${q(folder)} -type f -name '*.m4a' | head -1`).trim() : '';
+    // The organizer places the single .m4a as .m4b
+    const file = folder ? sh(`find ${q(folder)} -type f \\( -name '*.m4a' -o -name '*.m4b' \\) | head -1`).trim() : '';
     const tags = file ? JSON.parse(sh(`ffprobe -v error -show_entries format_tags -of json ${q(file)}`) || '{}').format?.tags ?? {} : {};
-    obs[`library_${k}`] = { folder, asinTag: tags.ASIN ?? null, album: tags.album ?? null, requests: obs.requests[k] };
+    obs[`library_${k}`] = {
+      folder, file,
+      asinTag: tags.ASIN ?? null, album: tags.album ?? null, requests: obs.requests[k],
+    };
     expect.soft(folder, `library folder for ${k}`).toBe(`${MEDIA}/${AUTHOR}/${BOOK[k].title} ${BOOK[k].asin}`);
     expect.soft(obs[`library_${k}`].asinTag, `ASIN tag for ${k}`).toBe(BOOK[k].asin);
     expect.soft(obs.requests[k].length, `one request for ${k}`).toBe(1);
