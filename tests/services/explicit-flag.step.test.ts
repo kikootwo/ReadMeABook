@@ -34,7 +34,7 @@ vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
 vi.mock('@/lib/utils/audiobook-matcher', () => ({ findPlexMatch: findPlexMatchMock }));
 vi.mock('@/lib/services/config.service', () => ({
-  getConfigService: () => ({ get: async (key: string) => state.config[key] ?? null, clearCache: () => {} }),
+  getConfigService: () => ({ get: async (key: string) => state.config[key] ?? null, getBackendMode: async () => 'audiobookshelf', clearCache: () => {} }),
 }));
 vi.mock('@/lib/services/audiobookshelf/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/services/audiobookshelf/api')>()),

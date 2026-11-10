@@ -251,12 +251,14 @@ describe('PUT /api/requests/[id]/explicit', () => {
     expect(prismaMock.request.findFirst).not.toHaveBeenCalled();
   });
 
-  it('Plex mode: stored, no ABS call, no message', async () => {
+  it("Plex mode with a leftover 'true' key: 403 FeatureDisabled, nothing read, stored or written", async () => {
     state.mode = 'plex';
 
     const res = await put({ explicit: true });
 
-    expect(res.body).toEqual({ success: true, request: { id: 'req-1', explicit: true } });
+    expect(res).toEqual({ status: 403, body: { error: 'FeatureDisabled', message: 'The Explicit mark is turned off in Settings' } });
+    expect(prismaMock.request.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(writeMock).not.toHaveBeenCalled();
     expect(canSeeMock).not.toHaveBeenCalled();
   });

@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ body: {} as unknown, setting: 'true' as string | null }));
+const state = vi.hoisted(() => ({ body: {} as unknown, setting: 'true' as string | null, mode: 'audiobookshelf' }));
 const createRequestForUserMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db', () => ({ prisma: {} }));
@@ -20,7 +20,10 @@ vi.mock('@/lib/middleware/auth', () => ({
 }));
 vi.mock('@/lib/services/request-creator.service', () => ({ createRequestForUser: createRequestForUserMock }));
 vi.mock('@/lib/services/config.service', () => ({
-  getConfigService: () => ({ get: async (key: string) => (key === 'audiobookshelf.explicit_mark_enabled' ? state.setting : null) }),
+  getConfigService: () => ({
+    get: async (key: string) => (key === 'audiobookshelf.explicit_mark_enabled' ? state.setting : null),
+    getBackendMode: async () => state.mode,
+  }),
 }));
 
 const BOOK = { asin: 'B000000001', title: 'Title', author: 'Author' };
@@ -35,6 +38,7 @@ async function post(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   state.setting = 'true';
+  state.mode = 'audiobookshelf';
   createRequestForUserMock.mockResolvedValue({ success: true, request: { id: 'req-1', explicit: true } });
 });
 
@@ -50,8 +54,9 @@ describe('POST /api/requests: explicit (#542)', () => {
     expect(createRequestForUserMock).toHaveBeenCalledWith('user-1', expect.objectContaining({ asin: BOOK.asin }), expect.objectContaining({ explicit: expected }));
   });
 
-  it.each([['off', 'false'], ['absent (an upgrade)', null]])('setting %s: explicit true is ignored, the request is created unmarked', async (_label, setting) => {
+  it.each([['off', 'false', 'audiobookshelf'], ['absent (an upgrade)', null, 'audiobookshelf'], ["'true' left over in Plex mode", 'true', 'plex']])('setting %s: explicit true is ignored, the request is created unmarked', async (_label, setting, mode) => {
     state.setting = setting;
+    state.mode = mode;
 
     const res = await post({ audiobook: BOOK, explicit: true });
 

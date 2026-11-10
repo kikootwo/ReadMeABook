@@ -3,11 +3,11 @@
  * Documentation: documentation/features/explicit-flag.md
  *
  * PUT /api/requests/[id]/explicit {explicit: boolean}. The requester or an admin may set the mark;
- * only an admin may clear it. Setting it on a book already in the library (Audiobookshelf mode)
- * turns on the item's Explicit flag at once; an admin's repeat mark retries that write (a
- * requester's repeat is a plain 200: the scan repair retries). Clearing writes nothing to
- * Audiobookshelf. Not on the API token allowlist (UI only). 403 FeatureDisabled while the admin
- * setting (audiobookshelf.explicit_mark_enabled, off by default) is off.
+ * only an admin may clear it. Setting it on a book already in the library turns on the item's
+ * Explicit flag at once; an admin's repeat mark retries that write (a requester's repeat is a plain
+ * 200: the scan repair retries). Clearing writes nothing to Audiobookshelf. Not on the API token
+ * allowlist (UI only). 403 FeatureDisabled while the admin setting
+ * (audiobookshelf.explicit_mark_enabled, off by default, Audiobookshelf mode only) is off.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,7 +17,6 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { zodIssueDetails } from '@/lib/utils/zod-validation';
-import { getConfigService } from '@/lib/services/config.service';
 import { isExplicitMarkOn, markItemExplicitNow } from '@/lib/services/audiobookshelf/explicit-flag';
 import { EXPLICIT_MARK_OFF_MESSAGE } from '@/lib/constants/explicit-mark';
 
@@ -81,21 +80,20 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         logger.info(`${explicit ? 'Marked' : 'Removed the explicit mark from'} request ${id} ("${record.audiobook.title}")${explicit ? ' explicit' : ''} by ${req.user.username} (${isAdmin ? 'admin' : 'requester'})`);
       }
 
-      const isABS = (await getConfigService().getBackendMode()) === 'audiobookshelf';
       const available = record.status === 'available';
       let message: string | undefined;
       let absUpdated: boolean | undefined;
 
       // A requester's repeat mark writes nothing (the scan repair is the retry); an admin's retries
       // the write: ABS answers "not updated" when the flag is already on
-      if (explicit && isABS && available && record.audiobook.absItemId && (isAdmin || !record.explicit)) {
+      if (explicit && available && record.audiobook.absItemId && (isAdmin || !record.explicit)) {
         const outcome = await markItemExplicitNow(record.audiobook.absItemId);
         absUpdated = outcome.written;
         if (!outcome.written) {
           logger.warn(`Request ${id} is marked explicit; Audiobookshelf item ${record.audiobook.absItemId} wasn't updated: ${outcome.reason}`);
           message = isAdmin ? NOT_UPDATED[outcome.cause] : NOT_UPDATED.requester;
         }
-      } else if (!explicit && isABS) {
+      } else if (!explicit) {
         const lines = [
           ...(available ? ['Mark removed. If the book is marked explicit in Audiobookshelf, change it there.'] : []),
           ...[await otherMarksLine(id, record.audiobookId)].filter((l): l is string => l !== null),

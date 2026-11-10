@@ -6,13 +6,13 @@
 An admin turns on **Explicit mark on requests** (Admin → Settings → Audiobookshelf tab). Then the requester or an admin ticks **Explicit** on an audiobook request; when the book reaches the library, RMAB sets `explicit: true` on its ABS item, and ABS hides it from every ABS user without "Can access explicit content". RMAB never turns the flag off.
 
 ## Setting
-- **Key:** `audiobookshelf.explicit_mark_enabled` (`'true'` = on; absent or anything else = off). **Off by default**, also on an upgrade (no key). Constant `EXPLICIT_MARK_SETTING_KEY` (`src/lib/constants/explicit-mark.ts`); server check `isExplicitMarkOn()` (`explicit-flag.ts`)
+- **Key:** `audiobookshelf.explicit_mark_enabled` (`'true'` = on; absent or anything else = off). **Off by default**, also on an upgrade (no key). Constant `EXPLICIT_MARK_SETTING_KEY` (`src/lib/constants/explicit-mark.ts`); server check `isExplicitMarkOn()` (`explicit-flag.ts`) = ABS mode **and** the key `'true'`: a `'true'` key left over in Plex mode counts as off (nothing stored, PUT refused)
 - **Switch:** `ExplicitMarkOption.tsx` under the requester tag option, Audiobookshelf mode only (no Plex control). Label "Explicit mark on requests"; help "Adds an Explicit checkbox to requests. ReadMeABook turns on a marked book's Explicit flag in Audiobookshelf."
 - **Saved by** `PUT /api/admin/settings/audiobookshelf` field `explicitMarkEnabled` (written only when a boolean); read by `GET /api/admin/settings` → `audiobookshelf.explicitMarkEnabled`. Both admin only
-- **Pages learn it** from the public `GET /api/auth/providers` they already load for the backend mode: `explicitMarkEnabled` (true only in ABS mode with the key `'true'`; Plex always false). `useExplicitMarkEnabled()` (`src/lib/hooks/useExplicitMark.ts`, SWR key `/api/auth/providers`, one request for every card) is false until the answer arrives, so no control flashes. The settings save revalidates that key
+- **Pages learn it** from the public `GET /api/auth/providers` they already load for the backend mode: `explicitMarkEnabled` (true only in ABS mode with the key `'true'`; Plex always false). `useExplicitMarkEnabled()` (`src/lib/hooks/useExplicitMark.ts`, SWR key `/api/auth/providers`, one request for every card) is false until the answer arrives, so no control flashes. The settings save revalidates that key; other open pages pick the change up on their next page load. A set call answered 403 `FeatureDisabled` (turned off since that page loaded) revalidates the key there, so its controls disappear
 - **Off:**
   - UI: no checkbox (details modal, My Requests), no pill or menu item (admin table), no confirm; the word never shows
-  - `PUT /api/requests/[id]/explicit` → 403 `FeatureDisabled` "The Explicit mark is turned off in Settings" (before any read; the app's status for a feature turned off)
+  - `PUT /api/requests/[id]/explicit` → 403 `FeatureDisabled` "The Explicit mark is turned off in Settings" (before any read; a 403, as local registration answers when it is disabled)
   - `explicit` on `POST /api/requests` (session or token) and `request-with-torrent` is ignored: created unmarked. A re-request or Replace still copies the old request's stored mark
   - Scan step, repair, backfill and guard: nothing (no `/api/me`, no PATCH, no warning, no read of marked rows). Tags still go out
   - Stored marks stay in the database; flags already set in ABS stay. Turning it on resumes everything (the next scan repairs listed items)
@@ -41,7 +41,7 @@ An admin turns on **Explicit mark on requests** (Admin → Settings → Audioboo
 `PUT /api/requests/[id]/explicit` body `{explicit: boolean}` (strict) → `{success, request: {id, explicit}, absUpdated?, message?}`
 | Case | Result |
 |---|---|
-| setting off (or absent) | 403 `FeatureDisabled`, nothing read or written |
+| setting off (or absent), or Plex mode | 403 `FeatureDisabled` "The Explicit mark is turned off in Settings", nothing read or written |
 | bad body | 400 `ValidationError` |
 | not found / deleted, or no row updated (replaced or deleted since the read) | 404 |
 | not the requester, not admin | 403 |
@@ -51,7 +51,6 @@ An admin turns on **Explicit mark on requests** (Admin → Settings → Audioboo
 | `true` again on a marked request | requester: plain 200, no ABS call (the scan repair is the retry). Admin: retries the write as above (API only: no UI sends a repeat) |
 | `true`, ABS, `available`, no `absItemId` yet | stored, no write, no message; the flag is written when a scan links the item (delivery step) |
 | admin `false`, ABS | stores it, writes nothing to ABS. Available → "Mark removed. If the book is marked explicit in Audiobookshelf, change it there." Plus, when other requests of the book that can still flag it (not cancelled, denied or deleted) are marked: "N other request(s) for this book are still marked; remove that mark too, or ReadMeABook marks the book explicit again once delivered." |
-| Plex (setting on) | stores the value only |
 
 ## Write and Guard
 - **Writer:** `writeABSItem(itemId, {tags?, explicit?: true})` (`src/lib/services/audiobookshelf/api.ts`), shared with requester tags: one GET (only when tags are asked) and one `PATCH /api/items/:id/media` per item holding only what is missing. `{metadata: {explicit: true}}` changes no other field. **Never sends `explicit: false`; never sends tags when tagging is off; sends explicit alone when the tag list can't be read.** Response check: a boolean `explicit !== true` → failed "explicit flag not saved". 15 s per call; never throws. Result `explicit: none | set | present | failed`

@@ -7,7 +7,8 @@
  * error, in Plex mode or with the setting off, so no control flashes before the answer arrives.
  * useSetExplicit: PUT /api/requests/[id]/explicit; returns the server's message (shown as a toast)
  * and revalidates the plain request keys (the admin table). The filter mutate skips infinite lists:
- * My Requests reloads its own through RequestCard's onChanged.
+ * My Requests reloads its own through RequestCard's onChanged. A 403 FeatureDisabled answer (turned
+ * off since the page loaded) revalidates the providers key, so the controls on that page disappear.
  */
 
 'use client';
@@ -49,7 +50,11 @@ export function useSetExplicit() {
         body: JSON.stringify({ explicit }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.message || 'Failed to update the explicit mark');
+      if (!response.ok) {
+        // Turned off since this page loaded: refetch the flag so the controls disappear here
+        if (data?.error === 'FeatureDisabled') void mutate(PROVIDERS_KEY);
+        throw new Error(data?.message || 'Failed to update the explicit mark');
+      }
       mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
       mutate((key) => typeof key === 'string' && key.includes('/api/admin/requests'));
       return { explicit: data?.request?.explicit === true, ...(data?.message ? { message: data.message } : {}) };

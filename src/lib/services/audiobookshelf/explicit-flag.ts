@@ -15,9 +15,13 @@ import { getConfigService } from '@/lib/services/config.service';
 import { EXPLICIT_MARK_SETTING_KEY } from '@/lib/constants/explicit-mark';
 import { canKeyUserSeeExplicit, writeABSItem } from './api';
 
-/** The admin setting (off by default): while off, nothing reads, writes or checks the mark. */
+/**
+ * The admin setting (off by default), Audiobookshelf mode only: while off, nothing reads, writes or
+ * checks the mark. A 'true' key left over in Plex mode counts as off.
+ */
 export async function isExplicitMarkOn(): Promise<boolean> {
-  return (await getConfigService().get(EXPLICIT_MARK_SETTING_KEY)) === 'true';
+  const config = getConfigService();
+  return (await config.get(EXPLICIT_MARK_SETTING_KEY)) === 'true' && (await config.getBackendMode()) === 'audiobookshelf';
 }
 
 const ACCESS_HINT = 'turn on "Can access explicit content" for that user in Audiobookshelf';
