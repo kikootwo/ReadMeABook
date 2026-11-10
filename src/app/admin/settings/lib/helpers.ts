@@ -7,6 +7,7 @@ import { fetchWithAuth } from '@/lib/utils/api';
 import type { Settings, SettingsTab, SavedIndexerConfig } from './types';
 import type { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
 import type { IndexerSavePlan } from './useConfiguredIndexers';
+import { parseFilePlacement, placementConflict } from '@/lib/utils/library-placement';
 
 /**
  * Converts JSON array string to comma-separated string for display
@@ -183,8 +184,12 @@ export const saveTabSettings = async (
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings.paths),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save paths settings');
+      }).then(async (res) => {
+        if (!res.ok) {
+          // The server's reason (e.g. a File placement conflict), else the generic message
+          const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+          throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to save paths settings');
+        }
       });
       break;
 
@@ -192,6 +197,15 @@ export const saveTabSettings = async (
       throw new Error('Unknown settings tab or tab handles its own saving');
   }
 };
+
+/** Why the Paths tab can't be saved as it is (a hard link with tags or chapter merge), or null. */
+export const pathsPlacementConflict = (settings: Settings): string | null =>
+  placementConflict({
+    backendMode: settings.backendMode,
+    placement: parseFilePlacement(settings.paths.filePlacement),
+    tagging: settings.paths.metadataTaggingEnabled,
+    merge: settings.paths.chapterMergingEnabled,
+  });
 
 /**
  * Validates that authentication is properly configured in Audiobookshelf mode
@@ -260,7 +274,7 @@ export const getTabValidation = (
     case 'download':
       return validated.download;
     case 'paths':
-      return validated.paths;
+      return validated.paths && pathsPlacementConflict(settings) === null;
     case 'ebook':
     case 'bookdate':
     case 'api':

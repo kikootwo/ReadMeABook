@@ -4,6 +4,7 @@
  */
 
 import type { RequesterTagWarnings } from '@/lib/services/audiobookshelf/requester-tag-users';
+import type { FilePlacement, LinkFallbackNote } from '@/lib/utils/library-placement';
 
 /**
  * Main settings object structure
@@ -129,6 +130,12 @@ export interface PathsSettings {
   fileRenameTemplate?: string;
   fileChmod?: string;
   dirChmod?: string;
+  /** Audiobookshelf only: copy, hardlink (copy if not possible) or hardlink_only. */
+  filePlacement?: FilePlacement;
+  /** Audiobookshelf only: write metadata.opf (tagging off). */
+  metadataOpfEnabled?: boolean;
+  /** Read-only: the last book copied because a hard link was not possible. */
+  linkFallbackLast?: LinkFallbackNote | null;
 }
 
 /**

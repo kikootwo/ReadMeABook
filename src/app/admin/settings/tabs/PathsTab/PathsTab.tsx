@@ -9,6 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { usePathsSettings } from './usePathsSettings';
+import { LibraryFilesSection } from './LibraryFilesSection';
 import type { PathsSettings } from '../../lib/types';
 import { validateTemplate, generateMockPreviews, validateFilenameTemplate, generateMockFilenamePreviews } from '@/lib/utils/path-template.util';
 
@@ -16,6 +17,8 @@ interface PathsTabProps {
   paths: PathsSettings;
   onChange: (paths: PathsSettings) => void;
   onValidationChange: (isValid: boolean) => void;
+  /** Audiobookshelf mode shows File placement and Metadata (Library files) instead of the tagging checkbox. */
+  backendMode?: 'plex' | 'audiobookshelf';
 }
 
 interface TemplatePreview {
@@ -31,8 +34,9 @@ interface FilenamePreview {
   multi?: string[];
 }
 
-export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps) {
-  const { testing, testResult, updatePath, testPaths } = usePathsSettings({
+export function PathsTab({ paths, onChange, onValidationChange, backendMode }: PathsTabProps) {
+  const absMode = backendMode === 'audiobookshelf';
+  const { testing, testResult, updatePath, updatePaths, testPaths } = usePathsSettings({
     paths,
     onChange,
     onValidationChange,
@@ -396,7 +400,11 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </div>
       </div>
 
+      {/* Audiobookshelf: Library files (placement, metadata, chapter merge) replaces the tagging checkbox */}
+      {absMode && <LibraryFilesSection paths={paths} onUpdate={updatePaths} />}
+
       {/* Metadata Tagging Toggle */}
+      {!absMode && (
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
         <div className="flex items-start gap-4">
           <input
@@ -421,6 +429,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
           </div>
         </div>
       </div>
+      )}
 
       {/* Plex Format Coercion Toggle */}
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
@@ -446,7 +455,8 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </div>
       </div>
 
-      {/* Chapter Merging Toggle */}
+      {/* Chapter Merging Toggle (in Library files in Audiobookshelf mode) */}
+      {!absMode && (
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
         <div className="flex items-start gap-4">
           <input
@@ -470,6 +480,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
           </div>
         </div>
       </div>
+      )}
 
       {/* File Permissions */}
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
