@@ -291,6 +291,21 @@ where: {
 3. No active request found → allowed to create new request
 4. Old soft-deleted request remains in DB for audit
 
+## Reported-Issue Replace
+
+`replaceAudiobook` (`src/lib/services/reported-issue.service.ts`, POST `/api/admin/reported-issues/:id/replace` `{torrent}`, admin): (1) newest non-deleted `audiobook` request of the book, with its user; (2) delete content: `deleteRequest(id, admin)`, or `removeLibraryContentForReplace` with no request (both behind the library delete guard, 409 when files kept, see Edge Cases 19-22); (3) reset the book; (4) new request `status: downloading` + `addDownloadJob` with the picked release (no approval step); (5) issue `replaced`, `resolvedById` = admin. Ebook requests are never read or changed.
+
+**Who the replacement belongs to (#571, `replacementRequester()`):**
+| Request it replaces | Requester | `approvalBypassedBy` |
+|---|---|---|
+| none (book added outside RMAB) | the admin | NULL |
+| requester deleted, or `registrationStatus` `pending_approval`/`rejected` | the admin | NULL |
+| status `awaiting_approval`, `denied`, `cancelled` (never approved, or withdrawn) | the admin | NULL |
+| any other status, requester not deleted, `approved` or NULL | that requester (an admin stays an admin) | copied from it |
+- Copied record: an approved request (NULL) gives a replacement tagged for its requester on delivery; one delivered without approval stays untagged ([requester-tags.md](../features/requester-tags.md))
+- Notifications (`request_grabbed`, `request_available`, errors) name the requester; the follow-up ebook request is theirs
+- Nothing on the download path reads the requester's permissions (interactive search, download access, auto-approve); RMAB has no request limits
+
 ## Edge Cases Handled
 
 1. ✅ **Torrent not in qBittorrent** - Skip deletion, continue with files
