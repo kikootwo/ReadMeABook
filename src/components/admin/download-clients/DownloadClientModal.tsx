@@ -5,14 +5,14 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { DownloadClientType, getClientDisplayName, CLIENT_PROTOCOL_MAP } from '@/lib/interfaces/download-client.interface';
 import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
-import { categoryInputError, existsInClient, normalizeCategory } from '@/lib/utils/download-category';
+import { categoryInputError, existsInClient, isSharedCategory, normalizeCategory, sameCategory } from '@/lib/utils/download-category';
 import { DownloadCategoryField } from './DownloadCategoryField';
 
 interface DownloadClientModalProps {
@@ -70,6 +70,7 @@ export function DownloadClientModal({
   const [postImportCategory, setPostImportCategory] = useState('');
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [fetchingCategories, setFetchingCategories] = useState(false);
+  const categoryRequest = useRef(0); // only the newest category answer is shown
 
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -111,6 +112,7 @@ export function DownloadClientModal({
       }
       setTestResult(null);
       setErrors({});
+      categoryRequest.current++;
       setAvailableCategories([]);
       setFetchingCategories(false);
     }
@@ -155,6 +157,7 @@ export function DownloadClientModal({
   };
 
   const fetchCategories = async () => {
+    const ticket = ++categoryRequest.current;
     setFetchingCategories(true);
     try {
       const isPasswordMasked = password === MASKED_PASSWORD;
@@ -188,13 +191,13 @@ export function DownloadClientModal({
           });
 
       const data = await response.json();
-      if (response.ok && data.success) {
+      if (ticket === categoryRequest.current && response.ok && data.success) {
         setAvailableCategories(data.categories || []);
       }
     } catch {
       // Non-critical — categories are optional
     } finally {
-      setFetchingCategories(false);
+      if (ticket === categoryRequest.current) setFetchingCategories(false);
     }
   };
 
@@ -265,7 +268,10 @@ export function DownloadClientModal({
 
   const cleanCustomPath = customPath.replace(/^\/+|\/+$/g, '').trim();
   const downloadsTo = cleanCustomPath ? `${downloadDir}/${cleanCustomPath}` : downloadDir;
-  const categoryInClient = existsInClient(type, category, availableCategories, initialClient?.ownedCategory);
+  // Edit mode: a saved category that isn't ReadMeABook's own shows the note before any Test
+  const savedShared = mode === 'edit' && !!initialClient && sameCategory(category, initialClient.category)
+    && isSharedCategory(type, initialClient.category, initialClient.ownedCategory);
+  const categoryInClient = savedShared || existsInClient(type, category, availableCategories, initialClient?.ownedCategory);
   const usenetFolder = categoryInClient && (type === 'sabnzbd' || type === 'nzbget')
     ? `${typeName}'s “${normalizeCategory(type, category)}” folder (ReadMeABook must be able to read it)`
     : null;

@@ -87,6 +87,34 @@ describe('Category field in the modal', () => {
     expect(screen.queryByText(/Already in/)).not.toBeInTheDocument();
   });
 
+  it('edit mode: a saved category that is not ReadMeABook\'s own shows the note before any Test', () => {
+    openModal('sabnzbd', [], {
+      id: 'c1', type: 'sabnzbd', name: 'SABnzbd', url: 'http://client:1234', password: 'key', enabled: true,
+      disableSSLVerify: false, remotePathMappingEnabled: false, category: 'books',
+    });
+    expect(screen.getByText("Already in SABnzbd. ReadMeABook won't change it; downloads use its folder and settings.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    typeCategory('readmeabook');
+    expect(screen.queryByText(/Already in/)).not.toBeInTheDocument();
+  });
+
+  it('a late answer from an earlier Test never replaces a newer one', async () => {
+    openModal('qbittorrent', []);
+    const answers: Array<(names: string[]) => void> = [];
+    fetchMock.mockImplementation(async (url: string) => url.includes('categories')
+      ? { ok: true, json: () => new Promise((resolve) => answers.push((categories) => resolve({ success: true, categories }))) }
+      : { ok: true, json: async () => ({ success: true, message: 'Connected' }) });
+    fireEvent.click(screen.getByRole('button', { name: /Test Connection/i }));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: /Test Connection/i }));
+    await waitFor(() => expect(answers).toHaveLength(2));
+    answers[1](['Books']);
+    await waitFor(() => expect(document.querySelectorAll('datalist option')).toHaveLength(1));
+    answers[0](['old-a', 'old-b', 'old-c']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect([...document.querySelectorAll('datalist option')].map((o) => o.getAttribute('value'))).toEqual(['Books']);
+  });
+
   it('the save carries the trimmed name and the display-only preview', async () => {
     const onSave = openModal('qbittorrent', ['Books']);
     await testConnection();
@@ -133,6 +161,11 @@ describe('Category line on the card', () => {
   it('the wizard preview decides before ownership is known', () => {
     card({ category: 'audiobooks', categoryInClient: false });
     expect(screen.queryByText('(existing, left as is)')).not.toBeInTheDocument();
+  });
+
+  it('the wizard preview for a name already in the client shows the suffix', () => {
+    card({ category: 'Books', ownedCategory: 'Books', categoryInClient: true });
+    expect(screen.getByText('(existing, left as is)')).toBeInTheDocument();
   });
 
   it('label clients never show the suffix', () => {
