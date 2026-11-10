@@ -285,12 +285,12 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 
 | Component | Purpose |
 |-----------|---------|
-| `DownloadClientManagement.tsx` | Container with add cards (4-column: qBittorrent, Transmission, SABnzbd, NZBGet) + configured cards; protocol-level enforcement (grayed out when protocol taken) |
+| `DownloadClientManagement.tsx` | Container with add cards (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet; 1/2/3 columns at base/`md`/`lg`, never more: the wizard's container is narrower than the viewport; name and badge share a `flex-wrap` row so the badge drops below the name instead of colliding, #581) + configured cards; protocol-level enforcement (grayed out when protocol taken) |
 | `DownloadClientCard.tsx` | Card with name, type badge (blue=qBittorrent, green=Transmission, purple=SABnzbd, orange=NZBGet), custom path display, edit/delete |
 | `DownloadClientModal.tsx` | Add/edit modal with type-specific fields; Username shown for qBittorrent + Transmission + NZBGet; URL placeholder per-type |
 
 **UI Flow:**
-1. **Add Client Section:** Four cards (qBittorrent, Transmission, SABnzbd, NZBGet) with "Add" button or "Protocol already configured" when protocol is taken (card grayed out with `opacity-50`)
+1. **Add Client Section:** Five cards (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet) with "Add" button or "Protocol already configured" when protocol is taken (card grayed out with `opacity-50`)
 2. **Configured Clients:** Grid of cards showing name, type, URL, custom path (if set), status
 3. **Modal:** Type-specific fields, custom download path with live preview, SSL toggle, path mapping, test connection
 
