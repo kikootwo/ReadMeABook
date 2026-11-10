@@ -296,7 +296,8 @@ type ReplacedRequest = {
  * with that request's approval record (an approved request stays tagged for them, one
  * delivered without approval stays untagged). The admin instead when there was no request
  * (book added outside RMAB), the requester could not request now (deleted, or registration
- * pending or rejected), or the request was never approved or was withdrawn.
+ * pending or rejected), or the request's status is awaiting approval, denied or cancelled.
+ * A delivered request keeps its requester whatever its approval record says.
  */
 function replacementRequester(existing: ReplacedRequest | null, adminUserId: string) {
   const user = existing?.user;
