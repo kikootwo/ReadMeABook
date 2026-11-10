@@ -4,7 +4,7 @@
  */
 
 import { STATUS_GROUPS, STATUS_GROUP_RANK } from './constants';
-import { fold } from './merge';
+import { fold } from './fold';
 import type { SortTuple, SortValue } from './cursor';
 import type {
   LibraryEntry,
