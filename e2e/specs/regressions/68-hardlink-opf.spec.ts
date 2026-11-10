@@ -79,9 +79,9 @@ const sectionShot = (page: Page, name: string) => elementShot(page, page.getByTe
 const VIEWS = [{ name: '1280-light', w: 1280, h: 900, dark: false }, { name: '375-dark', w: 375, h: 812, dark: true }];
 
 test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode only, and explains a stored conflict', async ({ browser }) => {
-  // What an upgrading admin sees first: Copy + Tags (today's settings)
-  expect((await savePaths(rmab, { filePlacement: 'copy', metadataTaggingEnabled: true, metadataOpfEnabled: false, chapterMergingEnabled: false })).status).toBe(200);
   for (const view of VIEWS) {
+    // What an upgrading admin sees first: Copy + Tags (today's settings; the 1280 view saves a hard link below)
+    expect((await savePaths(rmab, { filePlacement: 'copy', metadataTaggingEnabled: true, metadataOpfEnabled: false, chapterMergingEnabled: false })).status).toBe(200);
     const { ctx, page } = await adminPage(browser, view.w, view.h, view.dark);
     try {
       await openPaths(page);
