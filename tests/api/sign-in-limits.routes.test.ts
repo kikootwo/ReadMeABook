@@ -10,6 +10,7 @@ import {
   WRONG_PASSWORD,
   addAccount,
   bcryptMock,
+  loadRoute,
   loggerMock,
   realCompares,
   resetFixture,
@@ -37,9 +38,11 @@ const ACCOUNT_TEXT =
 const ADDRESS_TEXT = 'Too many sign-in attempts from your network. Try again in 15 minutes.';
 
 describe('sign-in attempt limits', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.JWT_SECRET = 'test-access-secret';
     process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
+    // Load each route once up front, so parallel attempts never race a first import
+    for (const route of SIGN_IN_ROUTES) await loadRoute(route);
   });
 
   beforeEach(async () => {
@@ -61,7 +64,7 @@ describe('sign-in attempt limits', () => {
 
     const attempts = Array.from({ length: 25 }, () => signIn(route, 'admin', WRONG_PASSWORD));
     // Let every request run up to its password check (or its refusal) before any check finishes
-    await vi.waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(10));
+    await vi.waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(10), { timeout: 15_000 });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(bcryptMock.compare).toHaveBeenCalledTimes(10);
     pending.forEach((release) => release());
