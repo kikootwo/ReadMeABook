@@ -25,13 +25,14 @@ export const USAGE = `usage:
        [--offline-fixtures] [--rm-image] [--allow-log-canary] [--isolation-check] [--allow-untracked]
        [--overrides <name,name>]   (trusted e2e/overrides/*.yml; untainted only)
        [--isolate-specs]           (fresh stack per --specs entry, same images)
+       [--stop-specs <a,b> [--stop-cycles <n>] [--stop-time <s>]]  (timed docker stop/start between phases)
   node e2e/run.mjs unit --slug <s> --worktree <dir> (--trusted | --tainted) [--evidence <dir>]
   (--tainted and --pr-dockerfile are currently disabled)
   node e2e/run.mjs preview --image <ref> [--replace-image <ref>] [--evidence <dir>]
   node e2e/run.mjs down --slug <s> [--force-reserved]`;
 
 const FLAGS = new Set(['offline-fixtures', 'rm-image', 'help', 'trusted', 'tainted', 'pr-dockerfile', 'allow-log-canary', 'force-reserved', 'isolation-check', 'allow-untracked', 'isolate-specs']);
-const VALUE_OPTIONS = new Set(['slug', 'port', 'image', 'worktree', 'dockerfile', 'specs', 'scenario', 'backend', 'upgrade-from', 'upgrade-specs', 'evidence', 'overrides', 'replace-image']);
+const VALUE_OPTIONS = new Set(['slug', 'port', 'image', 'worktree', 'dockerfile', 'specs', 'scenario', 'backend', 'upgrade-from', 'upgrade-specs', 'evidence', 'overrides', 'replace-image', 'stop-specs', 'stop-cycles', 'stop-time']);
 
 /** `child` is inside `parent` (or equal). Case-insensitive on Windows. */
 export function isInside(parent, child) {
@@ -108,6 +109,14 @@ export function parseArgs(argv) {
   }
   if (opts['pr-dockerfile'] && !opts.tainted) throw new Error('--pr-dockerfile only applies with --tainted');
   if (opts['upgrade-specs'] && !opts['upgrade-from']) throw new Error('--upgrade-specs only applies with --upgrade-from');
+  if ((opts['stop-cycles'] || opts['stop-time']) && !opts['stop-specs']) throw new Error('--stop-cycles / --stop-time only apply with --stop-specs');
+  if (opts['stop-specs']) {
+    if (opts.tainted || opts['upgrade-from'] || opts['isolate-specs'] || opts.command !== 'stack') {
+      throw new Error('--stop-specs is for untainted stack runs, without --upgrade-from or --isolate-specs');
+    }
+    if (!/^[1-9]$/.test(opts['stop-cycles'] || '1')) throw new Error('--stop-cycles must be 1-9');
+    if (!/^([1-9]|[1-9]\d|1[0-7]\d|180)$/.test(opts['stop-time'] || '10')) throw new Error('--stop-time must be 1-180 seconds');
+  }
   return opts;
 }
 

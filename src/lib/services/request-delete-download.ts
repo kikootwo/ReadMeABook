@@ -11,7 +11,13 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { evaluateSeeding, type SeedingRequirement } from '../utils/seeding-policy';
-import { otherActiveRequestsUsingNzb, otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
+import {
+  clearlyPartial,
+  describeHolds,
+  markOtherRowsRemoved,
+  otherActiveRequestsUsingNzb,
+  torrentHolds,
+} from '../utils/shared-torrent';
 import { describeIgnoredIndexerId, findIndexerConfig, parseSavedIndexers, type SavedIndexerConfig } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership, type OwnershipVerdict } from '../utils/torrent-ownership';
 
@@ -21,7 +27,7 @@ export interface DownloadCleanupCounts {
   torrentsRemoved: number;
   torrentsKeptSeeding: number;
   torrentsKeptUnlimited: number;
-  /** Torrents left in the client because another active request still uses them. */
+  /** Torrents left in the client because another request still keeps them (shared-torrent rule). */
   torrentsKeptShared: number;
   /** Torrents left in the client because RMAB did not add them (or can't tell that it did). */
   torrentsKeptNotOwned: number;
@@ -70,19 +76,21 @@ export async function cleanUpRequestDownload(
     const clientType = downloadHistory.downloadClient || 'qbittorrent';
 
     let seedingConfig: SeedingRequirement | null = null;
+    let indexersConfig: SavedIndexerConfig[] | null = null;
+    const indexerProtocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent';
+    // By Prowlarr id (survives renames) unless it now means another indexer; else by name
+    const configFor = (row: { indexerId: number | null; indexerName: string | null }): SeedingRequirement | null =>
+      (indexersConfig
+        ? findIndexerConfig(indexersConfig, { indexerId: row.indexerId, indexerName: row.indexerName, protocol: indexerProtocol }).config
+        : null) ?? null;
     if (indexersConfigStr) {
-      const indexersConfig = parseSavedIndexers(indexersConfigStr);
+      indexersConfig = parseSavedIndexers(indexersConfigStr) as SavedIndexerConfig[] | null;
       if (!indexersConfig) {
         // Unreadable settings: leave the download alone (handled by the catch below)
         throw new Error('Saved indexer configuration is not a list; the download was left in the client');
       }
-      // By Prowlarr id (survives renames) unless it now means another indexer; else by name
-      const ref = {
-        indexerId: downloadHistory.indexerId,
-        indexerName: downloadHistory.indexerName,
-        protocol: CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent',
-      };
-      const match = findIndexerConfig(indexersConfig as SavedIndexerConfig[], ref);
+      const ref = { indexerId: downloadHistory.indexerId, indexerName: downloadHistory.indexerName, protocol: indexerProtocol };
+      const match = findIndexerConfig(indexersConfig, ref);
       seedingConfig = match.config ?? null;
       const ignored = describeIgnoredIndexerId(ref, match);
       if (ignored) logger.warn(ignored);
@@ -162,13 +170,28 @@ export async function cleanUpRequestDownload(
       );
       counts.torrentsKeptUnlimited++;
     } else if (!isCompleted || seeding.met) {
-      // Incomplete, or done seeding: remove it, unless another active request still uses it
-      const others = await otherActiveRequestsUsingTorrent(requestId, downloadHistory.torrentHash);
-      if (others.length > 0) {
-        logger.info(
-          `Keeping download ${downloadInfo.name}: ${others.length} other active request(s) still use it (IDs: ${others.map((r) => r.id).join(', ')})`
-        );
+      // Incomplete, or done seeding: remove it, unless another request keeps it (same rule as the
+      // seeding cleanup). For holds, only a clearly partial torrent counts as partial (a recheck does not)
+      const finishedInfo = clearlyPartial(downloadInfo, downloadHistory.downloadStatus) ? null : downloadInfo;
+      // As the cancel step: a row without a stored hash still asks the rule (its client id is the hash)
+      const torrentHash = downloadHistory.torrentHash || clientId;
+      const holdsReadAt = new Date();
+      const holds = await torrentHolds(requestId, torrentHash, {
+        clientType,
+        addedAt: downloadInfo.addedAt,
+        seeding: finishedInfo ? (row) => evaluateSeeding(configFor(row), finishedInfo) : null,
+      });
+      if (holds.length > 0) {
+        logger.info(`Keeping download ${downloadInfo.name}: ${holds.length} other request(s) still need it: ${describeHolds(holds)}`);
         counts.torrentsKeptShared++;
+        if (finishedInfo && downloadHistory.downloadStatus !== 'completed') {
+          // The seeding cleanup comes back to this (soft-deleted) request once the holds end; it only reads 'completed' rows.
+          // Same test as the holds: a kept torrent in a recheck or an error state is visited too
+          await prisma.downloadHistory.update({
+            where: { id: downloadHistory.id },
+            data: { downloadStatus: 'completed', completedAt: downloadHistory.completedAt ?? new Date() },
+          });
+        }
       } else {
         logger.info(
           isCompleted
@@ -177,8 +200,9 @@ export async function cleanUpRequestDownload(
         );
         await client.deleteDownload(clientId, true);
         counts.torrentsRemoved++;
-        // Gone now: the seeding cleanup never checks (or removes by) this row again
+        // Gone now: the seeding cleanup never checks (or removes by) this row, or the other requests' rows, again
         await prisma.downloadHistory.update({ where: { id: downloadHistory.id }, data: { downloadStatus: 'removed' } });
+        await markOtherRowsRemoved(requestId, torrentHash, clientType, holdsReadAt);
       }
     } else {
       // The scheduled seeding cleanup removes it once the requirement is met.

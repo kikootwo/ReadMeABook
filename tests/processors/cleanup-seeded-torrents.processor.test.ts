@@ -30,6 +30,8 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
 describe('processCleanupSeededTorrents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Queries a test does not answer (soft-deleted holders, the cancelled-download pass) find nothing
+    prismaMock.request.findMany.mockResolvedValue([]);
   });
 
   it('skips when no indexer configuration is found', async () => {
@@ -160,7 +162,10 @@ describe('processCleanupSeededTorrents', () => {
           ],
         },
       ])
-      .mockResolvedValueOnce([{ id: 'req-4', status: 'downloaded' }]);
+      .mockResolvedValueOnce([{
+        id: 'req-4', status: 'downloaded', type: 'audiobook', audiobook: null,
+        downloadHistory: [{ id: 'dh-4', indexerId: null, indexerName: 'IndexerA', downloadClient: 'qbittorrent', createdAt: new Date(), downloadStatus: 'completed', addedByRmab: true }],
+      }]);
 
     prismaMock.request.delete.mockResolvedValue({});
 
@@ -514,7 +519,10 @@ describe('processCleanupSeededTorrents', () => {
         },
       ])
       // Shared torrent check finds an ebook request using same hash
-      .mockResolvedValueOnce([{ id: 'req-ebook-shared', status: 'downloading' }]);
+      .mockResolvedValueOnce([{
+        id: 'req-ebook-shared', status: 'downloading', type: 'ebook', audiobook: null,
+        downloadHistory: [{ id: 'dh-ebook-shared', indexerId: null, indexerName: 'SharedIndexer', downloadClient: 'qbittorrent', createdAt: new Date(), downloadStatus: 'downloading', addedByRmab: false }],
+      }]);
 
     const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
     const result = await processCleanupSeededTorrents({ jobId: 'job-shared' });

@@ -168,9 +168,9 @@ describe('a v1.2.11 row for a duplicate of the user\'s hybrid', () => {
 
 describe('shared-torrent guard', () => {
   it('matches a row stored by a base32 or hex hash under both forms, in either case', async () => {
-    const { otherActiveRequestsUsingTorrent } = await import('@/lib/utils/shared-torrent');
-    await otherActiveRequestsUsingTorrent('req-1', PLAIN.b32.toLowerCase());
-    await otherActiveRequestsUsingTorrent('req-1', PLAIN.v1);
+    const { otherActiveRequestsSharingTorrent } = await import('@/lib/utils/shared-torrent');
+    await otherActiveRequestsSharingTorrent('req-1', PLAIN.b32.toLowerCase());
+    await otherActiveRequestsSharingTorrent('req-1', PLAIN.v1);
     const filters = prismaMock.request.findMany.mock.calls.map(([args]) => args.where.downloadHistory.some.torrentHash);
     const upper = [PLAIN.v1.toUpperCase(), PLAIN.b32.toUpperCase()];
     expect(filters).toEqual([

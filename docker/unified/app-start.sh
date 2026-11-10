@@ -31,6 +31,112 @@ fi
 cd /app
 
 # =============================================================================
+# STOP HANDLING
+# =============================================================================
+# supervisord sends SIGTERM to this wrapper only. The wrapper forwards it to node
+# and keeps waiting, so node gets its stop window (src/lib/startup/shutdown-coordinator.ts,
+# hard deadline 5 s) and the wrapper exits after it. With this set, Next.js leaves
+# SIGTERM/SIGINT to that coordinator instead of exiting at once.
+export NEXT_MANUAL_SIG_HANDLE=true
+
+# Node's deadline is a timer on its own event loop. A node too busy or stuck to run it
+# is SIGKILLed this many seconds after the stop by wall clock, so on Docker's and
+# Unraid's default 10 s stop Redis and PostgreSQL still get their stop signal.
+# Above node's 5 s deadline, below supervisord's stopwaitsecs=8 (tests/docker/supervisord-config.test.ts).
+APP_STOP_KILL_AFTER=6
+
+SERVER_PID=""
+STOPPING=0
+
+# shellcheck disable=SC2317 # reached through the trap below
+on_stop() {
+    # One forward and one watchdog per stop; node ignores a second signal anyway
+    if [ "$STOPPING" = "1" ]; then return 0; fi
+    STOPPING=1
+    # $! covers a signal that lands between starting node and recording its PID
+    local pid="${SERVER_PID:-$!}"
+    if [ -z "$pid" ]; then
+        echo "[App] Stop requested before node started"
+        exit 143
+    fi
+    SERVER_PID="$pid"
+    echo "[App] Stop requested, sending SIGTERM to node (PID $SERVER_PID)"
+    kill -TERM "$SERVER_PID" 2>/dev/null || true
+    # Watchdog in this process group: end_leftovers ends it once node is gone
+    (
+        sleep "$APP_STOP_KILL_AFTER"
+        if kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "[App] node did not stop within ${APP_STOP_KILL_AFTER}s, sending SIGKILL (PID $SERVER_PID)"
+            kill -KILL "$SERVER_PID" 2>/dev/null || true
+        fi
+    ) &
+}
+trap on_stop TERM INT
+
+# Fills LEFTOVER with the PIDs in this wrapper's process group other than the wrapper
+# (supervisord makes it the group leader). Builtins only, so no helper process is
+# counted. Node's ffmpeg children (chapter merge, tagging) are not detached and stay here.
+LEFTOVER=""
+find_leftovers() {
+    local stat line rest pid state pgrp
+    LEFTOVER=""
+    for stat in /proc/[0-9]*/stat; do
+        # Braces: the redirect's own error (a process gone since the glob) goes to /dev/null too
+        { read -r line < "$stat"; } 2>/dev/null || continue
+        pid="${stat#/proc/}"
+        pid="${pid%/stat}"
+        rest="${line##*) }"
+        # rest: state ppid pgrp ...
+        read -r state _ pgrp _ <<< "$rest" || continue
+        # A zombie has already exited: an orphan (the watchdog's sleep, an ffmpeg) waits for
+        # supervisord's next reap, up to 1 s later, and must not hold up the stop
+        if [ "$state" = "Z" ]; then continue; fi
+        if [ "$pgrp" = "$$" ] && [ "$pid" != "$$" ]; then
+            LEFTOVER="$LEFTOVER $pid"
+        fi
+    done
+}
+
+# Run only once node is gone. Anything node left behind (an ffmpeg mid-merge) would
+# otherwise outlive it and write the same temp file as the rerun after a restart.
+end_leftovers() {
+    trap '' TERM INT
+    kill -TERM -- "-$$" 2>/dev/null || true
+    local _i
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+        find_leftovers
+        if [ -z "$LEFTOVER" ]; then return 0; fi
+        sleep 0.1
+    done
+    echo "[App] Ending leftover processes:$LEFTOVER"
+    # shellcheck disable=SC2086 # word splitting intended: one PID per word
+    kill -KILL $LEFTOVER 2>/dev/null || true
+}
+
+finish() {
+    end_leftovers
+    exit "$1"
+}
+
+# Sets NODE_STATUS once node is gone. A trapped signal cuts `wait` short with a status
+# above 128, and `set -e` would end the script right there and orphan node: wait again
+# while node runs, then once more for a status a cut-short wait did not collect.
+NODE_STATUS=0
+wait_for_node() {
+    local again
+    while :; do
+        NODE_STATUS=0
+        wait "$SERVER_PID" || NODE_STATUS=$?
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+    done
+    if [ "$NODE_STATUS" -gt 128 ]; then
+        again=0
+        wait "$SERVER_PID" 2>/dev/null || again=$?
+        if [ "$again" -ne 127 ]; then NODE_STATUS=$again; fi
+    fi
+}
+
+# =============================================================================
 # START SERVER WITH APPROPRIATE UID:GID HANDLING
 # =============================================================================
 # Two scenarios:
@@ -57,7 +163,8 @@ start_server() {
 
 # Start the server in background
 start_server
-SERVER_PID=$!
+# Keep the PID a stop already recorded: on_stop starts a background job, which changes $!
+SERVER_PID=${SERVER_PID:-$!}
 
 # =============================================================================
 # WAIT FOR SERVER READINESS
@@ -74,13 +181,19 @@ echo "[App] Waiting for server to be ready (timeout: ${READY_TIMEOUT}s)..."
 
 READY=false
 for i in $(seq 1 "$READY_TIMEOUT"); do
+    # A stop during startup goes straight to the final wait
+    if [ "$STOPPING" = "1" ]; then break; fi
+
     # Check if the server process is still alive
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo "[App] ERROR: Server process (PID $SERVER_PID) exited unexpectedly"
-        exit 1
+        if [ "$STOPPING" = "1" ]; then break; fi
+        wait_for_node
+        echo "[App] ERROR: Server process (PID $SERVER_PID) exited unexpectedly (status $NODE_STATUS)"
+        finish 1
     fi
 
-    if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
+    # bash runs the stop trap only once a foreground command returns: keep each one short
+    if curl -sf --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
         READY=true
         echo "[App] Server is healthy (took ${i}s)"
         break
@@ -94,7 +207,7 @@ for i in $(seq 1 "$READY_TIMEOUT"); do
     sleep 1
 done
 
-if [ "$READY" = "false" ]; then
+if [ "$READY" = "false" ] && [ "$STOPPING" = "0" ]; then
     echo "[App] WARNING: Server did not become healthy within ${READY_TIMEOUT}s"
     echo "[App] Startup initialization keeps retrying inside the app - check logs for [Startup] lines"
 fi
@@ -112,5 +225,7 @@ if [ -f "/proc/$SERVER_PID/status" ]; then
     fi
 fi
 
-# Wait for server process (keeps the script running as long as the server is alive)
-wait $SERVER_PID
+# Keep the wrapper running as long as node runs; exit with node's status
+wait_for_node
+echo "[App] node exited (status $NODE_STATUS)"
+finish "$NODE_STATUS"

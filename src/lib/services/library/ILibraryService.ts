@@ -33,6 +33,7 @@ export interface LibraryItem {
   updatedAt: Date;
   path?: string;           // ABS only: the item's folder as ABS sees it (stored in plex_library.file_path)
   isMissing?: boolean;     // ABS only: ABS no longer finds the item's files
+  tags?: string[];         // ABS only: the item's tags, set only when the listing carried a tag array (#232)
 }
 
 export interface LibraryConnectionResult {
