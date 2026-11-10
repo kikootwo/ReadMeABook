@@ -36,6 +36,7 @@ vi.mock('@/lib/middleware/auth', () => ({
 
 const makeRequest = (body: Record<string, any>) => ({
   json: vi.fn().mockResolvedValue(body),
+  headers: new Headers({ 'content-type': 'application/json' }),
 });
 
 describe('Change password route', () => {
@@ -246,6 +247,72 @@ describe('Change password route', () => {
         reserve([{ namespace: 'signin-account', key: 'user-1' }, { namespace: 'signin-address', key: 'none' }]);
       }
       expect((await attempt('oldpass')).status).toBe(200);
+    });
+
+    it('refuses a non-string current password before taking a slot', async () => {
+      const { POST } = await import('@/app/api/auth/change-password/route');
+      const { _getBucketUsage } = await import('@/lib/utils/rateLimit');
+      const request = makeRequest({ currentPassword: 12345678, newPassword: 'newpass123', confirmPassword: 'newpass123' });
+
+      const response = await POST(request as unknown as Parameters<typeof POST>[0]);
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toMatch(/required/i);
+      expect(bcryptMock.compare).not.toHaveBeenCalled();
+      expect(_getBucketUsage('password-change', 'user-1')).toBe(0);
+    });
+
+    it('gives the slot back when the password check throws', async () => {
+      const { _getBucketUsage } = await import('@/lib/utils/rateLimit');
+      bcryptMock.compare.mockRejectedValueOnce(new Error('compare failed'));
+
+      expect((await attempt('oldpass')).status).toBe(500);
+      expect(_getBucketUsage('password-change', 'user-1')).toBe(0);
+    });
+  });
+
+  describe('known browser after a password change', () => {
+    beforeEach(() => {
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        authProvider: 'local',
+        authToken: 'enc-hash',
+        plexId: 'local-user',
+        plexUsername: 'user',
+      });
+      encryptionMock.decrypt.mockReturnValue('hash');
+      bcryptMock.compare.mockResolvedValue(true);
+      bcryptMock.hash.mockResolvedValue('new-hash');
+      encryptionMock.encrypt.mockReturnValue('enc-new-hash');
+      prismaMock.user.update.mockResolvedValue({});
+    });
+
+    it('keeps the browser that made the change known, for the new password only', async () => {
+      const { POST } = await import('@/app/api/auth/change-password/route');
+      const { knownBrowserBucket } = await import('@/lib/services/auth/known-browser');
+      const request = makeRequest({ currentPassword: 'oldpass', newPassword: 'newpass123', confirmPassword: 'newpass123' });
+
+      const response = await POST(request as unknown as Parameters<typeof POST>[0]);
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      const value = setCookie.match(/rmab_known_browser=([^;]*)/)?.[1];
+
+      expect(response.status).toBe(200);
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).toMatch(/SameSite=Strict/i);
+      expect(setCookie).toMatch(/Path=\/api\/auth/);
+      expect(knownBrowserBucket(value, { id: 'user-1', authToken: 'enc-new-hash' })).not.toBeNull();
+      expect(knownBrowserBucket(value, { id: 'user-1', authToken: 'enc-hash' })).toBeNull();
+    });
+
+    it('sets no cookie when the current password is wrong', async () => {
+      bcryptMock.compare.mockResolvedValue(false);
+      const { POST } = await import('@/app/api/auth/change-password/route');
+      const request = makeRequest({ currentPassword: 'wrong', newPassword: 'newpass123', confirmPassword: 'newpass123' });
+
+      const response = await POST(request as unknown as Parameters<typeof POST>[0]);
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get('set-cookie')).toBeNull();
     });
   });
 });

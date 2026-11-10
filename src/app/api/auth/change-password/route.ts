@@ -11,6 +11,7 @@ import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { formatRetryAfter, refund, reserve } from '@/lib/utils/rateLimit';
+import { renewKnownBrowser } from '@/lib/services/auth/signin-guard';
 
 const logger = RMABLogger.create('API.Auth.ChangePassword');
 
@@ -32,7 +33,14 @@ export async function POST(request: NextRequest) {
       const { currentPassword, newPassword, confirmPassword } = bodyResult.data;
 
       // Validate input
-      if (!currentPassword || !newPassword || !confirmPassword) {
+      if (
+        !currentPassword ||
+        !newPassword ||
+        !confirmPassword ||
+        typeof currentPassword !== 'string' ||
+        typeof newPassword !== 'string' ||
+        typeof confirmPassword !== 'string'
+      ) {
         return NextResponse.json(
           {
             success: false,
@@ -154,8 +162,14 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Verify current password
-      const currentPasswordValid = await bcrypt.compare(currentPassword, decryptedHash);
+      // Verify current password; a check that could not run gives its slot back
+      let currentPasswordValid: boolean;
+      try {
+        currentPasswordValid = await bcrypt.compare(currentPassword, decryptedHash);
+      } catch (error) {
+        refund(attempt.reservations);
+        throw error;
+      }
       if (currentPasswordValid) refund(attempt.reservations);
 
       if (!currentPasswordValid) {
@@ -188,10 +202,13 @@ export async function POST(request: NextRequest) {
         username: user.plexUsername
       });
 
-      return NextResponse.json({
+      // This browser stays known for the new password; other browsers' cookies end
+      const response = NextResponse.json({
         success: true,
         message: 'Password changed successfully',
       });
+      renewKnownBrowser(response, request, { id: user.id, authToken: encryptedHash });
+      return response;
     } catch (error) {
       logger.error('Failed to change password', {
         error: error instanceof Error ? error.message : String(error)
