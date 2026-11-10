@@ -9,6 +9,7 @@
 
 import * as parseTorrentModule from 'parse-torrent';
 import { MAX_UPLOADED_TORRENT_BYTES } from '@/lib/constants/download-source';
+import { isWellFormedTorrentFile } from '@/lib/integrations/torrent-file-check';
 import { torrentFileHashes } from '@/lib/integrations/torrent-ids';
 import type { TorrentResult } from '@/lib/utils/ranking-algorithm';
 
@@ -49,7 +50,8 @@ type ParsedTorrent = {
 const safeLength = (value: unknown): boolean => Number.isSafeInteger(value) && (value as number) >= 0;
 
 /**
- * A .torrent file sent as base64. Accepted only when it decodes to at most 2 MiB and parses to a
+ * A .torrent file sent as base64. Accepted only when it decodes to at most 2 MiB, has a well-formed
+ * structure (`isWellFormedTorrentFile`, checked before any parse) and parses to a
  * real metainfo file: an info dict and its bytes, and a total length (and file lengths) that is a
  * safe non-negative integer. A 20-byte buffer (parse-torrent reads it as a bare info hash) has no
  * info dict, so it is refused.
@@ -59,6 +61,8 @@ export async function readUploadedTorrent(base64: string): Promise<UploadCheck> 
   if (base64.length % 4 !== 0 || !BASE64.test(base64)) return { ok: false, error: INVALID_TORRENT_FILE_MESSAGE };
   const data = Buffer.from(base64, 'base64');
   if (data.length > MAX_UPLOADED_TORRENT_BYTES) return { ok: false, error: 'This .torrent file is larger than 2 MB.' };
+  // Structure check first (shared with fetched files): only a well-formed file reaches parse-torrent
+  if (!isWellFormedTorrentFile(data)) return { ok: false, error: INVALID_TORRENT_FILE_MESSAGE };
 
   let parsed: ParsedTorrent;
   try {

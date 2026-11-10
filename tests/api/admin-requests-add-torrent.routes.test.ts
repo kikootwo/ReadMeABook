@@ -189,6 +189,18 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
       ['20 raw bytes', { torrentFile: Buffer.alloc(20, 7).toString('base64') }, 'Not a valid .torrent file.'],
       ['an http link as magnet', { magnet: 'http://prowlarr:9696/1/download' }, 'This is not a magnet link.'],
       ['a magnet with two torrents', { magnet: `magnet:?xt=urn:btih:${HEX}&xt.1=urn:btih:${'d'.repeat(40)}` }, 'This magnet link names more than one torrent.'],
+      ...([
+        ['a string length that runs past the end', 'd4:info9:abce'],
+        ['a length with a letter before the colon', 'd4:info4a:spame'],
+        ['a length with a + before the colon', 'd4:info+4:spame'],
+        ['an unclosed list', 'd4:infol4:spam'],
+        ['a top-level list', 'l4:spame'],
+        ['an empty buffer', ''],
+      ].map(([label, bencode]) => [
+        `refuses a file that is not well-formed (${label})`,
+        { torrentFile: Buffer.from(bencode).toString('base64') },
+        'Not a valid .torrent file.',
+      ]) as [string, Record<string, string>, string][]),
     ])('%s: 400 with a plain message, no job', async (_label, body, message) => {
       const { status, payload } = await call(post(body));
       expect(status).toBe(400);
