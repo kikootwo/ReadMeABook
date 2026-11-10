@@ -258,6 +258,33 @@ describe('Header', () => {
     });
   });
 
+  it('offers the theme choice in the user menu and keeps the menu open after a pick', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue({ version: 'v.test' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<Header />, {
+      auth: {
+        user: { id: 'user-7', plexId: 'plex-7', username: 'reader', role: 'user', authProvider: 'plex' },
+        isLoading: false,
+      },
+    });
+
+    expect(screen.queryByRole('radiogroup', { name: 'Theme' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('reader').closest('button') as HTMLButtonElement);
+
+    const group = await screen.findByRole('radiogroup', { name: 'Theme' });
+    expect(group).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'Dark' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true');
+    });
+    expect(screen.getByText('Logout')).toBeInTheDocument();
+    document.documentElement.removeAttribute('data-theme');
+  });
+
   it('closes the user menu when profile is clicked', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: vi.fn().mockResolvedValue({ version: 'v.test' }),

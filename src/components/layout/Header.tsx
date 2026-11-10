@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { VersionBadge } from '@/components/ui/VersionBadge';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
+import { ThemeSwitch } from '@/components/layout/ThemeSwitch';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 
 export function Header() {
@@ -100,6 +101,9 @@ export function Header() {
           Change Password
         </button>
       )}
+      <div className="border-y border-gray-100 dark:border-gray-700 my-1">
+        <ThemeSwitch />
+      </div>
       <button
         onClick={() => {
           logout();
