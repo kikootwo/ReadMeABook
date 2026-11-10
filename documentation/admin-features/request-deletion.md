@@ -295,7 +295,7 @@ where: {
 
 `replaceAudiobook` (`src/lib/services/reported-issue.service.ts`, POST `/api/admin/reported-issues/:id/replace` `{torrent}`, admin): (1) newest non-deleted `audiobook` request of the book, with its user; (2) delete content: `deleteRequest(id, admin)`, or `removeLibraryContentForReplace` with no request (both behind the library delete guard, 409 when files kept, see Edge Cases 19-22); (3) reset the book; (4) new request `status: downloading` + `addDownloadJob` with the picked release (no approval step); (5) issue `replaced`, `resolvedById` = admin. Ebook requests are never read or changed.
 
-**Who the replacement belongs to (#571, `replacementOwner()`):**
+**Who the replacement belongs to (#571, `replacementRequester()`):**
 | Request it replaces | Requester | `approvalBypassedBy` |
 |---|---|---|
 | none (book added outside RMAB) | the admin | NULL |

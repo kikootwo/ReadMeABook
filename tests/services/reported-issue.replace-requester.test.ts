@@ -44,8 +44,8 @@ beforeEach(() => {
 });
 
 const created = () => prismaMock.request.create.mock.calls[0][0].data;
-/** Owner and approval record of the new request (an unset record reads as NULL). */
-const owner = () => ({ userId: created().userId, approvalBypassedBy: created().approvalBypassedBy ?? null });
+/** Requester and approval record of the new request (an unset record reads as NULL). */
+const requester = () => ({ userId: created().userId, approvalBypassedBy: created().approvalBypassedBy ?? null });
 
 describe('replaceAudiobook: who the replacement request belongs to', () => {
   it('reads the requester with the request it replaces (audiobook requests only)', async () => {
@@ -99,7 +99,7 @@ describe('replaceAudiobook: who the replacement request belongs to', () => {
 
     await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
 
-    expect(owner()).toEqual({ userId: 'admin-1', approvalBypassedBy: null });
+    expect(requester()).toEqual({ userId: 'admin-1', approvalBypassedBy: null });
     expect(deleteRequestMock).toHaveBeenCalledWith('req-old', 'admin-1');
   });
 
@@ -108,7 +108,7 @@ describe('replaceAudiobook: who the replacement request belongs to', () => {
 
     await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
 
-    expect(owner()).toEqual({ userId: 'admin-1', approvalBypassedBy: null });
+    expect(requester()).toEqual({ userId: 'admin-1', approvalBypassedBy: null });
   });
 
   it.each(['failed', 'warn', 'downloaded'])('gives a %s request to its requester', async (status) => {
@@ -127,7 +127,7 @@ describe('replaceAudiobook: who the replacement request belongs to', () => {
     expect(replaceContentMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'book-1' }));
     expect(deleteRequestMock).not.toHaveBeenCalled();
     expect(created()).toMatchObject({ type: 'audiobook', status: 'downloading' });
-    expect(owner()).toEqual({ userId: 'admin-1', approvalBypassedBy: null });
+    expect(requester()).toEqual({ userId: 'admin-1', approvalBypassedBy: null });
   });
 
   it('leaves ebook requests alone: a remaining delivered ebook request is not moved or replaced', async () => {

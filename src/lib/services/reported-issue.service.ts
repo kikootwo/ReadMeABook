@@ -183,7 +183,7 @@ export async function replaceAudiobook(
     orderBy: { createdAt: 'desc' },
     include: { user: { select: { id: true, deletedAt: true, registrationStatus: true } } },
   });
-  const owner = replacementOwner(existingRequest, adminUserId);
+  const requester = replacementRequester(existingRequest, adminUserId);
 
   // Step 2: Delete old content
   let ebookStays = false;
@@ -245,8 +245,8 @@ export async function replaceAudiobook(
   // Step 4: Create new request + start download (admin-initiated, no approval needed)
   const newRequest = await prisma.request.create({
     data: {
-      userId: owner.userId,
-      approvalBypassedBy: owner.approvalBypassedBy,
+      userId: requester.userId,
+      approvalBypassedBy: requester.approvalBypassedBy,
       audiobookId: audiobook.id,
       status: 'downloading',
       type: 'audiobook',
@@ -281,7 +281,7 @@ export async function replaceAudiobook(
     },
   });
 
-  logger.info(`Issue ${issueId} resolved via replacement. New request: ${newRequest.id} (requester ${owner.userId === adminUserId ? 'the admin' : owner.userId})`);
+  logger.info(`Issue ${issueId} resolved via replacement. New request: ${newRequest.id} (requester ${requester.userId === adminUserId ? 'the admin' : requester.userId})`);
   return { issue, request: newRequest };
 }
 
@@ -298,7 +298,7 @@ type ReplacedRequest = {
  * (book added outside RMAB), the requester could not request now (deleted, or registration
  * pending or rejected), or the request was never approved or was withdrawn.
  */
-function replacementOwner(existing: ReplacedRequest | null, adminUserId: string) {
+function replacementRequester(existing: ReplacedRequest | null, adminUserId: string) {
   const user = existing?.user;
   const canRequest = !!user && !user.deletedAt && (user.registrationStatus === null || user.registrationStatus === 'approved');
   if (!existing || !canRequest || (UNAPPROVED_STATUSES as readonly string[]).includes(existing.status)) {
