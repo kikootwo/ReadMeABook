@@ -107,6 +107,20 @@ describe('useLibrary: Load more after a reload that ends a page earlier', () => 
     await waitFor(() => expect(result.current.isValidating).toBe(false));
     expect(result.current.hasMore).toBe(false);
     expect(result.current.isLoadingMore).toBe(false);
+
+    // A later reload (a settle, an action) keeps "All N loaded": it is not a Load more
+    let release!: () => void;
+    pages[BASE] = () => new Promise((r) => (release = () => r(ok({ ...response([a]), nextCursor: null, matched: 1 }))));
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.revalidate();
+    });
+    await waitFor(() => expect(result.current.isValidating).toBe(true));
+    expect(result.current.isLoadingMore).toBe(false);
+    await act(async () => {
+      release();
+      await pending;
+    });
   });
 });
 

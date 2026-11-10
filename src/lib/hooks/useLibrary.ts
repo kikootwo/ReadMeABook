@@ -271,8 +271,9 @@ export function useLibrary(query: LibraryQuery, hideAvailable: boolean, enabled:
     hasMore: !lagging && merged.hasMore,
     /** Nothing to show yet for this query. */
     isLoading: enabled && !error && !first,
-    // Only while a fetch runs: a reload that ends a page earlier leaves size above pages.length
-    isLoadingMore: isValidating && !!pages && size > pages.length && !error,
+    // Only while a fetch runs for a page past the last one with a cursor: a reload that ends a page
+    // earlier leaves size above pages.length for good, and later reloads must not read as Load more
+    isLoadingMore: isValidating && !!pages && merged.hasMore && size > pages.length && !error,
     isValidating,
     lagging,
     error: error ?? null,
