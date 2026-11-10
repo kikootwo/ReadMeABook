@@ -215,6 +215,10 @@ test('189: change a match by search and by typed ASIN, refusals listed, books im
     await openReview(page, 'Downloads', ['e2e-189', RUN]);
     await page.waitForTimeout(400);
     await snap(page, '189', 'review-375-dark');
+    // The list scrolls inside the dialog: a second shot shows the Requested and In Library rows
+    await row(page, 'Folder Delta').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(300);
+    await snap(page, '189', 'review-375-dark-scrolled');
     obs.phone = {
       findMatchHeight: (await row(page, 'Folder Bravo').getByRole('button', { name: /Find match/ }).boundingBox())?.height ?? null,
       scrollWidth: await page.evaluate(() => document.documentElement.scrollWidth),
@@ -250,7 +254,9 @@ test('189: change a match by search and by typed ASIN, refusals listed, books im
     // Two rows the scan matched to one book are marked before import
     obs.sameBook = { echo: await row(page, 'Folder Echo').getByText('Same book as another row').count(), foxtrot: await row(page, 'Folder Foxtrot').getByText('Same book as another row').count() };
     expect.soft(obs.sameBook).toEqual({ echo: 1, foxtrot: 1 });
-    await row(page, 'Folder Echo').scrollIntoViewIfNeeded();
+    // Foxtrot is the last row: scrolled to it, Echo sits just above
+    await row(page, 'Folder Foxtrot').evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    await page.waitForTimeout(300);
     await snap(page, '189', 'same-book-marked');
 
     // Row A: search replay; In Library and Requested hits cannot be picked
