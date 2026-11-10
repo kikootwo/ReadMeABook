@@ -1,6 +1,6 @@
 /**
  * Component: Reported Issue Service
- * Documentation: documentation/backend/services/reported-issues.md
+ * Documentation: documentation/admin-features/request-deletion.md
  *
  * Handles user-reported problems with available audiobooks.
  * Supports dismiss (admin closes) and replace (admin picks new torrent) workflows.
@@ -10,6 +10,7 @@ import { prisma } from '@/lib/db';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
 import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
+import { UNAPPROVED_STATUSES } from '@/lib/constants/request-statuses';
 
 const logger = RMABLogger.create('ReportedIssue');
 
@@ -180,7 +181,9 @@ export async function replaceAudiobook(
       deletedAt: null,
     },
     orderBy: { createdAt: 'desc' },
+    include: { user: { select: { id: true, deletedAt: true, registrationStatus: true } } },
   });
+  const owner = replacementOwner(existingRequest, adminUserId);
 
   // Step 2: Delete old content
   let ebookStays = false;
@@ -242,7 +245,8 @@ export async function replaceAudiobook(
   // Step 4: Create new request + start download (admin-initiated, no approval needed)
   const newRequest = await prisma.request.create({
     data: {
-      userId: adminUserId,
+      userId: owner.userId,
+      approvalBypassedBy: owner.approvalBypassedBy,
       audiobookId: audiobook.id,
       status: 'downloading',
       type: 'audiobook',
@@ -277,8 +281,30 @@ export async function replaceAudiobook(
     },
   });
 
-  logger.info(`Issue ${issueId} resolved via replacement. New request: ${newRequest.id}`);
+  logger.info(`Issue ${issueId} resolved via replacement. New request: ${newRequest.id} (requester ${owner.userId === adminUserId ? 'the admin' : owner.userId})`);
   return { issue, request: newRequest };
+}
+
+type ReplacedRequest = {
+  status: string;
+  approvalBypassedBy: string | null;
+  user: { id: string; deletedAt: Date | null; registrationStatus: string | null };
+};
+
+/**
+ * Who the replacement request belongs to (#571): the requester of the request it replaces,
+ * with that request's approval record (an approved request stays tagged for them, one
+ * delivered without approval stays untagged). The admin instead when there was no request
+ * (book added outside RMAB), the requester could not request now (deleted, or registration
+ * pending or rejected), or the request was never approved or was withdrawn.
+ */
+function replacementOwner(existing: ReplacedRequest | null, adminUserId: string) {
+  const user = existing?.user;
+  const canRequest = !!user && !user.deletedAt && (user.registrationStatus === null || user.registrationStatus === 'approved');
+  if (!existing || !canRequest || (UNAPPROVED_STATUSES as readonly string[]).includes(existing.status)) {
+    return { userId: adminUserId, approvalBypassedBy: null };
+  }
+  return { userId: existing.user.id, approvalBypassedBy: existing.approvalBypassedBy };
 }
 
 /**
