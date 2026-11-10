@@ -39,8 +39,8 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## POST `/api/requests` (Write)
 - Body: `{ "audiobook": { "asin", "title", "author", "narrator?", "description?", "coverArtUrl?" }, "explicit?": boolean }`
-- `explicit: true` marks the request Explicit (#542; Audiobookshelf mode turns on the item's Explicit flag on delivery, [explicit-flag.md](../../features/explicit-flag.md)); a re-request keeps the replaced request's mark either way. Later changes go through `PUT /api/requests/:id/explicit`, which is NOT on the allowlist (UI only); `src/lib/constants/api-tokens.ts` is unchanged by #542.
-- Internally calls `createRequestForUser(req.user.id, audiobook, { bypassIgnore: true, explicit })` — token requests bypass the ignore list, matching UI behavior.
+- `explicit: true` marks the request Explicit (#542; Audiobookshelf mode turns on the item's Explicit flag on delivery, [explicit-flag.md](../../features/explicit-flag.md)). **Ignored while the admin setting `audiobookshelf.explicit_mark_enabled` is off (the default):** the request is created unmarked. A re-request keeps the replaced request's mark either way. Later changes go through `PUT /api/requests/:id/explicit`, which is NOT on the allowlist (UI only); `src/lib/constants/api-tokens.ts` is unchanged by #542.
+- Internally calls `createRequestForUser(req.user.id, audiobook, { bypassIgnore: true, explicit: explicit && setting on })` — token requests bypass the ignore list, matching UI behavior.
 - Optional query param: `?skipAutoSearch=true` defers search-job creation.
 - Side effects (identical to UI): duplicate detection, library check, Audnexus enrichment, audiobook upsert, ignore-list check (bypassed), per-user dedup, auto-approve gating, release-date gate, notification queue, search-job queue.
 - Auto-approve: follows the token owner's per-user `autoApproveRequests` setting, then global. No bypass.

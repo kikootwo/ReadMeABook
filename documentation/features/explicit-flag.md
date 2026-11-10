@@ -1,33 +1,47 @@
 # Explicit Mark on Requests (Audiobookshelf Explicit flag)
 
-**Status:** ✅ Implemented | A request marked Explicit turns on its Audiobookshelf item's Explicit flag (#542)
+**Status:** ✅ Implemented | Behind an admin setting, off by default: a request marked Explicit turns on its Audiobookshelf item's Explicit flag (#542)
 
 ## Overview
-The requester or an admin ticks **Explicit** on an audiobook request. In ABS mode, when the book reaches the library, RMAB sets `explicit: true` on its ABS item, and ABS then hides it from every ABS user without "Can access explicit content". RMAB never turns the flag off. Plex mode stores the mark only. No setting: nothing is written until a request is marked.
+An admin turns on **Explicit mark on requests** (Admin → Settings → Audiobookshelf tab). Then the requester or an admin ticks **Explicit** on an audiobook request; when the book reaches the library, RMAB sets `explicit: true` on its ABS item, and ABS hides it from every ABS user without "Can access explicit content". RMAB never turns the flag off.
+
+## Setting
+- **Key:** `audiobookshelf.explicit_mark_enabled` (`'true'` = on; absent or anything else = off). **Off by default**, also on an upgrade (no key). Constant `EXPLICIT_MARK_SETTING_KEY` (`src/lib/constants/explicit-mark.ts`); server check `isExplicitMarkOn()` (`explicit-flag.ts`)
+- **Switch:** `ExplicitMarkOption.tsx` under the requester tag option, Audiobookshelf mode only (no Plex control). Label "Explicit mark on requests"; help "Adds an Explicit checkbox to requests. ReadMeABook turns on a marked book's Explicit flag in Audiobookshelf."
+- **Saved by** `PUT /api/admin/settings/audiobookshelf` field `explicitMarkEnabled` (written only when a boolean); read by `GET /api/admin/settings` → `audiobookshelf.explicitMarkEnabled`. Both admin only
+- **Pages learn it** from the public `GET /api/auth/providers` they already load for the backend mode: `explicitMarkEnabled` (true only in ABS mode with the key `'true'`; Plex always false). `useExplicitMarkEnabled()` (`src/lib/hooks/useExplicitMark.ts`, SWR key `/api/auth/providers`, one request for every card) is false until the answer arrives, so no control flashes. The settings save revalidates that key
+- **Off:**
+  - UI: no checkbox (details modal, My Requests), no pill or menu item (admin table), no confirm; the word never shows
+  - `PUT /api/requests/[id]/explicit` → 403 `FeatureDisabled` "The Explicit mark is turned off in Settings" (before any read; the app's status for a feature turned off)
+  - `explicit` on `POST /api/requests` (session or token) and `request-with-torrent` is ignored: created unmarked. A re-request or Replace still copies the old request's stored mark
+  - Scan step, repair, backfill and guard: nothing (no `/api/me`, no PATCH, no warning, no read of marked rows). Tags still go out
+  - Stored marks stay in the database; flags already set in ABS stay. Turning it on resumes everything (the next scan repairs listed items)
+- **On:** everything below
 
 ## Key Details
 - **Column:** `Request.explicit Boolean @default(false)` ([database.md](../backend/database.md#requests))
 - **Who:** the requester or an admin sets it; **only an admin clears it**. A requester can mark again after an admin clears it
 - **Kept by:** a re-request of a failed/warn/cancelled request (`request-creator.service.ts`, `request-with-torrent/route.ts`) and a reported-issue Replace (`reported-issue.service.ts`), whoever becomes the requester (the mark belongs to the book's content)
 - **Audiobook requests only:** ebook requests have no control; the PUT refuses them (400)
-- **API tokens:** `POST /api/requests` accepts `explicit?: boolean`. `PUT /api/requests/[id]/explicit` is **not** on the token allowlist (`src/lib/constants/api-tokens.ts` unchanged): later changes are UI only ([api-tokens.md](../backend/services/api-tokens.md))
+- **API tokens:** `POST /api/requests` accepts `explicit?: boolean` (ignored while the setting is off). `PUT /api/requests/[id]/explicit` is **not** on the token allowlist (`src/lib/constants/api-tokens.ts` unchanged): later changes are UI only ([api-tokens.md](../backend/services/api-tokens.md))
 
 ## UI
 | Surface | Control | Shown when |
 |---|---|---|
-| Details modal (`AudiobookDetailsModal`) | `ExplicitCheckbox` row above the action buttons; value sent with Request / Interactive Search (`createRequest`, `requestWithTorrent` add `explicit: true` only when ticked). Interactive Search on an existing request advances it (select-torrent, no mark), so a new tick is saved first with the PUT when the pick is confirmed (`beforeSelect`); a failed save starts nothing and says so in the search modal. While it saves, Download and Cancel are disabled and a second click does nothing; Esc or closing the search stops the pick before select-torrent | ABS mode, signed in, can request, not denied, not an ebook request. Starts from the request's mark when opened from My Requests or the admin table; Search, Home, Author and Series cards don't carry it (box starts unticked; a re-request keeps the mark anyway); BookDate and Shelves don't either: they open it without request actions, so no box |
-| My Requests (`RequestCard`) | `RequestExplicitControl` in the action row; saves at once, then reloads the list (`onChanged` → `useMyRequests().revalidate`, every loaded page); a pick or re-request from its details modal reloads it too (`onRequestSuccess`) | ABS mode, audiobook, not denied |
-| Admin Recent Requests (`RecentRequestsTable`) | rose "Explicit" pill by the title; `ExplicitMenuItem` in the actions menu ("Mark explicit" / "Remove explicit mark") | ABS mode, audiobook; the menu item is hidden on an unmarked denied request |
+| Details modal (`AudiobookDetailsModal`) | `ExplicitCheckbox` row above the action buttons; value sent with Request / Interactive Search (`createRequest`, `requestWithTorrent` add `explicit: true` only when ticked). Interactive Search on an existing request advances it (select-torrent, no mark), so a new tick is saved first with the PUT when the pick is confirmed (`beforeSelect`); a failed save starts nothing and says so in the search modal. While it saves, Download and Cancel are disabled and a second click does nothing; Esc or closing the search stops the pick before select-torrent | Setting on (ABS mode), signed in, can request, not denied, not an ebook request. Starts from the request's mark when opened from My Requests or the admin table; Search, Home, Author and Series cards don't carry it (box starts unticked; a re-request keeps the mark anyway); BookDate and Shelves don't either: they open it without request actions, so no box |
+| My Requests (`RequestCard`) | `RequestExplicitControl` in the action row; saves at once, then reloads the list (`onChanged` → `useMyRequests().revalidate`, every loaded page); a pick or re-request from its details modal reloads it too (`onRequestSuccess`) | Setting on (ABS mode), audiobook, not denied |
+| Admin Recent Requests (`RecentRequestsTable`) | rose "Explicit" pill by the title; `ExplicitMenuItem` in the actions menu ("Mark explicit" / "Remove explicit mark") | Setting on (ABS mode), audiobook; the menu item is hidden on an unmarked denied request |
 - **Non-admin tick asks first** (`ConfirmModal`, "Mark as explicit?"): "Audiobookshelf will hide this book from accounts that can't see explicit content (which may include yours), and only an admin can remove the mark."
 - **Non-admin, already marked:** checkbox disabled, with the visible line "Only an admin can remove this" (`aria-describedby`), readable at phone width. The details modal saves nothing until Request, so it locks the box only for a request already marked (`locked` prop); a fresh tick can be unticked before sending. An admin's locked box there reads "A re-request keeps the mark"
 - **Look:** the box is drawn by hand (`appearance-none`, rose fill and white tick when checked), so a locked mark keeps its rose tick in light and dark. Unticked border `gray-500` (dark `gray-400`), 3:1 or more; mid-save (busy, not locked) a wait cursor and a lighter border
 - A response `message` shows as a warning toast (10 s); an error as an error toast. My Requests is wrapped in `ToastProvider`
-- Backend mode comes from `GET /api/auth/providers` (`useBackendMode`, `src/lib/hooks/useExplicitMark.ts`)
+- Whether to show any of it: `useExplicitMarkEnabled()` (see Setting)
 
 ## API
 `PUT /api/requests/[id]/explicit` body `{explicit: boolean}` (strict) → `{success, request: {id, explicit}, absUpdated?, message?}`
 | Case | Result |
 |---|---|
+| setting off (or absent) | 403 `FeatureDisabled`, nothing read or written |
 | bad body | 400 `ValidationError` |
 | not found / deleted, or no row updated (replaced or deleted since the read) | 404 |
 | not the requester, not admin | 403 |
@@ -37,7 +51,7 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 | `true` again on a marked request | requester: plain 200, no ABS call (the scan repair is the retry). Admin: retries the write as above (API only: no UI sends a repeat) |
 | `true`, ABS, `available`, no `absItemId` yet | stored, no write, no message; the flag is written when a scan links the item (delivery step) |
 | admin `false`, ABS | stores it, writes nothing to ABS. Available → "Mark removed. If the book is marked explicit in Audiobookshelf, change it there." Plus, when other requests of the book that can still flag it (not cancelled, denied or deleted) are marked: "N other request(s) for this book are still marked; remove that mark too, or ReadMeABook marks the book explicit again once delivered." |
-| Plex | stores the value only |
+| Plex (setting on) | stores the value only |
 
 ## Write and Guard
 - **Writer:** `writeABSItem(itemId, {tags?, explicit?: true})` (`src/lib/services/audiobookshelf/api.ts`), shared with requester tags: one GET (only when tags are asked) and one `PATCH /api/items/:id/media` per item holding only what is missing. `{metadata: {explicit: true}}` changes no other field. **Never sends `explicit: false`; never sends tags when tagging is off; sends explicit alone when the tag list can't be read.** Response check: a boolean `explicit !== true` → failed "explicit flag not saved". 15 s per call; never throws. Result `explicit: none | set | present | failed`
@@ -46,11 +60,11 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 - **Once per scan:** the guard reads `/me` at most once per run; when no write needed it, it still runs once while any marked available request with an ABS item exists (one count query), so the warning shows even when nothing was written. It repeats every recently-added check (5 min) while that holds
 
 ## Per-run Step (`applyItemMarks`, `src/lib/services/audiobookshelf/requester-tags.ts`)
-- `runItemMarkStep` runs after every scan's matching in ABS mode (recently-added check and full library scan), tagging on or off; with tagging off it reads only marked requests
+- `runItemMarkStep` runs after every scan's matching in ABS mode (recently-added check and full library scan), tagging on or off; with tagging off it reads only marked requests. `applyItemMarks({explicit})`: false (setting off) plans no flag and skips the guard; with tagging also off it returns before any read
 - An item's plan gets `explicit` when **any** available, not deleted audiobook request of it is marked. Tag eligibility rules (approval record, requester state, admin import) don't apply: the flag only restricts
 - Delivered books first, uncapped. **Repair:** a listed item whose listing has `explicit` false (or null, which maps to false) is written again; a listing without the field is left alone. Repair cap 25 items per run shared with tag repair; 3 failures in a row stop the run's writes
 - Counters: `markedExplicit`, `explicitHeldBack` (also in the backfill job result). Log: `Marked "<title>" (Audiobookshelf item <id>) explicit`
-- The requester-tag backfill also marks the marked items it lists
+- The requester-tag backfill also marks the marked items it lists (setting on)
 
 ## Survival and Recovery
 - An ABS quick match keeps the flag (only truthy values copy; Audible `isAdult: false` is skipped). A rescan keeps it (ABS's own metadata.json holds `explicit: true`)
