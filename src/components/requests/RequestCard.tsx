@@ -286,6 +286,7 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
           asin={request.audiobook.audibleAsin}
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
+          onRequestSuccess={onChanged}
           requestStatus={request.status}
           isAvailable={COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number])}
           requestId={request.id}
