@@ -11,6 +11,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { probeAudioContent } from './audio-content';
+import { appendStderrTail, ffmpegFailureReason } from './ffmpeg-stderr';
 import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMergedContent } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
@@ -550,7 +551,7 @@ async function executeFFmpegWithProgress(
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn('ffmpeg', args);
 
-    let stderrBuffer = '';
+    let stderrBuffer = ''; // the tail only (appendStderrTail): a long encode prints for hours
     let lastProgressLog = Date.now();
     let lastProgressPercent = 0;
     let lastReportedPercent = -1;
@@ -564,7 +565,7 @@ async function executeFFmpegWithProgress(
     // Capture stderr for progress and errors
     ffmpeg.stderr.on('data', (data) => {
       const output = data.toString();
-      stderrBuffer += output;
+      stderrBuffer = appendStderrTail(stderrBuffer, output);
 
       // Parse FFmpeg progress output (the newest stats line of the chunk; hours may exceed 99)
       // Format: frame=... fps=... q=... size=... time=HH:MM:SS.MS bitrate=... speed=...
@@ -616,14 +617,8 @@ async function executeFFmpegWithProgress(
         }
         resolve();
       } else {
-        // Extract meaningful error from stderr
-        const errorLines = stderrBuffer.split('\n').filter(line =>
-          line.includes('Error') || line.includes('Invalid') || line.includes('failed')
-        );
-        const errorMsg = errorLines.length > 0
-          ? errorLines.slice(-3).join('; ')
-          : `FFmpeg exited with code ${code}`;
-        reject(new Error(errorMsg));
+        // ffmpeg's newest meaningful lines, no progress lines, capped
+        reject(new Error(ffmpegFailureReason(stderrBuffer, code)));
       }
     });
 
