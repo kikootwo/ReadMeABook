@@ -108,6 +108,8 @@ describe('another cancelled request on a finished torrent', () => {
       where: expect.objectContaining({
         requestId: { not: 'req-1' },
         selected: true,
+        // Only rows that existed when the holds were read (a grab after the delete keeps its row)
+        createdAt: { lte: expect.any(Date) },
         AND: expect.arrayContaining([{ OR: [{ downloadClient: null }, { downloadClient: '' }, { downloadClient: 'qbittorrent' }] }]),
       }),
       data: { downloadStatus: 'removed' },

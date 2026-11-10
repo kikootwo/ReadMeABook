@@ -58,6 +58,9 @@ const cancelled = (row: Record<string, unknown> = {}) =>
   ({ id: 'req-2', status: 'cancelled', type: 'audiobook', audiobook: null, downloadHistory: [otherRow(row)] });
 const softDeleted = (row: Record<string, unknown> = {}) => ({ id: 'req-2', downloadHistory: [otherRow(row)] });
 
+/** When the client delete was called (the last test's) */
+let deleteCalledAt = 0;
+
 async function deleteWith(row: DownloadHistory, answer: Record<string, unknown>) {
   configMock.get.mockImplementation(async (key: string) => (key === 'prowlarr_indexers'
     ? JSON.stringify([
@@ -69,7 +72,7 @@ async function deleteWith(row: DownloadHistory, answer: Record<string, unknown>)
     clientType: 'qbittorrent',
     protocol: 'torrent',
     getDownload: vi.fn().mockResolvedValue({ id: HASH, name: 'Book', seedingTime: 40 * 60, ratio: 0, addedAt: ADDED_AT, ...answer }),
-    deleteDownload: vi.fn().mockResolvedValue(undefined),
+    deleteDownload: vi.fn(async () => { deleteCalledAt = Date.now(); }),
   };
   managerMock.getClientServiceForProtocol.mockResolvedValue(client);
   const { cleanUpRequestDownload } = await import('@/lib/services/request-delete-download');
@@ -152,13 +155,48 @@ describe('a cancelled request on the torrent (#545 b)', () => {
     expect(otherRowsMarked()).toEqual([{ not: 'req-1' }]);
   });
 
-  it('a recheck (checking at 40%) is not a partial torrent for holds: the cancelled owner keeps it', async () => {
+  it.each([
+    ['a recheck (checking at 40%)', { status: 'checking', progress: 0.4 }],
+    ['an error state (failed at 40%)', { status: 'failed', progress: 0.4 }],
+  ])('%s is not a partial torrent for holds: the cancelled owner keeps it, and the own row is recorded completed for the cleanup', async (_label, answer) => {
     db({ active: [cancelled()] });
-    const { counts, client } = await deleteWith(ownRow({ downloadStatus: 'downloading' }), { status: 'checking', progress: 0.4 });
+    const { counts, client } = await deleteWith(ownRow({ downloadStatus: 'downloading' }), answer);
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(counts.torrentsKeptShared).toBe(1);
-    expect(statusWrites()).toEqual([]);
+    // The same test as the hold: the seeding cleanup visits this (soft-deleted) request again once the hold ends
+    expect(statusWrites()).toEqual([{ downloadStatus: 'completed', completedAt: expect.any(Date) }]);
+  });
+});
+
+describe('the other requests\' rows once the torrent is removed', () => {
+  it('only rows that existed when the holds were read are marked removed (a grab after the delete keeps its row)', async () => {
+    db({ active: [cancelled({ indexerName: 'Fast', indexerId: 1 })] });
+    const before = Date.now();
+    await deleteWith(ownRow(), SEEDING);
+
+    const [[args]] = prismaMock.downloadHistory.updateMany.mock.calls as [{ where: { createdAt?: { lte: Date } } }][];
+    const bound = args.where.createdAt?.lte.getTime();
+    expect(bound).toBeGreaterThanOrEqual(before);
+    expect(bound).toBeLessThanOrEqual(deleteCalledAt);
+  });
+});
+
+describe('a row without a stored hash (its client id is the hash)', () => {
+  it('still asks the rule: an active request downloading the torrent keeps it', async () => {
+    db({ active: [{ ...cancelled({ downloadStatus: 'downloading' }), status: 'downloading' }] });
+    const { counts, client } = await deleteWith(ownRow({ torrentHash: null, downloadStatus: 'downloading' }), PARTIAL);
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(counts.torrentsKeptShared).toBe(1);
+  });
+
+  it('once removed, marks the other requests\' rows by the client id', async () => {
+    db({ active: [cancelled({ indexerName: 'Fast', indexerId: 1 })] });
+    const { counts } = await deleteWith(ownRow({ torrentHash: null }), SEEDING);
+
+    expect(counts.torrentsRemoved).toBe(1);
+    expect(otherRowsMarked()).toEqual([{ not: 'req-1' }]);
   });
 });
 

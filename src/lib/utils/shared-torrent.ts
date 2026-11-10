@@ -290,12 +290,14 @@ export function describeHolds(holds: TorrentHold[]): string {
 
 /**
  * The torrent is gone from `clientType`: every other request's selected row for it recorded for that
- * client says so too (deleted ones included). Returns the number of rows marked.
+ * client, created by `holdsReadAt` (when the holds were read, before the client delete), says so too
+ * (deleted ones included). A grab that lands after the delete keeps its row. Returns the number marked.
  */
 export async function markOtherRowsRemoved(
   requestId: string,
   torrentHash: string | null | undefined,
-  clientType: string
+  clientType: string,
+  holdsReadAt: Date
 ): Promise<number> {
   if (!torrentHash) return 0;
   const { count } = await prisma.downloadHistory.updateMany({
@@ -303,6 +305,7 @@ export async function markOtherRowsRemoved(
       requestId: { not: requestId },
       selected: true,
       torrentHash: { in: torrentHashForms(torrentHash) },
+      createdAt: { lte: holdsReadAt },
       AND: [NOT_REMOVED, recordedForClient(clientType)],
     },
     data: { downloadStatus: 'removed' },

@@ -173,7 +173,10 @@ export async function cleanUpRequestDownload(
       // Incomplete, or done seeding: remove it, unless another request keeps it (same rule as the
       // seeding cleanup). For holds, only a clearly partial torrent counts as partial (a recheck does not)
       const finishedInfo = clearlyPartial(downloadInfo, downloadHistory.downloadStatus) ? null : downloadInfo;
-      const holds = await torrentHolds(requestId, downloadHistory.torrentHash, {
+      // As the cancel step: a row without a stored hash still asks the rule (its client id is the hash)
+      const torrentHash = downloadHistory.torrentHash || clientId;
+      const holdsReadAt = new Date();
+      const holds = await torrentHolds(requestId, torrentHash, {
         clientType,
         addedAt: downloadInfo.addedAt,
         seeding: finishedInfo ? (row) => evaluateSeeding(configFor(row), finishedInfo) : null,
@@ -181,8 +184,9 @@ export async function cleanUpRequestDownload(
       if (holds.length > 0) {
         logger.info(`Keeping download ${downloadInfo.name}: ${holds.length} other request(s) still need it: ${describeHolds(holds)}`);
         counts.torrentsKeptShared++;
-        if (isCompleted && downloadHistory.downloadStatus !== 'completed') {
-          // The seeding cleanup comes back to this (soft-deleted) request once the holds end; it only reads 'completed' rows
+        if (finishedInfo && downloadHistory.downloadStatus !== 'completed') {
+          // The seeding cleanup comes back to this (soft-deleted) request once the holds end; it only reads 'completed' rows.
+          // Same test as the holds: a kept torrent in a recheck or an error state is visited too
           await prisma.downloadHistory.update({
             where: { id: downloadHistory.id },
             data: { downloadStatus: 'completed', completedAt: downloadHistory.completedAt ?? new Date() },
@@ -198,7 +202,7 @@ export async function cleanUpRequestDownload(
         counts.torrentsRemoved++;
         // Gone now: the seeding cleanup never checks (or removes by) this row, or the other requests' rows, again
         await prisma.downloadHistory.update({ where: { id: downloadHistory.id }, data: { downloadStatus: 'removed' } });
-        await markOtherRowsRemoved(requestId, downloadHistory.torrentHash, clientType);
+        await markOtherRowsRemoved(requestId, torrentHash, clientType, holdsReadAt);
       }
     } else {
       // The scheduled seeding cleanup removes it once the requirement is met.

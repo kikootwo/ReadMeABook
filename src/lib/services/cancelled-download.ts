@@ -250,6 +250,7 @@ async function decide(
 
   const torrentHash = row.torrentHash || clientId;
   const remove = async (why: string): Promise<CancelStepResult> => {
+    const holdsReadAt = new Date();
     const hold = await holdReason(request, torrentHash, clientType, info, finished ? info : null, configFor);
     if (hold) {
       logger.info(`Keeping ${info.name} in ${clientName} for cancelled request ${request.id}: ${hold}`);
@@ -270,7 +271,7 @@ async function decide(
     ctx.deletedHashes?.add(clientId.toLowerCase());
     logger.info(`Removed ${info.name} and its files from ${clientName} (cancelled request ${request.id}, ${why})`);
     await markRemoved(`Removed ${info.name}`);
-    if (!deadline.passed()) await markOtherRowsRemoved(request.id, torrentHash, clientType);
+    if (!deadline.passed()) await markOtherRowsRemoved(request.id, torrentHash, clientType, holdsReadAt);
     return result('removed', why, { clientName });
   };
 

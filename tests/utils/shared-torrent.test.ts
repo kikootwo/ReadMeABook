@@ -173,6 +173,25 @@ describe('holdOf', () => {
     expect(holdOf(mixed, check(false))?.kind).toBe('active');
   });
 
+  // A client that reports no added time: a row RMAB recorded as its own owns it, a legacy row is unclear (never owns)
+  it.each([
+    ['5 deleted, own rule not met', 'added by RMAB', true, 'until_met'],
+    ['5 deleted, own rule not met', 'legacy row inside the window', true, null],
+    ['11 cancelled, own rule not met', 'added by RMAB', true, 'until_met'],
+    ['11 cancelled, own rule not met', 'legacy row inside the window', true, null],
+    ['12 cancelled, unlimited', 'added by RMAB', true, 'forever'],
+    ['12 cancelled, unlimited', 'legacy row inside the window', true, null],
+    ['1 active, not finished (downloading)', 'added by RMAB', false, 'active'],
+    ['1 active, not finished (downloading)', 'legacy row inside the window', false, 'until_met'],
+    ['3 finished, own rule not met', 'added by RMAB', true, 'active'],
+    ['3 finished, own rule not met', 'legacy row inside the window', true, 'until_met'],
+  ] as const)('no added time from the client: %s, row %s, finished %s: %s', async (stateName, variant, finished, expected) => {
+    const { holdOf } = await guard();
+    const state = STATES.find((s) => s.name === stateName)!;
+    const hold = holdOf(user(state, variant), { ...check(finished), addedAt: undefined });
+    expect(hold?.kind ?? null).toBe(expected);
+  });
+
   it('a deleted request with an owned row not met keeps it, whatever its other rows say', async () => {
     const { holdOf } = await guard();
     const holder = user(STATES[6], 'added by RMAB');
@@ -207,18 +226,22 @@ describe('torrentHolds', () => {
 });
 
 describe('markOtherRowsRemoved', () => {
+  const HOLDS_READ_AT = new Date('2026-10-02T12:00:00Z');
+
   it.each([
     ['qbittorrent', { OR: [{ downloadClient: null }, { downloadClient: '' }, { downloadClient: 'qbittorrent' }] }],
     ['transmission', { downloadClient: 'transmission' }],
   ])('marks the other requests\' selected live rows for the hash recorded for %s', async (clientType, client) => {
     const { markOtherRowsRemoved } = await guard();
     prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 2 });
-    await expect(markOtherRowsRemoved('req-a', HEX, clientType)).resolves.toBe(2);
+    await expect(markOtherRowsRemoved('req-a', HEX, clientType, HOLDS_READ_AT)).resolves.toBe(2);
     expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith({
       where: {
         requestId: { not: 'req-a' },
         selected: true,
         torrentHash: { in: expect.arrayContaining([HEX, HEX.toUpperCase(), B32]) },
+        // A grab that lands after the holds were read (after the client delete) keeps its row live
+        createdAt: { lte: HOLDS_READ_AT },
         AND: [{ OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }] }, client],
       },
       data: { downloadStatus: 'removed' },
@@ -227,7 +250,7 @@ describe('markOtherRowsRemoved', () => {
 
   it('nothing without a hash', async () => {
     const { markOtherRowsRemoved } = await guard();
-    await expect(markOtherRowsRemoved('req-a', null, 'qbittorrent')).resolves.toBe(0);
+    await expect(markOtherRowsRemoved('req-a', null, 'qbittorrent', HOLDS_READ_AT)).resolves.toBe(0);
     expect(prismaMock.downloadHistory.updateMany).not.toHaveBeenCalled();
   });
 });

@@ -33,16 +33,20 @@ export interface Fixture {
 
 type Where = Record<string, unknown>;
 
-/** Enough of Prisma's `where` for the shared-torrent queries: equality, `not`, `in`, `OR`, `AND` */
+/**
+ * Enough of Prisma's `where` for the shared-torrent queries: equality, `not`, `in`, `lte`, `OR`, `AND`.
+ * As in SQL, `{ not: x }` and `{ lte: t }` never match NULL.
+ */
 function matches(value: Record<string, unknown>, where: Where): boolean {
   return Object.entries(where).every(([key, cond]) => {
     if (key === 'OR') return (cond as Where[]).some((c) => matches(value, c));
     if (key === 'AND') return (cond as Where[]).every((c) => matches(value, c));
     const actual = value[key] ?? null;
     if (cond !== null && typeof cond === 'object' && !(cond instanceof Date)) {
-      const c = cond as { not?: unknown; in?: unknown[] };
+      const c = cond as { not?: unknown; in?: unknown[]; lte?: Date };
       if ('in' in c) return (c.in ?? []).includes(actual);
-      if ('not' in c) return c.not === null ? actual !== null : actual !== c.not;
+      if ('not' in c) return c.not === null ? actual !== null : actual !== null && actual !== c.not;
+      if ('lte' in c) return actual instanceof Date && c.lte instanceof Date && actual.getTime() <= c.lte.getTime();
     }
     return actual === cond;
   });

@@ -82,6 +82,18 @@ describe('a soft-deleted request on the torrent (#545 a)', () => {
     expect(hardDeleted()).toEqual(['req-b']);
   });
 
+  it('a row with no recorded status (NULL) is live: it keeps the torrent, and is marked once its rule is met', async () => {
+    const client = setup([req('req-a'), req('req-b', DELETED, { ...SLOW, downloadStatus: null })]);
+    await run();
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    const again = setup([req('req-a'), req('req-b', DELETED, { downloadStatus: null })]);
+    await run();
+    expect(again.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-a', 'dh-req-b']);
+  });
+
   it('a soft-deleted candidate kept by another deleted request stays soft-deleted (probed again next run)', async () => {
     const client = setup([req('req-a', DELETED), req('req-b', DELETED, SLOW)]);
 
@@ -121,6 +133,61 @@ describe('an active request on the torrent', () => {
     await run();
 
     expect(client.deleteDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('a soft-deleted owner held for good by a takeover is logged at info on its first run only', async () => {
+    const info = vi.spyOn(console, 'log').mockImplementation(() => {});
+    setup([
+      req('req-log', DELETED),
+      req('req-log-b', { status: 'downloading' }, { downloadStatus: 'downloading', addedByRmab: false }),
+    ]);
+    const keptLines = () => info.mock.calls.map(([line]) => String(line))
+      .filter((line) => /has met seeding requirement|Skipping download deletion|Kept deleted request req-log/.test(line));
+
+    await run();
+    expect(keptLines()).toHaveLength(3);
+
+    info.mockClear();
+    const result = await run();
+    expect(keptLines()).toEqual([]);
+    expect(result.skipped).toBe(1);
+    expect(hardDeleted()).toEqual([]);
+    info.mockRestore();
+  });
+});
+
+describe('a row without a stored hash (its client id is the hash)', () => {
+  it('still asks the rule: an active request downloading the torrent keeps it', async () => {
+    const client = setup([req('req-a', {}, { torrentHash: null }), req('req-b', { status: 'downloading' }, { downloadStatus: 'downloading' })]);
+
+    await run();
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('once removed, the other requests\' rows are marked by the client id', async () => {
+    const client = setup([req('req-a', {}, { torrentHash: null }), req('req-b', CANCELLED)]);
+
+    await run();
+
+    expect(client.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-a', 'dh-req-b']);
+  });
+});
+
+describe('the other requests\' rows once the torrent is removed', () => {
+  it('a grab that lands just after the client delete keeps its row live', async () => {
+    const fixtures = [req('req-a'), req('req-b', CANCELLED)];
+    const client = setup(fixtures);
+    client.deleteDownload.mockImplementation(async () => {
+      // Another request grabs the same torrent again: its row is written after the delete
+      fixtures.push(req('req-new', { status: 'downloading' }, { downloadStatus: 'downloading', createdAt: new Date(Date.now() + 1) }));
+    });
+
+    await run();
+
+    expect(client.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-a', 'dh-req-b']);
   });
 });
 
