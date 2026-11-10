@@ -62,7 +62,7 @@ describe('Unified container stop settings', () => {
     expect(wait!).toBeGreaterThanOrEqual(SHUTDOWN_HARD_DEADLINE_MS / 1000 + 3);
   });
 
-  it(`${SUPERVISORD}: app's stopwaitsecs leaves Redis and PostgreSQL at least 2 s of a default 10 s stop`, () => {
+  it(`${SUPERVISORD}: app's stopwaitsecs leaves Redis and PostgreSQL about 2 s of a default 10 s stop`, () => {
     expect(stopWaitSecs(app)!).toBeLessThanOrEqual(DEFAULT_DOCKER_STOP_S - 2);
   });
 

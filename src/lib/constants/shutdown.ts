@@ -6,7 +6,7 @@
  * step limits end before the hard deadline, so every step's warning prints. The
  * deadline runs on node's event loop; docker/unified/app-start.sh SIGKILLs node at
  * APP_STOP_KILL_AFTER (6 s) by wall clock, and supervisord's [program:app]
- * stopwaitsecs (8) is the last backstop, which leaves Redis and PostgreSQL at least
+ * stopwaitsecs (8) is the last backstop, which leaves Redis and PostgreSQL about
  * 2 s of a 10 s stop (tests/docker/supervisord-config.test.ts checks the order).
  */
 

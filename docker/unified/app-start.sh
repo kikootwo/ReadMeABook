@@ -163,7 +163,8 @@ start_server() {
 
 # Start the server in background
 start_server
-SERVER_PID=$!
+# Keep the PID a stop already recorded: on_stop starts a background job, which changes $!
+SERVER_PID=${SERVER_PID:-$!}
 
 # =============================================================================
 # WAIT FOR SERVER READINESS
