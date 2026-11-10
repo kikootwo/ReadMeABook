@@ -679,10 +679,11 @@ export class JobQueueService {
       return await this.addJob('download_torrent', payload, { priority: 9 }); // High priority - download selected torrent
     }
     const stored: StoredTorrentFile = { omitted: true, bytes: torrentFile.data.length, infoHash: torrentFile.infoHash };
+    // Bull drops the job (and the bytes with it) once it completes or fails for good; retries before that keep it
     return await this.addJob(
       'download_torrent',
       { ...payload, torrentFile: torrentFile.data.toString('base64') },
-      { priority: 9 },
+      { priority: 9, removeOnComplete: true, removeOnFail: true },
       { ...payload, torrentFile: stored }
     );
   }

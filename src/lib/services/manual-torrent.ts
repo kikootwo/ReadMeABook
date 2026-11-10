@@ -19,7 +19,7 @@ const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
 /** Indexer label of a hand-added torrent: no indexer config matches it, so it seeds until removed in the client */
 export const MANUAL_TORRENT_INDEXER = 'Manual';
 
-export const INVALID_TORRENT_FILE_MESSAGE = 'Not a valid .torrent file';
+export const INVALID_TORRENT_FILE_MESSAGE = 'Not a valid .torrent file.';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const MAX_BASE64_CHARS = Math.ceil(MAX_UPLOADED_TORRENT_BYTES / 3) * 4;
@@ -55,10 +55,10 @@ const safeLength = (value: unknown): boolean => Number.isSafeInteger(value) && (
  * info dict, so it is refused.
  */
 export async function readUploadedTorrent(base64: string): Promise<UploadCheck> {
-  if (base64.length > MAX_BASE64_CHARS) return { ok: false, error: 'This .torrent file is larger than 2 MB' };
+  if (base64.length > MAX_BASE64_CHARS) return { ok: false, error: 'This .torrent file is larger than 2 MB.' };
   if (base64.length % 4 !== 0 || !BASE64.test(base64)) return { ok: false, error: INVALID_TORRENT_FILE_MESSAGE };
   const data = Buffer.from(base64, 'base64');
-  if (data.length > MAX_UPLOADED_TORRENT_BYTES) return { ok: false, error: 'This .torrent file is larger than 2 MB' };
+  if (data.length > MAX_UPLOADED_TORRENT_BYTES) return { ok: false, error: 'This .torrent file is larger than 2 MB.' };
 
   let parsed: ParsedTorrent;
   try {

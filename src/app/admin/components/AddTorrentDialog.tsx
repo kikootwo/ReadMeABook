@@ -58,6 +58,9 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
   const [noTorrentClient, setNoTorrentClient] = useState(false);
   const magnetRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const chooseRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const focusChooseNext = useRef(false);
 
   // Opening focuses the magnet field and checks for a torrent client (the menu mounts the dialog per opening)
   useEffect(() => {
@@ -71,6 +74,25 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
       active = false;
     };
   }, [isOpen]);
+
+  // No torrent client: the fields are disabled, so focus moves to Cancel instead of falling to the page
+  useEffect(() => {
+    if (noTorrentClient) cancelRef.current?.focus();
+  }, [noTorrentClient]);
+
+  // After Remove, focus returns to the file button once it is back
+  useEffect(() => {
+    if (!file && focusChooseNext.current) {
+      focusChooseNext.current = false;
+      chooseRef.current?.focus();
+    }
+  }, [file]);
+
+  const removeFile = () => {
+    focusChooseNext.current = true;
+    setError(null);
+    setFile(null);
+  };
 
   const handleClose = () => {
     if (!sending) onClose();
@@ -101,10 +123,11 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
       const data = (await response.json().catch(() => null)) as { message?: string } | null;
       if (!response.ok) throw new Error(data?.message || `Adding the torrent failed (HTTP ${response.status}).`);
 
-      toast.success('Torrent added. Downloading now.');
-      await mutate((key: unknown) => typeof key === 'string' && key.includes('/api/admin/requests'));
-      await mutate((key: unknown) => typeof key === 'string' && key.includes('/api/admin/metrics'));
+      // Close and confirm first; the lists refresh in the background (a slow list never holds the dialog)
+      toast.success('Torrent added.');
       onClose();
+      void mutate((key: unknown) => typeof key === 'string' && key.includes('/api/admin/requests'));
+      void mutate((key: unknown) => typeof key === 'string' && key.includes('/api/admin/metrics'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Adding the torrent failed.');
     } finally {
@@ -168,7 +191,7 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
               <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{formatSize(file.size)}</span>
               <button
                 type="button"
-                onClick={() => setFile(null)}
+                onClick={removeFile}
                 disabled={sending}
                 className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex-shrink-0 disabled:opacity-50"
               >
@@ -177,6 +200,7 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
             </div>
           ) : (
             <button
+              ref={chooseRef}
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={blocked || magnet.trim() !== ''}
@@ -190,11 +214,11 @@ export function AddTorrentDialog({ isOpen, onClose, requestId, bookTitle }: AddT
         {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400 break-words">{error}</p>}
 
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          ReadMeABook never removes torrents added here; they seed until you remove them in your client.
+          Once it finishes, a torrent added here seeds until you remove it in your client.
         </p>
 
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-          <button type="button" onClick={handleClose} disabled={sending} className={SECONDARY_BUTTON_CLASS}>
+          <button ref={cancelRef} type="button" onClick={handleClose} disabled={sending} className={SECONDARY_BUTTON_CLASS}>
             Cancel
           </button>
           <button

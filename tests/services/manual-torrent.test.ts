@@ -45,7 +45,6 @@ describe('checkAddableMagnet', () => {
   it.each([
     ['40 hex', `magnet:?xt=urn:btih:${HEX}`],
     ['32 base32', `magnet:?xt=urn:btih:${B32}`],
-    ['upper-case scheme and urn', `MAGNET:?XT=URN:BTIH:${HEX}`],
     ['an xt.1 btih', `magnet:?xt.1=urn:btih:${HEX}`],
     ['a hybrid (one btih, one btmh)', `magnet:?xt=urn:btih:${HEX}&xt=urn:btmh:${V2}`],
   ])('accepts %s', async (_label, magnet) => {
@@ -57,29 +56,41 @@ describe('checkAddableMagnet', () => {
     await expect(checkAddableMagnet(magnet)).resolves.toEqual({ ok: true, value: magnet });
   });
 
+  it('sends an upper-case scheme, xt and urn lower-cased (every client tests for "magnet:")', async () => {
+    await expect(checkAddableMagnet(`MAGNET:?XT=URN:BTIH:${HEX}&dn=Book`)).resolves.toEqual({ ok: true, value: `magnet:?xt=urn:btih:${HEX}&dn=Book` });
+  });
+
+  it('reads nested &amp;amp; down to & (one torrent stays accepted)', async () => {
+    await expect(checkAddableMagnet(`magnet:?xt=urn:btih:${HEX}&amp;amp;dn=Book`)).resolves.toEqual({ ok: true, value: `magnet:?xt=urn:btih:${HEX}&dn=Book` });
+  });
+
   it('reads &amp; as & (what Transmission and Deluge are sent as well)', async () => {
     await expect(checkAddableMagnet(`magnet:?xt=urn:btih:${HEX}&amp;tr=udp%3A%2F%2Ft.invalid`))
       .resolves.toEqual({ ok: true, value: `magnet:?xt=urn:btih:${HEX}&tr=udp%3A%2F%2Ft.invalid` });
   });
 
   it.each([
-    ['an http link', 'http://prowlarr:9696/1/download?link=abc', 'This is not a magnet link'],
-    ['an empty string', '', 'Paste a magnet link'],
-    ['a number', 42, 'Paste a magnet link'],
-    ['no xt', 'magnet:?dn=Book', 'This magnet link has no info hash'],
-    ['39 hex', `magnet:?xt=urn:btih:${HEX.slice(1)}`, "This magnet link's info hash is not valid"],
-    ['41 hex', `magnet:?xt=urn:btih:${HEX}c`, "This magnet link's info hash is not valid"],
-    ['31 base32', `magnet:?xt=urn:btih:${B32.slice(1)}`, "This magnet link's info hash is not valid"],
-    ['33 base32', `magnet:?xt=urn:btih:${B32}A`, "This magnet link's info hash is not valid"],
-    ['btmh only (pure v2)', `magnet:?xt=urn:btmh:${V2}`, 'This magnet link has no BitTorrent v1 hash (btih); use the .torrent file'],
-    ['two btih (xt and xt.1)', `magnet:?xt=urn:btih:${HEX}&xt.1=urn:btih:${B32}`, 'This magnet link names more than one torrent'],
-    ['two btmh', `magnet:?xt=urn:btih:${HEX}&xt=urn:btmh:${V2}&xt.2=urn:btmh:${V2}`, 'This magnet link names more than one torrent'],
-    ['a second btih hidden in a tracker URL', `magnet:?xt=urn:btih:${HEX}&tr=http://t.invalid/a?xt=urn:btih:${B32}`, 'This magnet link names more than one torrent'],
-    ['a newline', `magnet:?xt=urn:btih:${HEX}\nmagnet:?xt=urn:btih:${B32}`, 'This is not a magnet link'],
-    ['a space', `magnet:?xt=urn:btih:${HEX}&dn=A Book`, 'This is not a magnet link'],
-    ['a NUL', `magnet:?xt=urn:btih:${HEX}\u0000`, 'This is not a magnet link'],
-    ['a DEL', `magnet:?xt=urn:btih:${HEX}\u007f`, 'This is not a magnet link'],
-    ['over 16 KiB', `magnet:?xt=urn:btih:${HEX}&tr=${'a'.repeat(16 * 1024)}`, 'This magnet link is too long'],
+    ['an http link', 'http://prowlarr:9696/1/download?link=abc', 'This is not a magnet link.'],
+    ['an empty string', '', 'Paste a magnet link.'],
+    ['a number', 42, 'Paste a magnet link.'],
+    ['no xt', 'magnet:?dn=Book', 'This magnet link has no info hash.'],
+    ['39 hex', `magnet:?xt=urn:btih:${HEX.slice(1)}`, "This magnet link's info hash is not valid."],
+    ['41 hex', `magnet:?xt=urn:btih:${HEX}c`, "This magnet link's info hash is not valid."],
+    ['31 base32', `magnet:?xt=urn:btih:${B32.slice(1)}`, "This magnet link's info hash is not valid."],
+    ['33 base32', `magnet:?xt=urn:btih:${B32}A`, "This magnet link's info hash is not valid."],
+    ['btmh only (pure v2)', `magnet:?xt=urn:btmh:${V2}`, 'ReadMeABook needs a torrent with a v1 hash.'],
+    ['two btih (xt and xt.1)', `magnet:?xt=urn:btih:${HEX}&xt.1=urn:btih:${B32}`, 'This magnet link names more than one torrent.'],
+    ['two btmh', `magnet:?xt=urn:btih:${HEX}&xt=urn:btmh:${V2}&xt.2=urn:btmh:${V2}`, 'This magnet link names more than one torrent.'],
+    ['a second btih hidden in a tracker URL', `magnet:?xt=urn:btih:${HEX}&tr=http://t.invalid/a?xt=urn:btih:${B32}`, 'This magnet link names more than one torrent.'],
+    ['a newline', `magnet:?xt=urn:btih:${HEX}\nmagnet:?xt=urn:btih:${B32}`, 'This is not a magnet link.'],
+    ['a space', `magnet:?xt=urn:btih:${HEX}&dn=A Book`, 'This is not a magnet link.'],
+    ['a NUL', `magnet:?xt=urn:btih:${HEX}\u0000`, 'This is not a magnet link.'],
+    ['a DEL', `magnet:?xt=urn:btih:${HEX}\u007f`, 'This is not a magnet link.'],
+    ['a second btih behind a double-escaped &amp;amp;', `magnet:?xt=urn:btih:${HEX}&amp;amp;xt=urn:btih:${B32}`, 'This magnet link names more than one torrent.'],
+    ['a second btih with a percent-encoded urn', `magnet:?xt=urn:btih:${HEX}&xt=urn%3Abtih%3A${B32}`, 'This magnet link names more than one torrent.'],
+    ['a second xt with a percent-encoded &', `magnet:?xt=urn:btih:${HEX}%26xt=urn:btih:${B32}`, 'This magnet link names more than one torrent.'],
+    ['its only btih percent-encoded (RMAB could not read it as sent)', `magnet:?xt=urn%3Abtih%3A${HEX}`, "This magnet link's info hash is not valid."],
+    ['over 16 KiB', `magnet:?xt=urn:btih:${HEX}&tr=${'a'.repeat(16 * 1024)}`, 'This magnet link is too long.'],
   ])('refuses %s', async (_label, magnet, error) => {
     await expect(checkAddableMagnet(magnet)).resolves.toEqual({ ok: false, error });
   });
@@ -120,13 +131,13 @@ describe('readUploadedTorrent', () => {
     ['base64 of a length that is not a multiple of 4', () => torrentFile(PLAIN).toString('base64').replace(/=+$/, '').slice(0, -1)],
     ['200,000 levels of nesting', () => b64(`${'l'.repeat(200_000)}${'e'.repeat(200_000)}`)],
     ['a dict with about 150,000 keys', () => b64(`d${Array.from({ length: 150_000 }, (_, i) => `7:k${String(i).padStart(6, '0')}i0e`).join('')}e`)],
-  ])('refuses %s with "Not a valid .torrent file"', async (_label, input) => {
-    await expect(readUploadedTorrent(input())).resolves.toEqual({ ok: false, error: 'Not a valid .torrent file' });
+  ])('refuses %s with "Not a valid .torrent file."', async (_label, input) => {
+    await expect(readUploadedTorrent(input())).resolves.toEqual({ ok: false, error: 'Not a valid .torrent file.' });
   });
 
   it('refuses a file over 2 MiB before decoding it', async () => {
     const over = Buffer.alloc(2 * 1024 * 1024 + 1, 0x61).toString('base64');
-    await expect(readUploadedTorrent(over)).resolves.toEqual({ ok: false, error: 'This .torrent file is larger than 2 MB' });
+    await expect(readUploadedTorrent(over)).resolves.toEqual({ ok: false, error: 'This .torrent file is larger than 2 MB.' });
   });
 });
 

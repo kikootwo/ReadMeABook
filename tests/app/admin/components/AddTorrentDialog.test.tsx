@@ -46,11 +46,11 @@ describe('AddTorrentDialog', () => {
     expect(screen.getByText('Generated Title')).toBeInTheDocument();
     expect(document.activeElement).toBe(magnetField());
     expect(addButton()).toBeDisabled();
-    expect(screen.getByText('ReadMeABook never removes torrents added here; they seed until you remove them in your client.')).toBeInTheDocument();
+    expect(screen.getByText('Once it finishes, a torrent added here seeds until you remove it in your client.')).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/settings/download-clients'));
   });
 
-  it('a magnet: the file button is disabled; Add sends the trimmed magnet, then toasts, refreshes and closes', async () => {
+  it('a magnet: the file button is disabled; Add sends the trimmed magnet, then toasts, closes and refreshes', async () => {
     const onClose = renderDialog();
     fireEvent.change(magnetField(), { target: { value: '  magnet:?xt=urn:btih:abc  ' } });
     expect(chooseButton()).toBeDisabled();
@@ -61,7 +61,7 @@ describe('AddTorrentDialog', () => {
     const [, init] = addCall()!;
     expect(init).toMatchObject({ method: 'POST', headers: { 'Content-Type': 'application/json' } });
     expect(JSON.parse(init.body)).toEqual({ magnet: 'magnet:?xt=urn:btih:abc' });
-    expect(toastMock.success).toHaveBeenCalledWith('Torrent added. Downloading now.');
+    expect(toastMock.success).toHaveBeenCalledWith('Torrent added.');
     const filters = mutateMock.mock.calls.map(([filter]) => filter as unknown as (key: unknown) => boolean);
     expect(filters.some((f) => f('/api/admin/requests/recent?limit=50'))).toBe(true);
     expect(filters.some((f) => f('/api/admin/metrics'))).toBe(true);
@@ -82,6 +82,31 @@ describe('AddTorrentDialog', () => {
     fireEvent.click(addButton());
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(JSON.parse(addCall()![1].body)).toEqual({ torrentFile: Buffer.from(bytes).toString('base64') });
+  });
+
+  it('closes and toasts before the lists finish refreshing (a slow list never holds the dialog open)', async () => {
+    mutateMock.mockImplementation(() => new Promise(() => undefined)); // the refreshes never settle
+    const onClose = renderDialog();
+    fireEvent.change(magnetField(), { target: { value: 'magnet:?xt=urn:btih:abc' } });
+    fireEvent.click(addButton());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(toastMock.success).toHaveBeenCalledWith('Torrent added.');
+    expect(mutateMock).toHaveBeenCalledTimes(2);
+    expect(toastMock.success.mock.invocationCallOrder[0]).toBeLessThan(mutateMock.mock.invocationCallOrder[0]);
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(mutateMock.mock.invocationCallOrder[0]);
+    mutateMock.mockImplementation(async () => undefined);
+  });
+
+  it('Remove clears the old error and puts focus back on the file button', async () => {
+    addResponse = () => json(400, { message: 'Not a valid .torrent file.' });
+    renderDialog();
+    pickFile(new File([new Uint8Array([1, 2, 3])], 'generated.torrent'));
+    fireEvent.click(addButton());
+    expect(await screen.findByText('Not a valid .torrent file.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(screen.queryByText('Not a valid .torrent file.')).toBeNull();
+    expect(document.activeElement).toBe(chooseButton());
   });
 
   it('a file over 2 MB is refused in the dialog and never sent', () => {
@@ -111,7 +136,7 @@ describe('AddTorrentDialog', () => {
 
   it.each([
     ['a proxy 413', () => ({ ok: false, status: 413, json: async () => { throw new Error('html'); } }), 'This file is larger than your server accepts.'],
-    ['the server\'s message', () => json(400, { message: 'Not a valid .torrent file' }), 'Not a valid .torrent file'],
+    ['the server\'s message', () => json(400, { message: 'Not a valid .torrent file.' }), 'Not a valid .torrent file.'],
     ['a non-JSON error', () => ({ ok: false, status: 502, json: async () => { throw new Error('html'); } }), 'Adding the torrent failed (HTTP 502).'],
   ])('shows %s inline and stays open', async (_label, response, message) => {
     addResponse = response;
@@ -128,5 +153,6 @@ describe('AddTorrentDialog', () => {
     expect(await screen.findByText('No torrent client is set up. Add qBittorrent, Transmission or Deluge in Settings > Download Clients.')).toBeInTheDocument();
     expect(magnetField()).toBeDisabled();
     expect(chooseButton()).toBeDisabled();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
   });
 });

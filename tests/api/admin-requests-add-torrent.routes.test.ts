@@ -44,8 +44,9 @@ const prismaMock = vi.hoisted(() => ({
       state.request && state.request.id === where.id && state.request.deletedAt === null ? { ...state.request } : null
     )),
     // Compare-and-set on the fixture row: only a row still in the status read matches
-    updateMany: vi.fn(async ({ where, data }: { where: { id: string; status: string }; data: Record<string, unknown> }) => {
+    updateMany: vi.fn(async ({ where, data }: { where: { id: string; status: string; deletedAt?: null }; data: Record<string, unknown> }) => {
       if (!state.request || state.request.id !== where.id || state.request.status !== where.status) return { count: 0 };
+      if ('deletedAt' in where && state.request.deletedAt !== null) return { count: 0 };
       Object.assign(state.request, data);
       return { count: 1 };
     }),
@@ -131,6 +132,20 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
       expect(requestCalls()).toBe(0);
     });
 
+    it('a user-role API token: 403 from the allowlist, body unread, no request query', async () => {
+      prismaMock.apiToken.findUnique.mockResolvedValueOnce({
+        id: 't2', tokenPrefix: 'rmab_usr', expiresAt: null, role: 'user',
+        tokenUser: { id: 'u-user', plexId: 'local-user', plexUsername: 'user', role: 'user', deletedAt: null, registrationStatus: 'approved' },
+      });
+      const req = post({ magnet: MAGNET }, { token: 'rmab_userxyz' });
+      const { status, payload } = await call(req);
+      expect(status).toBe(403);
+      expect(payload.message).toBe('This endpoint is not available via API token authentication');
+      expect(req.bodyUsed).toBe(false);
+      expect(requestCalls()).toBe(0);
+      expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    });
+
     it.each(['req-1', 'no-such-request'])('an admin API token: 403 from the allowlist, before the route runs (id %s)', async (id) => {
       const req = post({ magnet: MAGNET }, { token: 'rmab_abcdef', id });
       const { status, payload } = await call(req, id);
@@ -170,10 +185,10 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
     });
 
     it.each([
-      ['malformed base64', { torrentFile: '!!!not base64!!!' }, 'Not a valid .torrent file'],
-      ['20 raw bytes', { torrentFile: Buffer.alloc(20, 7).toString('base64') }, 'Not a valid .torrent file'],
-      ['an http link as magnet', { magnet: 'http://prowlarr:9696/1/download' }, 'This is not a magnet link'],
-      ['a magnet with two torrents', { magnet: `magnet:?xt=urn:btih:${HEX}&xt.1=urn:btih:${'d'.repeat(40)}` }, 'This magnet link names more than one torrent'],
+      ['malformed base64', { torrentFile: '!!!not base64!!!' }, 'Not a valid .torrent file.'],
+      ['20 raw bytes', { torrentFile: Buffer.alloc(20, 7).toString('base64') }, 'Not a valid .torrent file.'],
+      ['an http link as magnet', { magnet: 'http://prowlarr:9696/1/download' }, 'This is not a magnet link.'],
+      ['a magnet with two torrents', { magnet: `magnet:?xt=urn:btih:${HEX}&xt.1=urn:btih:${'d'.repeat(40)}` }, 'This magnet link names more than one torrent.'],
     ])('%s: 400 with a plain message, no job', async (_label, body, message) => {
       const { status, payload } = await call(post(body));
       expect(status).toBe(400);
@@ -201,20 +216,20 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
       state.request = requestRow({ status });
       const { status: code, payload } = await call(post({ magnet: MAGNET }));
       expect(code).toBe(200);
-      expect(payload.message).toBe('Torrent added. Downloading now.');
+      expect(payload.message).toBe('Torrent added.');
       expect(state.request).toMatchObject({ status: 'downloading', progress: 0, errorMessage: null, autoRerequestCount: 0 });
       expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
     });
 
     it.each([
-      ['awaiting_approval', 'Approve this request before adding a torrent'],
-      ['denied', 'This request was denied'],
-      ['searching', 'A torrent can only be added to a pending, failed or waiting request (this one is searching)'],
-      ['downloading', 'A torrent can only be added to a pending, failed or waiting request (this one is downloading)'],
-      ['processing', 'A torrent can only be added to a pending, failed or waiting request (this one is processing)'],
-      ['downloaded', 'A torrent can only be added to a pending, failed or waiting request (this one is downloaded)'],
-      ['available', 'A torrent can only be added to a pending, failed or waiting request (this one is available)'],
-      ['cancelled', 'A torrent can only be added to a pending, failed or waiting request (this one is cancelled)'],
+      ['awaiting_approval', 'Approve this request before adding a torrent.'],
+      ['denied', 'This request was denied.'],
+      ['searching', 'A torrent can only be added to a pending, failed or waiting request (this one is searching).'],
+      ['downloading', 'A torrent can only be added to a pending, failed or waiting request (this one is downloading).'],
+      ['processing', 'A torrent can only be added to a pending, failed or waiting request (this one is processing).'],
+      ['downloaded', 'A torrent can only be added to a pending, failed or waiting request (this one is downloaded).'],
+      ['available', 'A torrent can only be added to a pending, failed or waiting request (this one is available).'],
+      ['cancelled', 'A torrent can only be added to a pending, failed or waiting request (this one is cancelled).'],
     ])('%s: 409, no job', async (status, message) => {
       state.request = requestRow({ status });
       const { status: code, payload } = await call(post({ magnet: MAGNET }));
@@ -239,7 +254,20 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
       prismaMock.request.updateMany.mockResolvedValueOnce({ count: 0 });
       const { status, payload } = await call(post({ magnet: MAGNET }));
       expect(status).toBe(409);
-      expect(payload.message).toBe('This request changed; refresh and try again');
+      expect(payload.message).toBe('This request changed; refresh and try again.');
+      expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    });
+
+    it('a request deleted between the read and the claim: 409, no job (the claim also matches deletedAt: null)', async () => {
+      prismaMock.request.findFirst.mockImplementationOnce(async () => {
+        const read = { ...state.request! };
+        state.request!.deletedAt = new Date(); // soft-deleted right after the read
+        return read as never;
+      });
+      const { status, payload } = await call(post({ magnet: MAGNET }));
+      expect(status).toBe(409);
+      expect(payload.message).toBe('This request changed; refresh and try again.');
+      expect(state.request).toMatchObject({ status: 'failed' });
       expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
     });
 
@@ -249,10 +277,11 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
       expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
     });
 
-    it('the queue add fails: the claim is undone and the answer is 500', async () => {
+    it('the queue add fails: everything the claim changed is undone and the answer is 500', async () => {
+      state.request = requestRow({ autoRerequestCount: 2 });
       jobQueueMock.addDownloadJob.mockRejectedValueOnce(new Error('redis down'));
       expect((await call(post({ magnet: MAGNET }))).status).toBe(500);
-      expect(state.request).toMatchObject({ status: 'failed', progress: 30, errorMessage: 'old failure' });
+      expect(state.request).toMatchObject({ status: 'failed', progress: 30, errorMessage: 'old failure', autoRerequestCount: 2 });
     });
   });
 
@@ -263,6 +292,12 @@ describe('POST /api/admin/requests/[id]/add-torrent', () => {
       expect([id, audiobook, alternates, chain, file]).toEqual(['req-1', { id: 'ab-1', title: 'Generated Title', author: 'Generated Author' }, [], undefined, undefined]);
       expect(torrent).toMatchObject({ indexer: 'Manual', title: 'A Book', downloadUrl: MAGNET, guid: MAGNET, infoHash: HEX, protocol: 'torrent' });
       expect((torrent as { indexerId?: number }).indexerId).toBeUndefined();
+    });
+
+    it('an upper-case MAGNET: scheme is queued lower-cased (what every client tests for)', async () => {
+      expect((await call(post({ magnet: `MAGNET:?XT=URN:BTIH:${HEX}&dn=A%20Book` })))).toMatchObject({ status: 200 });
+      const torrent = jobQueueMock.addDownloadJob.mock.calls[0][2] as Record<string, unknown>;
+      expect(torrent).toMatchObject({ downloadUrl: `magnet:?xt=urn:btih:${HEX}&dn=A%20Book`, guid: `magnet:?xt=urn:btih:${HEX}&dn=A%20Book`, infoHash: HEX });
     });
 
     it('a .torrent file: the bytes go beside the release (bare magnet), never on it', async () => {

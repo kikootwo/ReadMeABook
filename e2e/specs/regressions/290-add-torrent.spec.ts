@@ -6,14 +6,18 @@
  *   0  phm (admin) fails on its only listed release -> `failed`; martian (admin) and artemis (a local
  *      user) find nothing listed -> `awaiting_search`
  *   1  refusals on artemis: the user's session, the user's API token and an admin's API token get the
- *      same 403 for a real id and a made-up one; over 3 MiB (declared and chunked) 413; bad base64 400;
- *      no enabled torrent client 409 (dialog notice shot); no job row, status unchanged after each
- *   2  phm: menu -> dialog -> paste the unlisted magnet (shots); fake qBittorrent adds that hash; Library
- *      history reads "Found on Manual" while downloading (shot); downloaded
+ *      same 403 for a real id and a made-up one; over 3 MiB (declared and chunked) 413; bad base64 and
+ *      files that are not well-formed (a string past the end, an unclosed list) 400; no enabled torrent
+ *      client 409 (dialog notice shot); no job row, status unchanged after each
+ *   2  phm: menu (after Adjust Search Terms) -> dialog -> paste the unlisted magnet (shots); toast "Torrent
+ *      added." (shot); fake qBittorrent adds that hash; the magnet job stays in Redis (control: queue
+ *      defaults); Library history reads "Found on Manual" while downloading (shot); downloaded
  *   3  martian with a pre-existing `Books` category at /other: a bad file shows the server's error, then
  *      the generated .torrent uploads; the fake gets the same sha256 under <hash>.torrent, category Books,
- *      autoTMM=false, no create/edit call, Books still /other; jobs row holds a placeholder; downloaded
- *   4  artemis: dialog at 375 dark (shot); two submits at once -> one 200, one 409, one job, one add
+ *      autoTMM=false, no create/edit call, Books still /other; jobs row holds a placeholder; its Bull job
+ *      (the bytes) is gone from Redis once completed; downloaded
+ *   4  artemis: dialog at 375 dark (shot); two submits at once of an upper-case `MAGNET:` -> one 200, one
+ *      409, one job, one add (the fake reads only a lower-case `xt=urn:btih:` magnet)
  *   5  the local user: no Add Torrent on My Requests or the Library detail (shot)
  *   afterAll: qBittorrent enabled with category readmeabook, `Books` removed, test tokens revoked
  */
@@ -26,13 +30,15 @@ import { QBIT, VIEWS, adminPage, lastSeq, callsSince, putCategory } from './46-h
 import { viewer, contextFor, card, type Viewer } from './177-library-page-helpers';
 import {
   DIR, ADD_PATH, loadScenario, releaseTorrent, addTorrent, addTorrentChunked, requestStatus, jobCount, waitStatus,
-  manualHistory, storedFilePayload, addsFor, openActions, settle,
+  manualHistory, storedFilePayload, addsFor, openActions, settle, downloadJobInQueue,
 } from './290-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 test.describe.configure({ mode: 'serial' });
 
 const NO_CLIENT = 'No torrent client is set up. Add qBittorrent, Transmission or Deluge in Settings > Download Clients.';
+const NOT_A_TORRENT = 'Not a valid .torrent file.';
+const ADDED = 'Torrent added.';
 const MIB = 1024 * 1024;
 const ids: Record<'phm' | 'martian' | 'artemis', string> = { phm: '', martian: '', artemis: '' };
 const titles: Record<string, string> = {};
@@ -119,8 +125,15 @@ test('1 refusals leave no job and the status as it was', async ({ browser }) => 
   c.check(`over 3 MiB with Content-Length: 413 (${declared.status})`, declared.status === 413);
   c.check(`over 3 MiB chunked: 413 (${chunked.status})`, chunked.status === 413);
   unchanged('413');
-  c.check(`bad base64: 400 ${JSON.stringify(badBase64.body)}`, badBase64.status === 400 && (badBase64.body as { message?: string })?.message === 'Not a valid .torrent file');
+  c.check(`bad base64: 400 ${JSON.stringify(badBase64.body)}`, badBase64.status === 400 && (badBase64.body as { message?: string })?.message === NOT_A_TORRENT);
   unchanged('400');
+  // Files that are not well-formed
+  for (const [label, bencode] of [['a string running past the end', 'd4:info9:abce'], ['an unclosed list', 'l4:spam']]) {
+    const malformed = await addTorrent(admin, id, { torrentFile: Buffer.from(bencode).toString('base64') });
+    c.save(`400-${label.replace(/\W+/g, '-')}.json`, malformed);
+    c.check(`${label}: 400 ${JSON.stringify(malformed.body)}`, malformed.status === 400 && (malformed.body as { message?: string })?.message === NOT_A_TORRENT);
+    unchanged(label);
+  }
 
   const disable = await admin.raw('PUT', `/api/admin/settings/download-clients/${QBIT}`, { enabled: false });
   c.check(`qBittorrent disabled (${disable.status})`, disable.ok, 'control');
@@ -151,6 +164,9 @@ test('2 an admin pastes a magnet on a failed request', async ({ browser }) => {
   const { page, close } = await adminPage(browser, VIEWS.light);
   await openActions(page, titles.phm);
   await expect(page.getByRole('menuitem', { name: 'Add Torrent' })).toBeVisible();
+  const items = (await page.getByRole('menuitem').allTextContents()).map((t) => t.trim());
+  const search = items.indexOf('Interactive Search');
+  c.check(`menu order ${JSON.stringify(items)}`, search >= 0 && items[search + 1] === 'Adjust Search Terms' && items[search + 2] === 'Add Torrent');
   await settle(page);
   await snap(page, `${DIR}/shots`, 'menu-add-torrent-1280-light');
   await page.getByRole('menuitem', { name: 'Add Torrent' }).click();
@@ -176,8 +192,9 @@ test('2 an admin pastes a magnet on a failed request', async ({ browser }) => {
   const res = await answer;
   c.save('answer.json', { status: res.status(), body: await res.json() });
   c.check(`200 (${res.status()})`, res.status() === 200);
-  await expect(page.getByText('Torrent added. Downloading now.')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(ADDED, { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(field).toHaveCount(0);
+  await snap(page, `${DIR}/shots`, 'dialog-toast-added-1280-light');
 
   const status = await waitStatus(id, ['downloading'], 'phm', 60_000);
   const adds = await waitFor('fake qBittorrent add', async () => ((await addsFor(since, release.infoHash)).added.length ? addsFor(since, release.infoHash) : null), { timeoutMs: 60_000 });
@@ -188,6 +205,9 @@ test('2 an admin pastes a magnet on a failed request', async ({ browser }) => {
   c.save('download-history.txt', `${history.join('\n')}\n`);
   const manual = history.at(-1)?.split('|') ?? [];
   c.check(`history: indexer Manual, no indexer id, the hash (${history.at(-1)})`, status === 'downloading' && manual[0] === 'Manual' && manual[1] === '' && manual[2] === release.infoHash);
+  const magnetJob = await waitFor('magnet download job completed', async () => (downloadJobInQueue(id).status === 'completed' ? downloadJobInQueue(id) : null), { timeoutMs: 30_000 });
+  c.save('queue-job.json', magnetJob);
+  c.check(`a magnet job keeps the queue defaults: still in Redis once completed (${JSON.stringify(magnetJob)})`, !!magnetJob.bullId && magnetJob.inRedis, 'control');
 
   await page.goto('/library');
   await card(page, titles.phm).first().click();
@@ -218,12 +238,14 @@ test('3 an admin uploads a .torrent; a pre-existing custom category is left as i
   await page.getByTestId('add-torrent-file').setInputFiles({ name: 'broken.torrent', mimeType: 'application/x-bittorrent', buffer: Buffer.from('d4:infoi1ee') });
   await dialogAdd(page).click();
   // The dialog's own alert (Next's route announcer is an empty role=alert too)
-  await expect(page.locator('p[role="alert"]')).toHaveText('Not a valid .torrent file', { timeout: 15_000 });
+  await expect(page.locator('p[role="alert"]')).toHaveText(NOT_A_TORRENT, { timeout: 15_000 });
   c.check(`bad file: no job, still awaiting_search (${jobCount(id)}, ${requestStatus(id)})`, jobCount(id) === jobsBefore && requestStatus(id) === 'awaiting_search');
   await settle(page);
   await snap(page, `${DIR}/shots`, 'dialog-error-bad-file-1280-light');
 
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.locator('p[role="alert"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Choose .torrent file' })).toBeFocused();
   await page.getByTestId('add-torrent-file').setInputFiles({ name: 'fixture-book-two.torrent', mimeType: 'application/x-bittorrent', buffer: bytes });
   await expect(page.getByText('fixture-book-two.torrent')).toBeVisible();
   await expect(page.getByLabel('Magnet link')).toBeDisabled();
@@ -233,7 +255,7 @@ test('3 an admin uploads a .torrent; a pre-existing custom category is left as i
   const res = await answer;
   c.save('answer.json', { status: res.status(), body: await res.json() });
   c.check(`200 (${res.status()})`, res.status() === 200);
-  await expect(page.getByText('Torrent added. Downloading now.')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(ADDED, { exact: true })).toBeVisible({ timeout: 15_000 });
   await close();
 
   const adds = await waitFor('fake qBittorrent upload', async () => ((await addsFor(since, release.infoHash)).added.length ? addsFor(since, release.infoHash) : null), { timeoutMs: 60_000 });
@@ -251,6 +273,9 @@ test('3 an admin uploads a .torrent; a pre-existing custom category is left as i
   const payload = storedFilePayload(id, release.torrentFile!);
   c.save('job-payload.json', payload);
   c.check(`jobs row: placeholder ${payload.stored}, no row holds the bytes (${payload.rowsHoldingBytes})`, JSON.parse(payload.stored).omitted === true && payload.rowsHoldingBytes === 0);
+  const fileJob = await waitFor('file download job completed', async () => (downloadJobInQueue(id).status === 'completed' ? downloadJobInQueue(id) : null), { timeoutMs: 30_000 });
+  c.save('queue-job.json', fileJob);
+  c.check(`the bytes are gone from the queue: Bull job ${fileJob.bullId} no longer in Redis once completed (${JSON.stringify(fileJob)})`, !!fileJob.bullId && !fileJob.inRedis);
   const history = await manualHistory(id);
   c.save('download-history.txt', `${history.join('\n')}\n`);
   c.check(`history: Manual, the file's hash (${history.at(-1)})`, history.at(-1)?.startsWith(`Manual||${release.infoHash}|`) === true);
@@ -272,7 +297,9 @@ test('4 a double submit queues one download', async ({ browser }) => {
   await close();
 
   const since = await lastSeq();
-  const answers = await Promise.all([addTorrent(admin, id, { magnet: release.magnet }), addTorrent(admin, id, { magnet: release.magnet })]);
+  const upper = release.magnet.replace(/^magnet:\?xt=urn:btih:/i, 'MAGNET:?XT=URN:BTIH:');
+  c.check(`sent upper-case (${upper.slice(0, 20)})`, upper.startsWith('MAGNET:?XT=URN:BTIH:'), 'control');
+  const answers = await Promise.all([addTorrent(admin, id, { magnet: upper }), addTorrent(admin, id, { magnet: upper })]);
   c.save('answers.json', answers);
   const statuses = answers.map((a) => a.status).sort();
   c.check(`one 200, one 409 (${statuses.join(',')})`, statuses[0] === 200 && statuses[1] === 409);
@@ -280,6 +307,8 @@ test('4 a double submit queues one download', async ({ browser }) => {
   const adds = await addsFor(since, release.infoHash);
   c.save('qbit-adds.json', adds.adds.map((r) => ({ seq: r.seq, added: r.added, duplicates: r.duplicates })));
   c.check(`one download job (${jobCount(id, 'download_torrent')})`, jobCount(id, 'download_torrent') === 1);
+  // RMAB sends a magnet as `urls` only when it starts with "magnet:", and the fake reads only a lower-case
+  // `xt=urn:btih:`: an add of this hash means the upper-case paste reached qBittorrent lower-cased
   c.check(`one add, no repeat (${adds.added.length}, ${adds.duplicates.length})`, adds.added.length === 1 && adds.duplicates.length === 0);
   expect(c.finish().map((f) => f.name)).toEqual([]);
 });

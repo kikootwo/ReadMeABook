@@ -4,7 +4,7 @@
  */
 
 import type { Page } from '@playwright/test';
-import { ctl, urls, waitFor, type Rmab } from '../../lib/harness';
+import { ctl, stackExecSync, urls, waitFor, type Rmab } from '../../lib/harness';
 import { psql, sqlStr } from './242-helpers';
 import { callsSince } from './46-helpers';
 
@@ -104,6 +104,15 @@ export function storedFilePayload(id: string, base64: string) {
   const stored = psql(`select coalesce(payload->'torrentFile','null'::jsonb)::text from jobs where request_id = ${sqlStr(id)} and type = 'download_torrent' order by created_at desc limit 1`);
   const leaked = psql(`select count(*) from jobs where request_id = ${sqlStr(id)} and position(${sqlStr(base64.slice(0, 64))} in payload::text) > 0`);
   return { stored, rowsHoldingBytes: Number(leaked) };
+}
+
+/** The request's newest download job: its jobs row status, its Bull id and whether Redis still holds that Bull job. */
+export function downloadJobInQueue(id: string) {
+  const [status = '', bullId = ''] = psql(
+    `select status || '|' || coalesce(bull_job_id,'') from jobs where request_id = ${sqlStr(id)} and type = 'download_torrent' order by created_at desc limit 1`
+  ).split('|');
+  const exists = bullId ? stackExecSync('rmab', ['redis-cli', 'EXISTS', `bull:audiobook-jobs:${bullId}`]).trim() : '';
+  return { status, bullId, inRedis: exists === '1' };
 }
 
 /** fake qBittorrent adds recorded after `since` that added (or tried to re-add) `hash`. */

@@ -237,8 +237,19 @@ describe('JobQueueService', () => {
     const rowPayload = prismaMock.job.create.mock.calls[0][0].data.payload;
     expect(rowPayload.torrentFile).toEqual({ omitted: true, bytes: bytes.length, infoHash: 'a'.repeat(40) });
     expect(JSON.stringify(rowPayload)).not.toContain(base64);
-    const [, queued] = queueMock.add.mock.calls[0];
+    const [, queued, options] = queueMock.add.mock.calls[0];
     expect(queued).toMatchObject({ torrentFile: base64, jobId: 'job-9', torrent: { title: 'Book' } });
+    // Gone from Redis once the add completes or fails for good (no attempts override: retries keep the bytes)
+    expect(options).toEqual({ priority: 9, removeOnComplete: true, removeOnFail: true });
+  });
+
+  it('keeps the queue defaults for a download job without a file', async () => {
+    prismaMock.job.create.mockResolvedValue({ id: 'job-10' });
+    queueMock.add.mockResolvedValue({ id: 'bull-10' });
+    prismaMock.job.update.mockResolvedValue({});
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    await new JobQueueService().addDownloadJob('req-1', { id: 'ab-1', title: 'Title', author: 'Author' }, { title: 'Book' } as never);
+    expect(queueMock.add.mock.calls[0][2]).toEqual({ priority: 9 });
   });
 
   it('adds monitor jobs with delay in milliseconds', async () => {

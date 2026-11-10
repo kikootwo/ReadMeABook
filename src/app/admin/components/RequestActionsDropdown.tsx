@@ -304,8 +304,6 @@ export function RequestActionsDropdown({
               </button>
             )}
 
-            {canAddTorrent(request) && <AddTorrentMenuItem onClick={() => { setIsOpen(false); setShowAddTorrent(true); }} />}
-
             {/* Adjust Search Terms */}
             {canAdjustSearchTerms && (
               <button
@@ -334,6 +332,8 @@ export function RequestActionsDropdown({
                 </span>
               </button>
             )}
+
+            {canAddTorrent(request) && <AddTorrentMenuItem onClick={() => { setIsOpen(false); setShowAddTorrent(true); }} />}
 
             {/* View Source */}
             {canViewSource && viewSourceUrl && (

@@ -30,9 +30,9 @@ const fail = (status: number, error: string, message: string) => NextResponse.js
 
 /** Refusal for a request outside ADVANCEABLE_FROM_INTERACTIVE_SEARCH */
 function statusRefusal(status: string): NextResponse {
-  if (status === 'awaiting_approval') return fail(409, 'AwaitingApproval', 'Approve this request before adding a torrent');
-  if (status === 'denied') return fail(409, 'RequestDenied', 'This request was denied');
-  return fail(409, 'InvalidStatus', `A torrent can only be added to a pending, failed or waiting request (this one is ${status.replace(/_/g, ' ')})`);
+  if (status === 'awaiting_approval') return fail(409, 'AwaitingApproval', 'Approve this request before adding a torrent.');
+  if (status === 'denied') return fail(409, 'RequestDenied', 'This request was denied.');
+  return fail(409, 'InvalidStatus', `A torrent can only be added to a pending, failed or waiting request (this one is ${status.replace(/_/g, ' ')}).`);
 }
 
 /**
@@ -50,10 +50,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         });
         if (!bodyResult.ok) return bodyResult.response;
         const body = BodySchema.safeParse(bodyResult.data);
-        if (!body.success) return fail(400, 'ValidationError', 'Send a magnet link or a .torrent file');
+        if (!body.success) return fail(400, 'ValidationError', 'Send a magnet link or a .torrent file.');
         const { magnet, torrentFile } = body.data;
         if ((magnet === undefined) === (torrentFile === undefined)) {
-          return fail(400, 'ValidationError', 'Send either a magnet link or a .torrent file');
+          return fail(400, 'ValidationError', 'Send either a magnet link or a .torrent file.');
         }
 
         // The torrent itself, checked before any request is looked up
@@ -72,8 +72,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         const { id } = await params;
         const record = await prisma.request.findFirst({ where: { id, deletedAt: null }, include: { audiobook: true } });
-        if (!record) return fail(404, 'NotFound', 'Request not found');
-        if (record.type !== 'audiobook') return fail(409, 'NotAudiobook', 'Add Torrent is for audiobook requests only');
+        if (!record) return fail(404, 'NotFound', 'Request not found.');
+        if (record.type !== 'audiobook') return fail(409, 'NotAudiobook', 'Add Torrent is for audiobook requests only.');
         if (!(ADVANCEABLE_FROM_INTERACTIVE_SEARCH as readonly string[]).includes(record.status)) {
           return statusRefusal(record.status);
         }
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           where: { id, deletedAt: null, status: record.status },
           data: { status: 'downloading', progress: 0, errorMessage: null, autoRerequestCount: 0, updatedAt: new Date() },
         });
-        if (claim.count === 0) return fail(409, 'RequestChanged', 'This request changed; refresh and try again');
+        if (claim.count === 0) return fail(409, 'RequestChanged', 'This request changed; refresh and try again.');
 
         const audiobook = { id: record.audiobook.id, title: record.audiobook.title, author: record.audiobook.author };
         try {
@@ -94,9 +94,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             id, audiobook, torrent, [], undefined, file && { data: file.data, infoHash: file.infoHash }
           );
         } catch (error) {
+          // Undo everything the claim changed. If the queue took the job and only its row update threw,
+          // the job still runs and moves the request on; a second submit then meets a request that is
+          // no longer in this status (or, rarely, queues a second add, which the client takes over as a duplicate).
           await prisma.request.updateMany({
             where: { id, status: 'downloading' },
-            data: { status: record.status, progress: record.progress, errorMessage: record.errorMessage },
+            data: { status: record.status, progress: record.progress, errorMessage: record.errorMessage, autoRerequestCount: record.autoRerequestCount },
           });
           throw error;
         }
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           infoHash: torrent.infoHash,
           bytes: file?.data.length ?? null,
         });
-        return NextResponse.json({ success: true, request: { id, status: 'downloading' }, message: 'Torrent added. Downloading now.' });
+        return NextResponse.json({ success: true, request: { id, status: 'downloading' }, message: 'Torrent added.' });
       } catch (error) {
         logger.error('Failed to add a torrent', { error: error instanceof Error ? error.message : String(error) });
         return fail(500, 'AddTorrentError', 'The torrent could not be added. Try again.');

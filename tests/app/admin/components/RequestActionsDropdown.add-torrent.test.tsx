@@ -37,10 +37,12 @@ function openMenu(status: string, type?: 'audiobook' | 'ebook') {
 }
 
 describe('RequestActionsDropdown: Add Torrent', () => {
-  it.each(['pending', 'failed', 'awaiting_search', 'awaiting_release'])('is offered on an audiobook request that is %s, right after Interactive Search', (status) => {
+  it.each(['pending', 'failed', 'awaiting_search', 'awaiting_release'])('is offered on an audiobook request that is %s, right after Adjust Search Terms (the search items stay together)', (status) => {
     openMenu(status, 'audiobook');
     const items = screen.getAllByRole('menuitem').map((item) => item.textContent?.trim());
-    expect(items.indexOf('Add Torrent')).toBe(items.indexOf('Interactive Search') + 1);
+    const search = items.indexOf('Interactive Search');
+    expect(search).toBeGreaterThanOrEqual(0);
+    expect(items.slice(search, search + 3)).toEqual(['Interactive Search', 'Adjust Search Terms', 'Add Torrent']);
   });
 
   it.each(['awaiting_approval', 'denied', 'searching', 'downloading', 'processing', 'downloaded', 'available', 'cancelled'])('is not offered on a request that is %s', (status) => {
