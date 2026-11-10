@@ -51,6 +51,12 @@ test.afterAll(() => {
   if (execBridgeAvailable()) cleanupPageSeeds();
 });
 
+/** Evidence shot with the pointer parked in the left gutter (no hover state in the picture). */
+async function shot(page: Page, name: string) {
+  await page.mouse.move(1, 400);
+  await snap(page, DIR, name);
+}
+
 async function openLibrary(page: Page) {
   await page.goto('/library');
   await expect(card(page, TITLES.failed)).toBeVisible({ timeout: 30_000 });
@@ -63,9 +69,9 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await openLibrary(page);
   for (const title of [...Object.values(TITLES).flat()]) await expect(card(page, title), title).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Library' })).toBeVisible();
-  await snap(page, DIR, 'grid-1280-light');
+  await shot(page, 'grid-1280-light');
   await page.emulateMedia({ colorScheme: 'dark' });
-  await snap(page, DIR, 'grid-1280-dark');
+  await shot(page, 'grid-1280-dark');
   await page.emulateMedia({ colorScheme: 'light' });
 
   // Live overlay: a status change reaches the card without a list reload
@@ -77,19 +83,21 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await expect(page).toHaveURL(/group=author/);
   await expect(page.getByRole('heading', { name: /Mara Quill/ })).toHaveCount(1);
   await expect(page.getByRole('heading', { name: /Odette Marsh/ })).toHaveCount(1);
-  await snap(page, DIR, 'grouped-by-author');
+  await shot(page, 'grouped-by-author');
   await page.getByRole('group', { name: 'Group by' }).getByRole('button', { name: 'None' }).click();
 
   // Search with no results, then cleared
   await page.getByRole('searchbox', { name: 'Search the library' }).fill('zzqx nothing here');
   await expect(page.getByText('No books match')).toBeVisible();
   await expect(page).toHaveURL(/q=zzqx/);
-  await snap(page, DIR, 'search-no-results');
+  await shot(page, 'search-no-results');
   await page.getByRole('button', { name: 'Clear search and filters' }).click();
   await expect(card(page, TITLES.failed)).toBeVisible();
 
   // The Problem filter from the rail
   const rail = page.getByRole('complementary', { name: 'Filters' });
+  const railFit = await rail.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(railFit, 'the rail has no horizontal overflow (every count inside it)').toBeLessThanOrEqual(0);
   await rail.getByRole('checkbox', { name: /^Problem/ }).check();
   await expect(page).toHaveURL(/status=problem/);
   await expect(card(page, TITLES.failed)).toBeVisible();
@@ -98,17 +106,17 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await expect(card(page, TITLES.pending)).toBeVisible();
 
   await page.setViewportSize({ width: 768, height: 1024 });
-  await snap(page, DIR, 'grid-768');
+  await shot(page, 'grid-768');
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.getByRole('complementary', { name: 'Filters' })).toBeHidden();
-  await snap(page, DIR, 'grid-375-dark');
+  await shot(page, 'grid-375-dark');
   await page.getByRole('button', { name: /^Filters/ }).click();
   const sheet = page.getByRole('dialog', { name: 'Filters' });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('checkbox', { name: /^Problem/ })).toBeVisible();
   await page.waitForTimeout(400); // the sheet's slide-in
-  await snap(page, DIR, 'filter-sheet-375');
+  await shot(page, 'filter-sheet-375');
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
 
@@ -128,7 +136,7 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await page.goto('/library');
   await expect(page.getByText('Nothing here yet')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: 'Scan library now' })).toBeVisible();
-  await snap(page, DIR, 'empty-state');
+  await shot(page, 'empty-state');
   await page.unroute(/\/api\/library\?(?!live=1)/);
 });
 
@@ -145,7 +153,7 @@ test('#177 page: a requester sees their own request, Interactive search until it
     await expect(detail.getByRole('button', { name: 'Search again' })).toHaveCount(0);
     await expect(detail.getByRole('link', { name: 'View request' })).toHaveAttribute('href', '/requests');
     await expect(detail.getByText('Path', { exact: true })).toHaveCount(0);
-    await snap(page, DIR, 'detail-requester');
+    await shot(page, 'detail-requester');
 
     psql(`update users set interactive_search_access = false where id = ${sqlStr(requester.id)}`);
     await page.reload();
@@ -171,7 +179,7 @@ test('#177 page: another user sees public fields only and no request detail call
     await expect(detail.getByText('Mara Quill').first()).toBeVisible();
     await expect(detail.getByText('lib177preq').first()).toBeVisible();
     for (const hidden of [FAILED_ERROR, 'Request history', 'Actions', 'Files']) await expect(detail.getByText(hidden, { exact: true }), hidden).toHaveCount(0);
-    await snap(page, DIR, 'detail-other-user');
+    await shot(page, 'detail-other-user');
     await page.waitForTimeout(1500);
     expect(detailCalls, 'no request detail call for a book the viewer may not see').toEqual([]);
   } finally {
@@ -191,14 +199,14 @@ test('#177 page: the admin header fits at 768 and 1024 (16 character name, BookD
       if (width >= 1024) await expect(page.locator('header nav').getByRole('link', { name: 'BookDate' })).toBeVisible();
       figures[`w${width}`] = await headerFigures(page);
       if (width !== 1280) {
-        await snap(page, DIR, `header-${width}`);
-        if (width === 768) await snap(page, DIR, 'header-768-option-a');
+        await shot(page, `header-${width}`);
+        if (width === 768) await shot(page, 'header-768-option-a');
       }
     }
     const style = await page.addStyleTag({ content: HEADER_OPTION_B_CSS });
     await page.setViewportSize({ width: 768, height: 800 });
     figures.optionB768 = await headerFigures(page);
-    await snap(page, DIR, 'header-768-option-b');
+    await shot(page, 'header-768-option-b');
     await style.evaluate((el) => (el as Element).remove());
     writeEvidence(`${DIR}/header.json`, figures);
 
@@ -229,7 +237,7 @@ test('#177 page: the admin detail, Search again and its toast over the open deta
   await expect(detail.getByText('Request history')).toBeVisible();
   await expect(detail.getByRole('link', { name: 'View request' })).toHaveAttribute('href', `/admin?search=${encodeURIComponent(TITLES.failed)}&type=audiobook`);
   await expect(detail.getByText('lib177preq').first()).toBeVisible();
-  await snap(page, DIR, 'detail-admin');
+  await shot(page, 'detail-admin');
 
   await detail.getByRole('button', { name: 'Search again' }).click();
   const toast = page.getByText(`Searching again for ${TITLES.failed}`);
@@ -241,7 +249,7 @@ test('#177 page: the admin detail, Search again and its toast over the open deta
     return { toast: stack.findIndex((n) => n === el || el.contains(n) || n.contains(el)), dialog: stack.findIndex((n) => dialog.contains(n) || n === dialog.parentElement) };
   });
   expect(order.toast, `toast is hit at its own centre: ${JSON.stringify(order)}`).toBe(0);
-  await snap(page, DIR, 'toast-over-detail');
+  await shot(page, 'toast-over-detail');
   // The book left "failed"; the detail keeps its snapshot and stays open
   await expect(detail).toBeVisible();
   await page.keyboard.press('Escape');

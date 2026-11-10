@@ -24,8 +24,9 @@ interface FacetListProps {
 }
 
 function Section({ title, onClear, children }: { title: string; onClear?: () => void; children: React.ReactNode }) {
+  // min-w-0: a fieldset is min-content wide by default, which pushed the counts out of the 220 px rail
   return (
-    <fieldset className="space-y-1">
+    <fieldset className="min-w-0 space-y-1">
       <div className="flex items-center justify-between mb-1">
         <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</legend>
         {onClear && (
