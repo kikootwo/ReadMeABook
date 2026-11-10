@@ -60,7 +60,7 @@ const box = () => screen.getByRole('checkbox', { name: /Explicit/ });
 
 let markResponse: { ok: boolean; status: number; body: unknown };
 
-async function pickRelease(props: Partial<React.ComponentProps<typeof AudiobookDetailsModal>> = {}, tick = true) {
+async function openConfirm(props: Partial<React.ComponentProps<typeof AudiobookDetailsModal>> = {}, tick = true) {
   render(
     <AudiobookDetailsModal asin="ASIN1" isOpen={true} onClose={vi.fn()} requestId="req-1" requestStatus="failed" requestedByUserId="user-1" {...props} />
   );
@@ -71,7 +71,23 @@ async function pickRelease(props: Partial<React.ComponentProps<typeof AudiobookD
   }
   fireEvent.click(screen.getByTitle('Interactive Search'));
   fireEvent.click(await screen.findByRole('button', { name: 'Get' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+  return screen.findByRole('button', { name: 'Download' });
+}
+
+async function pickRelease(props: Partial<React.ComponentProps<typeof AudiobookDetailsModal>> = {}, tick = true) {
+  fireEvent.click(await openConfirm(props, tick));
+}
+
+/** The mark's PUT waits until the returned function is called. */
+function holdTheSave() {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'PUT') return { ok: false, status: 403, json: async () => ({}) };
+    await gate;
+    return { ok: true, status: 200, json: async () => markResponse.body };
+  });
+  return finish;
 }
 
 beforeEach(() => {
@@ -112,6 +128,37 @@ describe('AudiobookDetailsModal Explicit tick on Interactive Search (existing re
 
     await waitFor(() => expect(selectTorrentMock).toHaveBeenCalledWith('req-1', release));
     expect(markCalls()).toHaveLength(0);
+  });
+
+  it('one click, one download: a second Download click while the mark saves sends nothing more', async () => {
+    const finishSave = holdTheSave();
+    const download = await openConfirm();
+
+    fireEvent.click(download);
+    fireEvent.click(download);
+    expect(download).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await act(async () => { finishSave(); });
+
+    await waitFor(() => expect(selectTorrentMock).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(markCalls()).toHaveLength(1);
+    expect(selectTorrentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['Esc', () => fireEvent.keyDown(document, { key: 'Escape' })],
+    ['closing the search', () => fireEvent.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!)],
+  ])('backing out with %s while the mark saves starts no download', async (_how, backOut) => {
+    const finishSave = holdTheSave();
+    fireEvent.click(await openConfirm());
+
+    backOut();
+    await act(async () => { finishSave(); });
+    await act(async () => {});
+
+    expect(markCalls()).toHaveLength(1);
+    expect(selectTorrentMock).not.toHaveBeenCalled();
   });
 
   it('no tick: no save', async () => {

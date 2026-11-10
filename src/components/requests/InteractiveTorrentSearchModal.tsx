@@ -154,7 +154,11 @@ export function InteractiveTorrentSearchModal({
   // Stable close handler via ref
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const handleClose = useCallback(() => { onCloseRef.current(); }, []);
+  // The running confirm (#542): one at a time; backing out (Esc, close) clears it, so a run
+  // still saving the mark stops before select-torrent
+  const confirmRunRef = useRef<object | null>(null);
+  const handleClose = useCallback(() => { confirmRunRef.current = null; onCloseRef.current(); }, []);
+  useEffect(() => () => { confirmRunRef.current = null; }, []);
 
   // Determine which mode we're in
   const isEbookMode = searchMode === 'ebook';
@@ -247,6 +251,7 @@ export function InteractiveTorrentSearchModal({
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (confirmTorrent) {
+          confirmRunRef.current = null;
           setConfirmTorrent(null);
         } else {
           handleClose();
@@ -298,7 +303,9 @@ export function InteractiveTorrentSearchModal({
   };
 
   const handleConfirmDownload = async () => {
-    if (!confirmTorrent) return;
+    if (!confirmTorrent || confirmRunRef.current) return;
+    const run = {};
+    confirmRunRef.current = run;
     let outcome: { needsApproval?: boolean } | undefined;
     setBeforeSelectError(null);
     try {
@@ -320,10 +327,14 @@ export function InteractiveTorrentSearchModal({
         }
         outcome = { needsApproval: result?.needsApproval === true };
       } else if (hasRequestId) {
-        await beforeSelect?.().catch((err: unknown) => {
-          setBeforeSelectError(err instanceof Error ? err.message : String(err));
-          throw err;
-        });
+        if (beforeSelect) {
+          setIsCustomConfirming(true); // Download and Cancel stay disabled while the mark saves
+          await beforeSelect().catch((err: unknown) => {
+            setBeforeSelectError(err instanceof Error ? err.message : String(err));
+            throw err;
+          });
+          if (confirmRunRef.current !== run) return; // backed out while it saved
+        }
         await selectTorrent(requestId, confirmTorrent);
       } else {
         if (!fullAudiobook) throw new Error('Audiobook data required to create request');
@@ -336,6 +347,7 @@ export function InteractiveTorrentSearchModal({
       console.error('Failed to download:', err);
       setConfirmTorrent(null);
     } finally {
+      if (confirmRunRef.current === run) confirmRunRef.current = null;
       setIsCustomConfirming(false);
     }
   };
