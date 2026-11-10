@@ -65,11 +65,20 @@ async function showBelowHeader(box: Locator) {
   return box.evaluate((el) => {
     el.scrollIntoView({ block: 'start' });
     window.scrollBy(0, -16);
+    // The checkbox's centre and the top edge of its title must both be the page itself, not the header
+    const label = document.querySelector(`label[for="${el.id}"]`);
+    let header: Element | null = document.elementFromPoint(window.innerWidth / 2, 2);
+    while (header && !['sticky', 'fixed'].includes(getComputedStyle(header).position)) header = header.parentElement;
+    const clear = (x: number, y: number) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit !== null && !(header && header.contains(hit));
+    };
     const hits = () => {
       const r = el.getBoundingClientRect();
-      return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el;
+      const t = label?.getBoundingClientRect();
+      return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el && !!t && clear(t.left + 4, t.top - 6);
     };
-    for (let i = 0; i < 40 && !hits(); i++) window.scrollBy(0, -8);
+    for (let i = 0; i < 60 && !hits(); i++) window.scrollBy(0, -8);
     const help = document.getElementById(el.getAttribute('aria-describedby') || '')?.getBoundingClientRect();
     return { checkboxTop: el.getBoundingClientRect().top, notCovered: hits(), helpBottom: help?.bottom ?? null, viewport: window.innerHeight };
   });
