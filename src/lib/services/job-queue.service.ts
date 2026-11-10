@@ -73,6 +73,24 @@ export interface DownloadTorrentPayload extends JobPayload {
   /** Ranked candidates after `torrent`, used when an upstream grab is rate-limited/unavailable. */
   alternateTorrents?: TorrentResult[];
   clientFailures?: number; // Set only by automatic search (#332)
+  /**
+   * An admin-uploaded .torrent (base64), added in place of `torrent.downloadUrl` (Add Torrent).
+   * Lives in the queue's job data only: the `jobs` row holds a StoredTorrentFile in its place.
+   */
+  torrentFile?: string;
+}
+
+/** What the `jobs` row keeps of an uploaded .torrent: never the bytes */
+export interface StoredTorrentFile {
+  omitted: true;
+  bytes: number;
+  infoHash: string;
+}
+
+/** An uploaded .torrent for addDownloadJob: the bytes, plus what its `jobs` row may keep */
+export interface UploadedTorrentFile {
+  data: Buffer;
+  infoHash: string;
 }
 
 export interface MonitorDownloadPayload extends JobPayload {
@@ -580,12 +598,14 @@ export class JobQueueService {
   }
 
   /**
-   * Add a job to the queue
+   * Add a job to the queue. `dbPayload`: what the `jobs` row keeps when it must differ from the
+   * queue's job data (an uploaded .torrent stays out of the database).
    */
   private async addJob(
     type: JobType,
     payload: JobPayload,
-    options?: JobOptions
+    options?: JobOptions,
+    dbPayload: JobPayload = payload
   ): Promise<string> {
     // First create the database job record
     const dbJob = await prisma.job.create({
@@ -595,7 +615,7 @@ export class JobQueueService {
         type,
         status: 'pending',
         priority: options?.priority || 0,
-        payload,
+        payload: dbPayload,
         maxAttempts: options?.attempts || 3,
       },
     });
@@ -645,20 +665,26 @@ export class JobQueueService {
     audiobook: { id: string; title: string; author: string },
     torrent: TorrentResult,
     alternateTorrents: TorrentResult[] = [],
-    chain?: ClientFailureChain
+    chain?: ClientFailureChain,
+    torrentFile?: UploadedTorrentFile // admin Add Torrent: queue data only, never the jobs row
   ): Promise<string> {
+    const payload = {
+      requestId,
+      audiobook,
+      torrent,
+      alternateTorrents,
+      ...(chain?.clientFailures !== undefined && { clientFailures: chain.clientFailures }),
+    } as DownloadTorrentPayload;
+    if (!torrentFile) {
+      return await this.addJob('download_torrent', payload, { priority: 9 }); // High priority - download selected torrent
+    }
+    const stored: StoredTorrentFile = { omitted: true, bytes: torrentFile.data.length, infoHash: torrentFile.infoHash };
+    // Bull drops the job (and the bytes with it) once it completes or fails for good; retries before that keep it
     return await this.addJob(
       'download_torrent',
-      {
-        requestId,
-        audiobook,
-        torrent,
-        alternateTorrents,
-        ...(chain?.clientFailures !== undefined && { clientFailures: chain.clientFailures }),
-      } as DownloadTorrentPayload,
-      {
-        priority: 9, // High priority - download selected torrent
-      }
+      { ...payload, torrentFile: torrentFile.data.toString('base64') },
+      { priority: 9, removeOnComplete: true, removeOnFail: true },
+      { ...payload, torrentFile: stored }
     );
   }
 

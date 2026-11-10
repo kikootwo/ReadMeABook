@@ -12,6 +12,9 @@ import { prisma } from '../db';
 
 export type RequestStopReason = 'cancelled' | 'deleted' | 'missing';
 
+/** Extra status condition for one guarded write (#591): refuse these too, or write only from these */
+export type RequestStatusCondition = { notIn: readonly string[] } | { onlyIn: readonly string[] };
+
 /**
  * Why background work for this request must stop, or null to carry on.
  * A row that no longer exists (or no id at all) counts as stopped.
@@ -37,24 +40,34 @@ export async function getRequestStopReason(requestId: string | null | undefined)
  *
  * Without an id this writes nothing: Prisma's updateMany treats
  * `id: undefined` as "no filter" and would update every live request.
+ *
+ * `condition` narrows the same write (#591): `notIn` refuses these statuses too,
+ * `onlyIn` writes only from these. Cancelled is refused either way.
  */
 export async function updateRequestUnlessStopped(
   requestId: string | null | undefined,
-  data: Prisma.RequestUpdateManyMutationInput
+  data: Prisma.RequestUpdateManyMutationInput,
+  condition?: RequestStatusCondition
 ): Promise<boolean> {
   if (!requestId) return false;
 
+  const status = !condition
+    ? { not: 'cancelled' }
+    : 'onlyIn' in condition
+      ? { in: condition.onlyIn.filter((s) => s !== 'cancelled') }
+      : { notIn: ['cancelled', ...condition.notIn] };
   const { count } = await prisma.request.updateMany({
-    where: { id: requestId, deletedAt: null, status: { not: 'cancelled' } },
+    where: { id: requestId, deletedAt: null, status },
     data: { ...data, updatedAt: new Date() },
   });
   return count > 0;
 }
 
-/** Mark the request failed unless it was cancelled or deleted. */
+/** Mark the request failed unless it was cancelled or deleted (or `condition` refuses it). */
 export function markRequestFailedUnlessStopped(
   requestId: string | null | undefined,
-  errorMessage: string
+  errorMessage: string,
+  condition?: RequestStatusCondition
 ): Promise<boolean> {
-  return updateRequestUnlessStopped(requestId, { status: 'failed', errorMessage });
+  return updateRequestUnlessStopped(requestId, { status: 'failed', errorMessage }, condition);
 }

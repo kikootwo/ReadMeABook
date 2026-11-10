@@ -26,6 +26,9 @@ export const AUTH_JSON_BODY_LIMIT_BYTES = 64 * KIB;
 /** Limit for the admin bulk import (one entry per scanned book). */
 export const BULK_IMPORT_JSON_BODY_LIMIT_BYTES = 32 * MIB;
 
+/** Limit for the admin Add Torrent route (a base64 .torrent file of up to 2 MiB). */
+export const TORRENT_UPLOAD_JSON_BODY_LIMIT_BYTES = 3 * MIB;
+
 export type JsonBodyResult<T> = { ok: true; data: T } | { ok: false; response: NextResponse };
 
 export interface ReadJsonBodyOptions<T> {

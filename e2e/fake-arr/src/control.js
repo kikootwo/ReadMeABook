@@ -3,7 +3,7 @@
  * Documentation: documentation/testing/e2e-harness.md
  */
 
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { readParams, sendJson, notFound } from './http-util.js';
 import { torrentInfo, seedTorrent, armQbitFault } from './qbit.js';
 import { sabSlots } from './sab.js';
@@ -56,6 +56,19 @@ export async function handleControl(state, req, res, url) {
     if (p === '/books' && req.method === 'GET') return sendJson(res, 200, state.fixtureIndex.books);
     if (p === '/plex-library' && req.method === 'GET') {
       return sendJson(res, 200, { refreshes: state.plexRefreshes, albums: scanAlbums(state).map(({ dir, ...a }) => ({ ...a, dir })) });
+    }
+    if (p === '/release-torrent' && req.method === 'GET') {
+      // What an admin would paste or upload by hand (#290): the magnet, and the .torrent bytes as base64
+      const release = state.releases.get(String(url.searchParams.get('id') || ''));
+      if (!release || release.protocol !== 'torrent') throw new Error(`no torrent release "${url.searchParams.get('id')}" in the scenario`);
+      const file = release.torrentFile || null;
+      return sendJson(res, 200, {
+        id: release.id,
+        infoHash: release.infoHash,
+        magnet: release.magnet,
+        torrentFile: file ? file.toString('base64') : null,
+        sha256: file ? createHash('sha256').update(file).digest('hex') : null,
+      });
     }
     if (p === '/scenario' && req.method === 'POST') {
       const { params } = await readParams(req, url);

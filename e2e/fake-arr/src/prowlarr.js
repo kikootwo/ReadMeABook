@@ -187,7 +187,7 @@ export function handleProwlarr(state, req, res, url) {
   if (rss && req.method === 'GET') {
     if (!keyOk) return sendJson(res, 401, { error: 'invalid api key' });
     const indexerId = Number(rss[1]);
-    const releases = [...state.releases.values()].filter((r) => r.indexerId === indexerId && !r.hideFromRss);
+    const releases = [...state.releases.values()].filter((r) => r.indexerId === indexerId && !r.hideFromRss && !r.unlisted);
     res.writeHead(200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
     return res.end(rssXml(state, releases));
   }
@@ -212,7 +212,9 @@ export function handleProwlarr(state, req, res, url) {
       const indexerIds = url.searchParams.getAll('indexerIds').map(Number);
       const categories = url.searchParams.getAll('categories').map(Number).filter(Number.isFinite);
       const limit = Number(url.searchParams.get('limit'));
+      // `unlisted: true`: the fake clients know the release, but no search or RSS ever returns it (#290)
       let results = [...state.releases.values()]
+        .filter((r) => !r.unlisted)
         .filter((r) => indexerIds.length === 0 || indexerIds.includes(r.indexerId))
         .filter((r) => categories.length === 0 || r.categories.some((c) => categories.includes(c)))
         .filter((r) => matchesQuery(r, query))
