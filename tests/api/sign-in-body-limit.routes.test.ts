@@ -36,7 +36,8 @@ vi.mock('@/lib/services/auth-token-cache.service', () => ({
   getAuthTokenCache: () => ({ get: vi.fn(() => null), set: vi.fn(), delete: vi.fn() }),
 }));
 vi.mock('@/lib/services/auth/plex-identity', () => ({ canSignInAsPlexIdentity: vi.fn(() => false) }));
-vi.mock('@/lib/utils/rateLimit', () => ({
+vi.mock('@/lib/utils/rateLimit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/rateLimit')>()),
   checkTokenLoginRateLimit: vi.fn(() => ({ allowed: true, retryAfterSeconds: 0 })),
 }));
 

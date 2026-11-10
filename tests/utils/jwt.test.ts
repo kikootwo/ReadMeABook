@@ -201,3 +201,36 @@ describe('JWT secret resolution', () => {
     expect(logged).not.toContain(DERIVED_REFRESH);
   });
 });
+
+describe('derivePurposeKey', () => {
+  beforeEach(() => {
+    process.env.JWT_SECRET = ENV_ACCESS_SECRET;
+    process.env.JWT_REFRESH_SECRET = ENV_REFRESH_SECRET;
+  });
+
+  it('derives a fixed 32-byte key per label from the access secret', async () => {
+    const { derivePurposeKey } = await loadJwt();
+    const key = derivePurposeKey('known-browser:v1');
+
+    expect(key).toHaveLength(32);
+    expect(derivePurposeKey('known-browser:v1').equals(key)).toBe(true);
+    expect(derivePurposeKey('other:v1').equals(key)).toBe(false);
+    expect(key.toString('utf8')).not.toContain(ENV_ACCESS_SECRET);
+    expect(key.equals(Buffer.from(ENV_ACCESS_SECRET))).toBe(false);
+    expect(
+      key.equals(
+        Buffer.from(
+          crypto.hkdfSync('sha256', ENV_ACCESS_SECRET, 'readmeabook:purpose-key-derivation', 'readmeabook:known-browser:v1', 32)
+        )
+      )
+    ).toBe(true);
+  });
+
+  it('changes when JWT_SECRET changes', async () => {
+    const first = (await loadJwt()).derivePurposeKey('known-browser:v1');
+    process.env.JWT_SECRET = 'a-different-access-secret';
+    const second = (await loadJwt()).derivePurposeKey('known-browser:v1');
+
+    expect(second.equals(first)).toBe(false);
+  });
+});

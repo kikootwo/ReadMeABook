@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { RMABLogger } from '@/lib/utils/logger';
 import { checkTokenLoginRateLimit } from '@/lib/utils/rateLimit';
+import { clientAddressKey } from '@/lib/utils/client-address';
 import crypto from 'crypto';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 import {
@@ -20,8 +21,7 @@ const logger = RMABLogger.create('API.Auth.TokenLogin');
 
 export async function POST(request: NextRequest) {
   try {
-    const ip = request.headers.get('x-forwarded-for') ?? 'unknown';
-    const rateLimit = checkTokenLoginRateLimit(ip);
+    const rateLimit = checkTokenLoginRateLimit(clientAddressKey(request.headers));
     if (!rateLimit.allowed) {
       return NextResponse.json(
         { error: 'Too many login attempts. Please try again later.' },

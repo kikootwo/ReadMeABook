@@ -43,7 +43,7 @@ export async function runPlaywright({ image, project, evidence, env, specs, phas
   const name = `${project}-runner-${Date.now()}`;
   // Env goes through a file so tokens/creds never appear in commands.log or `ps`.
   const envFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rmab-e2e-env-')), 'runner.env');
-  fs.writeFileSync(envFile, Object.entries({ ...env, E2E_PHASE: phase }).map(([k, v]) => `${k}=${String(v).replace(/\r?\n/g, ' ')}`).join('\n'));
+  fs.writeFileSync(envFile, Object.entries({ ...env, E2E_PHASE: phase, E2E_RUN_SPECS: specs.join(',') }).map(([k, v]) => `${k}=${String(v).replace(/\r?\n/g, ' ')}`).join('\n'));
   let status = 2;
   let bootstrapped = false;
   try {

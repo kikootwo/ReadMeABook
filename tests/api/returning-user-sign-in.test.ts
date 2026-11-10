@@ -100,7 +100,8 @@ function rowsAfterReturn(oldId: string, where: Record<string, unknown>) {
 }
 
 describe('a deleted user signing in again gets a new account', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    (await import('@/lib/utils/rateLimit'))._resetBuckets();
     vi.clearAllMocks();
     usersDb.reset();
     config.values = {

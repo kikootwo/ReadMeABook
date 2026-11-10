@@ -5,9 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
-import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 import {
@@ -15,6 +13,7 @@ import {
   PENDING_APPROVAL_MESSAGE,
   REJECTED_ACCOUNT_ERROR,
 } from '@/lib/services/auth/local-account-status';
+import { createSignInGuard, tooManyAttemptsResponse, verifyPassword } from '@/lib/services/auth/signin-guard';
 
 const logger = RMABLogger.create('API.Auth.AdminLogin');
 
@@ -32,11 +31,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES, requireJsonContentType: true });
     if (!bodyResult.ok) return bodyResult.response;
     const { username, password } = bodyResult.data;
 
-    if (!username || !password) {
+    if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
       return NextResponse.json(
         {
           error: 'ValidationError',
@@ -54,35 +53,19 @@ export async function POST(request: NextRequest) {
     });
 
     // A deleted account answers exactly like an unknown one
-    if (!user || user.deletedAt) {
-      return NextResponse.json(
-        {
-          error: 'AuthenticationError',
-          message: 'Invalid username or password',
-        },
-        { status: 401 }
-      );
+    const account = user && !user.deletedAt ? user : null;
+
+    const guard = createSignInGuard(request);
+    const attempt = guard.begin(normalizedUsername, account);
+    if (!attempt.ok) {
+      return tooManyAttemptsResponse(attempt.error, attempt.retryAfterSeconds);
     }
 
-    // Verify password
-    // authToken contains an encrypted bcrypt hash, so we need to decrypt it first
-    let passwordValid = false;
-    try {
-      const encryptionService = getEncryptionService();
-      const decryptedHash = encryptionService.decrypt(user.authToken || '');
-      passwordValid = await bcrypt.compare(password, decryptedHash);
-    } catch (error) {
-      logger.error('Password verification failed', { error: error instanceof Error ? error.message : String(error) });
-      return NextResponse.json(
-        {
-          error: 'AuthenticationError',
-          message: 'Invalid username or password',
-        },
-        { status: 401 }
-      );
-    }
+    // authToken holds an encrypted bcrypt hash; unknown names are checked against a dummy hash
+    const passwordValid = await verifyPassword(account, password);
+    guard.settle(passwordValid);
 
-    if (!passwordValid) {
+    if (!account || !passwordValid) {
       return NextResponse.json(
         {
           error: 'AuthenticationError',
@@ -93,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Same registration checks as the regular local login, same responses
-    const refusal = getRegistrationRefusal(user.registrationStatus);
+    const refusal = getRegistrationRefusal(account.registrationStatus);
     if (refusal === 'pending_approval') {
       return NextResponse.json({
         success: false,
@@ -107,34 +90,36 @@ export async function POST(request: NextRequest) {
 
     // Update last login time
     await prisma.user.update({
-      where: { id: user.id },
+      where: { id: account.id },
       data: { lastLoginAt: new Date() },
     });
 
     // Generate JWT tokens
     const accessToken = generateAccessToken({
-      sub: user.id,
-      plexId: user.plexId,
-      username: user.plexUsername,
-      role: user.role,
+      sub: account.id,
+      plexId: account.plexId,
+      username: account.plexUsername,
+      role: account.role,
     });
 
-    const refreshToken = generateRefreshToken(user.id);
+    const refreshToken = generateRefreshToken(account.id);
 
     // Return tokens and user info
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       accessToken,
       refreshToken,
       user: {
-        id: user.id,
-        plexId: user.plexId,
-        username: user.plexUsername,
-        email: user.plexEmail,
-        role: user.role,
-        avatarUrl: user.avatarUrl,
+        id: account.id,
+        plexId: account.plexId,
+        username: account.plexUsername,
+        email: account.plexEmail,
+        role: account.role,
+        avatarUrl: account.avatarUrl,
       },
     });
+    guard.remember(response);
+    return response;
   } catch (error) {
     logger.error('Failed to authenticate admin user', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

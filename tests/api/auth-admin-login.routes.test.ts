@@ -34,16 +34,20 @@ vi.mock('@/lib/services/encryption.service', () => ({
 vi.mock('@/lib/utils/jwt', () => ({
   generateAccessToken: tokenMock.generateAccessToken,
   generateRefreshToken: tokenMock.generateRefreshToken,
+  derivePurposeKey: () => Buffer.alloc(32, 7),
 }));
 
 const makeRequest = (body: Record<string, any>) => ({
   json: vi.fn().mockResolvedValue(body),
+  headers: new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7' }),
+  cookies: { get: () => undefined },
 });
 
 describe('Admin login route', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     delete process.env.DISABLE_LOCAL_LOGIN;
+    (await import('@/lib/utils/rateLimit'))._resetBuckets();
   });
 
   it('blocks local login when disabled', async () => {
@@ -76,6 +80,8 @@ describe('Admin login route', () => {
 
     expect(response.status).toBe(401);
     expect(payload.error).toBe('AuthenticationError');
+    // An unknown name still gets one password check (against a dummy hash)
+    expect(bcryptMock.compare).toHaveBeenCalledTimes(1);
   });
 
   it('rejects invalid password', async () => {

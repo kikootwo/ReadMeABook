@@ -21,6 +21,7 @@ const { name } = bodyResult.data;
 - **Over the limit:** 413 `{ error: 'PayloadTooLarge', message: 'Request body is larger than <limit>' }`; one `warn` log (path, limit, declared length), never the body.
 - **Content-Length over the limit:** the handler answers 413 without reading the body; Node then reads and discards the rest of the declared body on that connection. **No/smaller Content-Length (chunked):** bytes counted while reading; reading stops once past the limit and the reader is released (not cancelled: cancelling closes the connection before the 413 is sent).
 - **Within the limit:** parsed with `new Response(bytes).json()`, identical to `request.json()` (same BOM handling, same `SyntaxError` for invalid/empty bodies, so each route's catch keeps its status).
+- **`requireJsonContentType`:** 415 `{ error: 'UnsupportedMediaType', message: 'Content-Type must be application/json' }` before reading unless the media type is `application/json` (parameters allowed). Used by POST auth/admin/login and auth/local/login.
 - **`fallback`:** `readJsonBody(request, { fallback: {} })` returns the fallback for a missing/invalid body (replaces `request.json().catch(() => ({}))`); over-limit still 413.
 - **Body already read / locked:** throws the same `TypeError` as `request.json()` (even with `fallback`).
 - **Test doubles:** an object without `body` (e.g. `{ json: vi.fn() }` in route tests) is passed to its own `json()`; a real `Request` always has `body` (stream or null).
