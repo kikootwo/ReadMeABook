@@ -4,7 +4,9 @@
  *
  * Queues manual imports for multiple audiobooks at once.
  * Reuses the same logic as the single manual import endpoint.
- * Admin-only.
+ * Admin-only. Every row is checked the same way before anything is written: an ASIN-shaped
+ * ASIN, not repeated in the call, a folder under a root, a book that resolves, not in the
+ * library, and no request by any user in IMPORT_BLOCKING_STATUSES.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -13,22 +15,20 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
-import { approvalBypassMark } from '@/lib/constants/request-statuses';
-import { getAudibleService } from '@/lib/integrations/audible.service';
+import { approvalBypassMark, IMPORT_BLOCKING_STATUSES } from '@/lib/constants/request-statuses';
+import { BULK_IMPORT_REFUSAL } from '@/lib/constants/bulk-import';
+import { asinShaped } from '@/lib/utils/asin';
+import { getImportBlock, resolveBookByAsin, type ResolvedBook } from '@/lib/utils/bulk-import-checks';
 import { readJsonBody, BULK_IMPORT_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.BulkImport.Execute');
 
 const BOOKDROP_PATH = '/bookdrop';
 
-/** Statuses that indicate the request is actively being worked on. */
-const ACTIVE_STATUSES = ['searching', 'downloading', 'processing', 'awaiting_import'];
+/** Statuses a bulk import recycles (a status in IMPORT_BLOCKING_STATUSES refuses the row). */
+const RECYCLABLE_STATUSES = ['failed', 'warn', 'cancelled', 'denied'];
 
-/** Statuses that can be recycled for a new manual import. */
-const RECYCLABLE_STATUSES = [
-  'failed', 'warn', 'cancelled', 'denied', 'pending',
-  'awaiting_search', 'awaiting_approval',
-];
+const isBlockingStatus = (status: string) => (IMPORT_BLOCKING_STATUSES as readonly string[]).includes(status);
 
 interface ImportItem {
   folderPath: string;
@@ -105,12 +105,30 @@ export async function POST(request: NextRequest) {
         }
 
         const userId = req.user!.id;
-        const audibleService = getAudibleService();
         const jobQueue = getJobQueueService();
         const results: ImportResult[] = [];
 
-        for (const item of imports) {
-          const { folderPath, asin, audioFiles: itemAudioFiles } = item;
+        // Upper-cased ASIN per row (null when not ASIN-shaped), and how many rows name each one
+        const rawAsins = imports.map((entry) => (entry as Partial<ImportItem> | null)?.asin);
+        const rowAsins = rawAsins.map((raw) => (typeof raw === 'string' ? asinShaped(raw)?.toUpperCase() ?? null : null));
+        const asinCounts = new Map<string, number>();
+        for (const a of rowAsins) if (a) asinCounts.set(a, (asinCounts.get(a) ?? 0) + 1);
+
+        for (const [rowIndex, entry] of imports.entries()) {
+          const { folderPath, audioFiles: itemAudioFiles } = (entry ?? {}) as ImportItem;
+          const asin = rowAsins[rowIndex];
+
+          // A missing or malformed ASIN is refused before any lookup (#588)
+          if (!asin) {
+            const raw = rawAsins[rowIndex];
+            results.push({ folderPath, asin: typeof raw === 'string' ? raw : '', success: false, error: BULK_IMPORT_REFUSAL.invalidAsin });
+            continue;
+          }
+          // Every row naming a repeated ASIN is refused: none of them is the whole book
+          if (asinCounts.get(asin)! > 1) {
+            results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.duplicate });
+            continue;
+          }
 
           try {
             // Validate path
@@ -146,59 +164,32 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            // Resolve or create audiobook record
-            let audiobookId: string;
-            let existingBook = await prisma.audiobook.findFirst({
-              where: { audibleAsin: asin },
-            });
-
-            if (existingBook) {
-              audiobookId = existingBook.id;
-            } else {
-              // Try Audible cache, then Audnexus
-              const cached = await prisma.audibleCache.findUnique({ where: { asin } });
-              if (cached) {
-                const newBook = await prisma.audiobook.create({
-                  data: {
-                    audibleAsin: asin,
-                    title: cached.title,
-                    author: cached.author,
-                    coverArtUrl: cached.coverArtUrl,
-                    narrator: cached.narrator,
-                    status: 'pending',
-                  },
-                });
-                audiobookId = newBook.id;
-              } else {
-                try {
-                  const liveData = await audibleService.getAudiobookDetails(asin);
-                  if (!liveData) {
-                    results.push({ folderPath, asin, success: false, error: 'Audiobook not found' });
-                    continue;
-                  }
-                  const newBook = await prisma.audiobook.create({
-                    data: {
-                      audibleAsin: asin,
-                      title: liveData.title,
-                      author: liveData.author,
-                      coverArtUrl: liveData.coverArtUrl,
-                      narrator: liveData.narrator,
-                      series: liveData.series,
-                      seriesPart: liveData.seriesPart,
-                      seriesAsin: liveData.seriesAsin,
-                      year: liveData.releaseDate
-                        ? new Date(liveData.releaseDate).getFullYear() || undefined
-                        : undefined,
-                      status: 'pending',
-                    },
-                  });
-                  audiobookId = newBook.id;
-                } catch {
-                  results.push({ folderPath, asin, success: false, error: 'Failed to fetch audiobook details' });
-                  continue;
-                }
-              }
+            // Resolve the book: audiobooks row, then Audible cache, then a live lookup
+            let book: ResolvedBook | null;
+            try {
+              book = await resolveBookByAsin(asin);
+            } catch {
+              results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.lookupFailed });
+              continue;
             }
+            if (!book) {
+              results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.notFound });
+              continue;
+            }
+
+            // The review screen's own checks, on the server: not in the library, no active request
+            const block = await getImportBlock(asin);
+            if (block.inLibrary) {
+              results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.inLibrary });
+              continue;
+            }
+            if (block.hasActiveRequest) {
+              results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.requested });
+              continue;
+            }
+
+            const audiobookId = book.audiobookId
+              ?? (await prisma.audiobook.create({ data: { ...book.newRecord!, status: 'pending' } })).id;
 
             // Check for existing request and recycle or create
             const existingRequest = await prisma.request.findFirst({
@@ -213,16 +204,13 @@ export async function POST(request: NextRequest) {
             let requestId: string;
 
             if (existingRequest) {
-              if (ACTIVE_STATUSES.includes(existingRequest.status)) {
-                results.push({ folderPath, asin, success: false, error: 'Already being processed' });
+              // Requested since the check above
+              if (isBlockingStatus(existingRequest.status)) {
+                results.push({ folderPath, asin, success: false, error: BULK_IMPORT_REFUSAL.requested });
                 continue;
               }
 
-              if (
-                RECYCLABLE_STATUSES.includes(existingRequest.status) ||
-                existingRequest.status === 'downloaded' ||
-                existingRequest.status === 'available'
-              ) {
+              if (RECYCLABLE_STATUSES.includes(existingRequest.status)) {
                 // Another user's unapproved request is recorded as completed without approval
                 // (the importing admin's own request never is)
                 const bypass = existingRequest.userId !== userId

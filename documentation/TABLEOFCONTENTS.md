@@ -141,6 +141,7 @@
 - **Dashboard (metrics, downloads, requests)** → [admin-dashboard.md](admin-dashboard.md)
 - **System logs (filters, search, pagination, /api/admin/logs)** → [admin-dashboard.md](admin-dashboard.md)
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
+- **Change a Bulk Import row's match (search or ASIN), import refusals (#189, #588)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 - **Reported issues: Replace (who the replacement request belongs to, #571)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#reported-issue-replace)

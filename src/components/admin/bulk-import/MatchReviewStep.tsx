@@ -2,156 +2,200 @@
  * Component: Bulk Import - Match Review Step
  * Documentation: documentation/features/bulk-import.md
  *
- * Scrollable list of discovered audiobooks with Audible matches,
- * skip toggles, library status badges, and import controls.
+ * Scrollable list of discovered audiobooks with Audible matches, skip toggles, library status
+ * badges, Change match / Find match / Undo, and import controls. A skipped row dims its cover
+ * and text only; the controls stay at full strength.
  */
 
 'use client';
 
-import React from 'react';
-import {
-  ArrowLeftIcon,
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  MusicalNoteIcon,
-  XCircleIcon,
-} from '@heroicons/react/24/outline';
+import React, { useCallback, useRef } from 'react';
+import { ArrowLeftIcon, ExclamationTriangleIcon, MusicalNoteIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon as CheckCircleSolid } from '@heroicons/react/24/solid';
-import { ScannedBook, formatBytes } from './types';
+import { BULK_IMPORT_REFUSAL } from '@/lib/constants/bulk-import';
+import { ScannedBook, MatchCandidate, ImportOutcome } from './types';
+import {
+  canChangeMatch, effectiveFlags, effectiveMatch, isImportable, isSharedRow, matchLabel, sharedAsins,
+} from './row-match';
+import { ChangeMatchDialog } from './ChangeMatchDialog';
+import { ImportResultsView } from './ImportResultsView';
 
 interface MatchReviewStepProps {
   books: ScannedBook[];
   onToggleSkip: (index: number) => void;
   onStartImport: () => void;
   isImporting: boolean;
-  importResults: any;
+  importResults: ImportOutcome | null;
   onClose: () => void;
   onBack: () => void;
+  /** The row whose match dialog is open, else null. */
+  matchDialogFor: number | null;
+  onOpenMatch: (index: number) => void;
+  onCloseMatch: () => void;
+  onChooseMatch: (index: number, candidate: MatchCandidate) => void;
+  onUndoMatch: (index: number) => void;
 }
+
+const CONTROL_BUTTON =
+  'inline-flex items-center px-3 min-h-[44px] sm:min-h-0 sm:py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 function BookRow({
   book,
+  shared,
+  isImporting,
   onToggleSkip,
+  onOpenMatch,
+  onUndo,
+  changeButtonRef,
 }: {
   book: ScannedBook;
+  shared: boolean;
+  isImporting: boolean;
   onToggleSkip: () => void;
+  onOpenMatch: () => void;
+  onUndo: () => void;
+  changeButtonRef: (el: HTMLButtonElement | null) => void;
 }) {
-  const isDisabled = book.inLibrary || book.hasActiveRequest;
+  const changeRef = useRef<HTMLButtonElement | null>(null);
+  const match = effectiveMatch(book);
+  const { inLibrary, hasActiveRequest } = effectiveFlags(book);
+  const isDisabled = inLibrary || hasActiveRequest;
   const isSkipped = book.skipped;
-  const hasMatch = book.match !== null;
+  const showControl = canChangeMatch(book);
   // Low confidence when search term came from a filename or folder name fallback,
   // BUT not when an ASIN was extracted directly from the folder name (that's a
-  // direct lookup and is as reliable as embedded metadata tags).
+  // direct lookup and is as reliable as embedded metadata tags), nor for a picked book.
   const isLowConfidence =
+    !book.chosen &&
     (book.metadataSource === 'file_name' || book.metadataSource === 'folder_name') &&
     !book.extractedAsin;
 
   return (
-    <div
-      className={`flex items-center gap-3 px-4 py-3 transition-opacity ${
-        isSkipped ? 'opacity-40' : ''
-      }`}
-    >
-      {/* Cover Art */}
-      <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800">
-        {hasMatch && book.match!.coverArtUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={book.match!.coverArtUrl}
-            alt={book.match!.title}
-            className="w-12 h-12 object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/placeholder_cover.svg';
+    <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 px-4 py-3" data-testid="bulk-import-row">
+      {/* Cover, text and badges: the only part a skipped row dims */}
+      <div
+        className={`order-1 flex items-center gap-3 flex-1 min-w-0 transition-opacity ${isSkipped ? 'opacity-40' : ''}`}
+        data-testid="bulk-import-row-body"
+      >
+        <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800">
+          {match?.coverArtUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={match.coverArtUrl}
+              alt={match.title}
+              className="w-12 h-12 object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/placeholder_cover.svg';
+              }}
+            />
+          ) : (
+            <div className="w-12 h-12 flex items-center justify-center">
+              <MusicalNoteIcon className="w-6 h-6 text-gray-400 dark:text-gray-600" />
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          {match ? (
+            <>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{match.title}</p>
+                {isLowConfidence && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 flex-shrink-0">
+                    Low Confidence
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                {match.author}
+                {match.narrator && (
+                  <span className="text-gray-400 dark:text-gray-500">
+                    {' '}&middot; {match.narrator}
+                  </span>
+                )}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{book.folderName}</p>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex-shrink-0">
+                  No Match
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 italic">Could not find this title on Audible</p>
+            </>
+          )}
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono truncate mt-0.5">{book.relativePath}</p>
+          {shared && (
+            <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300">
+              {BULK_IMPORT_REFUSAL.duplicate}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium">
+            <MusicalNoteIcon className="w-3 h-3" />
+            {book.audioFileCount}
+          </span>
+          {inLibrary && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs font-medium">
+              <CheckCircleSolid className="w-3 h-3" />
+              In Library
+            </span>
+          )}
+          {hasActiveRequest && !inLibrary && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium">
+              Requested
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Change match / Find match and Undo: under the text on phones, before the toggle from sm */}
+      {showControl && (
+        <div className="order-3 sm:order-2 w-full sm:w-auto flex items-center gap-1 pl-[3.75rem] sm:pl-0 flex-shrink-0">
+          {book.chosen && (
+            <button
+              type="button"
+              onClick={() => {
+                onUndo();
+                changeRef.current?.focus();
+              }}
+              disabled={isImporting}
+              aria-label={`Undo change for ${book.folderName}`}
+              className={`${CONTROL_BUTTON} text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800`}
+            >
+              Undo
+            </button>
+          )}
+          <button
+            ref={(el) => {
+              changeRef.current = el;
+              changeButtonRef(el);
             }}
-          />
-        ) : (
-          <div className="w-12 h-12 flex items-center justify-center">
-            <MusicalNoteIcon className="w-6 h-6 text-gray-400 dark:text-gray-600" />
-          </div>
-        )}
-      </div>
-
-      {/* Book Info */}
-      <div className="flex-1 min-w-0">
-        {hasMatch ? (
-          <>
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                {book.match!.title}
-              </p>
-              {isLowConfidence && (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 flex-shrink-0">
-                  Low Confidence
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-              {book.match!.author}
-              {book.match!.narrator && (
-                <span className="text-gray-400 dark:text-gray-500">
-                  {' '}&middot; {book.match!.narrator}
-                </span>
-              )}
-            </p>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                {book.folderName}
-              </p>
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 flex-shrink-0">
-                No Match
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 italic">
-              Could not find this title on Audible
-            </p>
-          </>
-        )}
-        <p className="text-[11px] text-gray-400 dark:text-gray-500 font-mono truncate mt-0.5">
-          {book.relativePath}
-        </p>
-      </div>
-
-      {/* Badges */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Audio file count */}
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-medium">
-          <MusicalNoteIcon className="w-3 h-3" />
-          {book.audioFileCount}
-        </span>
-
-        {/* Status badges */}
-        {book.inLibrary && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs font-medium">
-            <CheckCircleSolid className="w-3 h-3" />
-            In Library
-          </span>
-        )}
-        {book.hasActiveRequest && !book.inLibrary && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-medium">
-            Requested
-          </span>
-        )}
-      </div>
+            type="button"
+            onClick={onOpenMatch}
+            disabled={isImporting}
+            aria-label={`${matchLabel(book)} for ${book.folderName}`}
+            className={`${CONTROL_BUTTON} text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20`}
+          >
+            {matchLabel(book)}
+          </button>
+        </div>
+      )}
 
       {/* Skip Toggle */}
       <button
         onClick={onToggleSkip}
         disabled={isDisabled}
-        className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${
-          isDisabled
-            ? 'cursor-not-allowed opacity-50'
-            : 'cursor-pointer'
-        } ${
-          isSkipped
-            ? 'bg-gray-200 dark:bg-gray-700'
-            : 'bg-blue-600'
-        }`}
+        className={`order-2 sm:order-3 flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${
+          isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+        } ${isSkipped ? 'bg-gray-200 dark:bg-gray-700' : 'bg-blue-600'}`}
         title={
           isDisabled
-            ? book.inLibrary
+            ? inLibrary
               ? 'Already in your library'
               : 'Already requested'
             : isSkipped
@@ -177,64 +221,28 @@ export function MatchReviewStep({
   importResults,
   onClose,
   onBack,
+  matchDialogFor,
+  onOpenMatch,
+  onCloseMatch,
+  onChooseMatch,
+  onUndoMatch,
 }: MatchReviewStepProps) {
-  const toImport = books.filter((b) => !b.skipped && b.match !== null);
+  const toImport = books.filter(isImportable);
   const skippedCount = books.filter((b) => b.skipped).length;
-  const inLibraryCount = books.filter((b) => b.inLibrary).length;
-  const noMatchCount = books.filter((b) => b.match === null).length;
-  const matchedCount = books.filter((b) => b.match !== null).length;
+  const inLibraryCount = books.filter((b) => effectiveFlags(b).inLibrary).length;
+  const noMatchCount = books.filter((b) => effectiveMatch(b) === null).length;
+  const matchedCount = books.length - noMatchCount;
+  const shared = sharedAsins(books);
+  const dialogBook = matchDialogFor === null ? undefined : books.find((b) => b.index === matchDialogFor);
+  // Each row's Change match / Find match button, so focus returns to it when the dialog closes
+  const changeButtons = useRef(new Map<number, HTMLButtonElement>());
+  const setChangeButton = useCallback((index: number, el: HTMLButtonElement | null) => {
+    if (el) changeButtons.current.set(index, el);
+    else changeButtons.current.delete(index);
+  }, []);
 
-  // Import completed state
   if (importResults) {
-    const succeeded = importResults.summary?.succeeded || 0;
-    const failed = importResults.summary?.failed || 0;
-
-    return (
-      <div className="flex flex-col items-center justify-center h-full px-6 py-16">
-        {importResults.success !== false ? (
-          <>
-            <CheckCircleSolid className="w-14 h-14 text-green-500 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Import Started
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-2">
-              {succeeded} audiobook{succeeded !== 1 ? 's' : ''} queued for import.
-            </p>
-            {failed > 0 && (
-              <p className="text-sm text-amber-600 dark:text-amber-400 text-center mb-2">
-                {failed} book{failed !== 1 ? 's' : ''} could not be queued.
-              </p>
-            )}
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-sm">
-              Files will be organized, tagged, and imported into your library. Check the admin
-              dashboard for progress.
-            </p>
-            <button
-              onClick={onClose}
-              className="mt-6 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors"
-            >
-              Done
-            </button>
-          </>
-        ) : (
-          <>
-            <XCircleIcon className="w-14 h-14 text-red-500 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Import Failed
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 text-center mb-6">
-              {importResults.error || 'An unexpected error occurred'}
-            </p>
-            <button
-              onClick={onClose}
-              className="px-6 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm font-medium rounded-xl transition-colors"
-            >
-              Close
-            </button>
-          </>
-        )}
-      </div>
-    );
+    return <ImportResultsView outcome={importResults} onClose={onClose} />;
   }
 
   // Empty state (no audiobooks found)
@@ -242,9 +250,7 @@ export function MatchReviewStep({
     return (
       <div className="flex flex-col items-center justify-center h-full px-6 py-16">
         <ExclamationTriangleIcon className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-          No Audiobooks Found
-        </h3>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">No Audiobooks Found</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center max-w-sm mb-6">
           The selected folder does not contain any folders with audio files. Try selecting a
           different folder.
@@ -264,7 +270,7 @@ export function MatchReviewStep({
     <div className="flex flex-col h-full">
       {/* Summary header */}
       <div className="px-5 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700/50">
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-x-4 gap-y-1 flex-wrap text-xs">
           <span className="text-gray-500 dark:text-gray-400">
             <span className="font-semibold text-gray-900 dark:text-gray-100">{books.length}</span> discovered
           </span>
@@ -297,7 +303,12 @@ export function MatchReviewStep({
           <BookRow
             key={book.index}
             book={book}
+            shared={isSharedRow(book, shared)}
+            isImporting={isImporting}
             onToggleSkip={() => onToggleSkip(book.index)}
+            onOpenMatch={() => onOpenMatch(book.index)}
+            onUndo={() => onUndoMatch(book.index)}
+            changeButtonRef={(el) => setChangeButton(book.index, el)}
           />
         ))}
       </div>
@@ -314,14 +325,10 @@ export function MatchReviewStep({
 
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-600 dark:text-gray-400">
-            <span className="font-semibold text-gray-900 dark:text-gray-100">
-              {toImport.length}
-            </span>{' '}
+            <span className="font-semibold text-gray-900 dark:text-gray-100">{toImport.length}</span>{' '}
             book{toImport.length !== 1 ? 's' : ''} to import
             {skippedCount > 0 && (
-              <span className="text-gray-400 dark:text-gray-500">
-                {' '}({skippedCount} skipped)
-              </span>
+              <span className="text-gray-400 dark:text-gray-500"> ({skippedCount} skipped)</span>
             )}
           </span>
 
@@ -344,6 +351,16 @@ export function MatchReviewStep({
           </button>
         </div>
       </div>
+
+      {dialogBook && (
+        <ChangeMatchDialog
+          key={dialogBook.index}
+          book={dialogBook}
+          onChoose={(candidate) => onChooseMatch(dialogBook.index, candidate)}
+          onClose={onCloseMatch}
+          restoreFocus={() => changeButtons.current.get(dialogBook.index)?.focus()}
+        />
+      )}
     </div>
   );
 }

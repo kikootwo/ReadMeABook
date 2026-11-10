@@ -39,11 +39,41 @@ export interface ScannedBook {
   extractedAsin?: string;
   searchTerm: string;
   audioFiles: string[];
+  /** The scan's match (kept for Undo; a changed row's book is in `chosen`). */
   match: AudibleMatch | null;
   inLibrary: boolean;
   hasActiveRequest: boolean;
+  /** The folder (or one of its files) is in the media folder: no Change match. */
+  inMediaFolder?: boolean;
   /** User toggle: true = skip this book during import. */
   skipped: boolean;
+  /** Client-only: the book picked with Change match / Find match (never stored). */
+  chosen?: { match: AudibleMatch };
+}
+
+/** A GET /api/admin/bulk-import/match result: a book plus the scan's flags for it. */
+export interface MatchCandidate extends AudibleMatch {
+  inLibrary: boolean;
+  hasActiveRequest: boolean;
+}
+
+/** One row of the execute response (same order as the rows sent). */
+export interface ImportRowResult {
+  folderPath: string;
+  asin: string;
+  success: boolean;
+  requestId?: string;
+  error?: string;
+}
+
+/** What the finished screen shows: the execute response plus the rows that were sent, in order. */
+export interface ImportOutcome {
+  success?: boolean;
+  error?: string;
+  results?: ImportRowResult[];
+  summary?: { total: number; succeeded: number; failed: number };
+  /** The sent rows' paths relative to the scan root, by index (two tag groups in one folder share a folder path). */
+  sentPaths?: string[];
 }
 
 /** Progress event from the SSE scan stream. */

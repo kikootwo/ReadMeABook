@@ -12,7 +12,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { discoverAudiobooks, cleanSearchString } from '@/lib/utils/bulk-import-scanner';
 import { getAudibleService } from '@/lib/integrations/audible.service';
-import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
+import { getImportBlock, loadImportRoots, isInMediaFolder } from '@/lib/utils/bulk-import-checks';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { catalogTitleFitsFolder, extractDigitAsinCandidate } from '@/lib/utils/bulk-import-asin';
 import { getConfigService } from '@/lib/services/config.service';
@@ -147,6 +147,7 @@ export async function POST(request: NextRequest) {
 
             // Phase 2: Match each audiobook against Audible
             const audibleService = getAudibleService();
+            const importRoots = await loadImportRoots();
             const results: any[] = [];
             // Region language, read once, and only when a folder holds an all-digit ASIN candidate
             let candidateLangConfig: LanguageConfig | null = null;
@@ -221,34 +222,10 @@ export async function POST(request: NextRequest) {
                 }
 
                 if (match) {
-
-                  // Check library availability
-                  const plexMatch = await findPlexMatch({
-                    asin: match.asin,
-                    title: match.title,
-                    author: match.author,
-                    narrator: match.narrator,
-                  });
-                  inLibrary = plexMatch !== null;
-
-                  // Check for active requests
-                  if (!inLibrary) {
-                    const activeRequest = await prisma.request.findFirst({
-                      where: {
-                        audiobook: { audibleAsin: match.asin },
-                        type: 'audiobook',
-                        status: {
-                          in: [
-                            'pending', 'searching', 'downloading', 'processing',
-                            'awaiting_search', 'awaiting_import', 'awaiting_approval',
-                            'downloaded', 'available',
-                          ],
-                        },
-                        deletedAt: null,
-                      },
-                    });
-                    hasActiveRequest = activeRequest !== null;
-                  }
+                  // In the library, else an active request by any user (the import refuses both)
+                  const block = await getImportBlock(match.asin);
+                  inLibrary = block.inLibrary;
+                  hasActiveRequest = !inLibrary && block.hasActiveRequest;
                 }
               } catch (searchError) {
                 logger.warn(
@@ -281,6 +258,8 @@ export async function POST(request: NextRequest) {
                   : null,
                 inLibrary,
                 hasActiveRequest,
+                // Delivered files: the review screen offers no Change match on them
+                inMediaFolder: await isInMediaFolder(book.folderPath, book.audioFiles, importRoots),
               };
 
               results.push(result);
