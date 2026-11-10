@@ -90,7 +90,7 @@ test('#177: GET /api/library gates request data per viewer and leaks no server-o
   const canaryQ: Record<string, Record<string, number>> = {};
   for (const [name, rmab] of Object.entries(viewers)) {
     canaryQ[name] = {};
-    for (const q of [CANARY.absFolder, CANARY.placedEbook, CANARY.error, CANARY.adminPath, CANARY.ebookFolder]) {
+    for (const q of [CANARY.absFolder, CANARY.placedEbook, CANARY.error, CANARY.adminPath, CANARY.ebookFolder, CANARY.bypass, CANARY.rawLibraryAsin, CANARY.thumbToken, 'epub']) {
       canaryQ[name][q] = (await rmab.get(`/api/library?q=${encodeURIComponent(q)}`)).matched;
     }
   }
@@ -164,4 +164,30 @@ test('#177: GET /api/library gates request data per viewer and leaks no server-o
   expect.soft(liveIds, 'live mode lists the in-flight request').toContain(downloadingId);
   expect.soft(liveIds, 'live mode skips non-live requests').not.toContain(byTitle('other', 'Failed')?.id);
   expect.soft(responses.other.live.refreshMs).toBe(5000);
+
+  // The row cache: a change that keeps the row count and updated_at still reaches the list; the
+  // first call after it may serve the previous rows while the one rebuild runs.
+  psql(`update plex_library set title = '${PREFIX} Scan Renamed', updated_at = updated_at where plex_guid = 'e2e-177-scan'`);
+  const renamedSeen: string[] = [];
+  for (let i = 0; i < 10 && !renamedSeen.includes(`${PREFIX} Scan Renamed`); i++) {
+    const page = await other.rmab.get(`/api/library?limit=120&q=${encodeURIComponent(PREFIX)}`);
+    renamedSeen.splice(0, renamedSeen.length, ...(page.items ?? []).map((item: any) => item.title));
+    if (!renamedSeen.includes(`${PREFIX} Scan Renamed`)) await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
+  // Live and full pick the same request: a newer request on the downloading book takes it out of live
+  const downloadingBook = psql(`select id from audiobooks where audible_asin = 'B0E177DOWN'`);
+  psql(`insert into requests (id, user_id, audiobook_id, type, status, progress, created_at, updated_at)
+        values (gen_random_uuid(), '${other.id}', '${downloadingBook}', 'audiobook', 'awaiting_approval', 0, now() + interval '1 second', now())`);
+  const afterLive = await other.rmab.get('/api/library?live=1');
+  const afterFull = await other.rmab.get(`/api/library?limit=120&q=${encodeURIComponent(PREFIX)}`);
+  const followUp = {
+    renamedListed: renamedSeen.includes(`${PREFIX} Scan Renamed`),
+    liveIds: (afterLive.items ?? []).map((item: any) => item.id),
+    downloadingInFull: (afterFull.items ?? []).find((item: any) => item.id === downloadingId)?.statusGroup,
+  };
+  writeEvidence('177/follow-up.json', followUp);
+  expect.soft(followUp.renamedListed, 'a row change with an unchanged updated_at reaches the list').toBe(true);
+  expect.soft(followUp.liveIds, 'live drops a book whose newest request is not live').not.toContain(downloadingId);
+  expect.soft(followUp.downloadingInFull, 'full mode shows that newer request').toBe('needs_approval');
 });

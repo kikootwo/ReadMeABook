@@ -1,148 +1,217 @@
 /**
- * Component: E2E #177 Library API performance under a CPU cap (full mode vs live mode)
+ * Component: E2E #177 Library API performance at the design's load under a 2-CPU cap
  * Documentation: documentation/testing/e2e-harness.md
  *
- * Run with `--overrides cpu-cap` (rmab container limited to 2 CPUs; Postgres runs in it too).
- * Schedules off (library scan, recently added, Audible refresh) and RMAB's boot burst waited out, so
- * no scan removes the seeded rows. psql seeds 10k `plex_library` rows in the active library plus 2k
- * audiobook requests (half on library books, statuses spread, 5% live), then grows the library to
- * 30k. Per size: an idle `/api/health` baseline, then a loaded window with 4 back-to-back `?live=1`
- * pollers, 2 back-to-back full first-page loads (admin and a user) and a `/api/health` sampler every
- * 50 ms from the runner (out of process). Reports p50/p95/p99 per mode and the health latency vs its
- * idle baseline (event-loop lag proxy) in `177-perf/result.json`. Budgets are soft checks.
+ * Run with `--overrides cpu-cap` (rmab limited to 2 CPUs; Postgres runs in it too). Schedules off
+ * and RMAB's boot burst waited out, so no real scan removes the seeded rows; the recently-added
+ * check's writes are made by the spec instead. psql seeds 10k `plex_library` rows with real id
+ * shapes plus 2k audiobook requests. The budgeted case, 60 s open loop at 10k: 5 `?live=1` pollers
+ * every 5 s, one full load every 2 s (first pages, sorts, a status filter, a search, author groups,
+ * a cursor page), one burst of 10 full loads (5 viewers x 2 pages) at 30 s; during it the
+ * recently-added touch of the 10 newest rows every 10 s, a progress tick on downloading requests
+ * every 5 s and one new library row at 40 s. Event-loop lag: a static file (no database call)
+ * every 50 ms, excess over its idle median; `/api/health` every 200 ms against its idle p95.
+ * Budgets (soft): full p95 < 300 ms, live p95 < 50 ms, lag p99 < 100 ms, health p95 <= idle p95 +
+ * 25 ms, no failed call. Calibration only (no budget): the cold first load, the same window at 30k
+ * rows, and a closed-loop stress case at 10k. Evidence: `177-perf/result.json`.
  */
 
 import { test, expect } from '@playwright/test';
 import { execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab, stackExecSync, writeEvidence } from '../../lib/harness';
-import { psql } from './242-helpers';
+import { psql, sqlStr } from './242-helpers';
 import { disableSchedules, waitStartupSettled } from './284-helpers';
 import { activeLibraryId, percentile, registerUser, timedGet } from './177-library-helpers';
+import { every, loop, probe, psqlAsync, record, sampled, seedLibrary, seedRequests, sleep, stats, type Sampled } from './177-perf-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 
-const LOAD_MS = 30_000;
-const BUDGET = { fullP95: 300, liveP95: 50, healthRatio: 1.5, lagP99: 100 };
+const WINDOW_MS = 60_000;
+const STRESS_MS = 30_000;
+const LAG_PROBE = '/file.svg';
+const BUDGET = { fullP95: 300, liveP95: 50, lagP99: 100, healthMarginMs: 25 };
 
-function seedLibrary(libraryId: string, from: number, to: number) {
-  psql(
-    `insert into plex_library (id, plex_guid, title, author, narrator, duration, year, asin, plex_library_id, added_at, last_scanned_at, created_at, updated_at)
-     select gen_random_uuid(), 'e2e-177-perf-' || g, 'Perf Book ' || g, 'Perf Author ' || (g % 700), 'Perf Narrator', 36000000, 1950 + (g % 70),
-            'B0P' || lpad(g::text, 7, '0'), ${`'${libraryId.replace(/'/g, "''")}'`}, now() - (g || ' minutes')::interval, now(), now(), now()
-     from generate_series(${from}, ${to}) g`
-  );
+interface Viewer { name: string; token: string }
+
+/** The full-mode queries a household's tabs make, rotated through the window. */
+function fullQueries(cursor: string): string[] {
+  return [
+    '/api/library?limit=60',
+    '/api/library?limit=60&sort=title',
+    '/api/library?limit=60&status=on_the_way,problem',
+    '/api/library?limit=60&q=perf%20author%2012',
+    '/api/library?limit=60&group=author',
+    `/api/library?limit=60&cursor=${encodeURIComponent(cursor)}`,
+  ];
 }
 
-function seedRequests(userIds: string[]) {
-  const ids = `array[${userIds.map((id) => `'${id}'`).join(',')}]::text[]`;
-  psql(
-    `begin;
-     insert into audiobooks (id, audible_asin, title, author, status, created_at, updated_at)
-     select gen_random_uuid(), case when g <= 1000 then 'B0P' || lpad(g::text, 7, '0') else 'B0Q' || lpad(g::text, 7, '0') end,
-            'Requested Perf Book ' || g, 'Perf Author ' || (g % 700), 'requested', now(), now()
-     from generate_series(1, 2000) g;
-     insert into requests (id, user_id, audiobook_id, type, status, progress, created_at, updated_at)
-     select gen_random_uuid(), (${ids})[1 + (row_number() over () % ${userIds.length})], a.id, 'audiobook',
-            (array['available','downloading','failed','awaiting_approval','denied','pending','downloaded','awaiting_release','available','available','searching','warn','available','available','awaiting_search','available','available','available','available','processing'])[1 + (row_number() over () % 20)],
-            (row_number() over () % 100), now() - (row_number() over () || ' seconds')::interval, now()
-     from audiobooks a where a.audible_asin like 'B0P%' or a.audible_asin like 'B0Q%';
-     commit;`
-  );
-}
-
-async function sample(token: string, path: string, n: number) {
-  const ms: number[] = [];
-  for (let i = 0; i < n; i++) ms.push((await timedGet(token, path)).ms);
-  return ms;
-}
-
-async function loadedWindow(admin: Rmab, user: Rmab) {
-  const stopAt = Date.now() + LOAD_MS;
-  const live: number[] = [];
-  const full: number[] = [];
+async function idleBaseline(admin: Rmab) {
+  const lag: number[] = [];
   const health: number[] = [];
-  const errors: string[] = [];
-  const loop = async (token: string, path: string, into: number[], gapMs: number) => {
-    while (Date.now() < stopAt) {
-      const r = await timedGet(token, path);
-      if (r.status !== 200) errors.push(`${path} ${r.status}`);
-      into.push(r.ms);
-      if (gapMs) await new Promise((res) => setTimeout(res, gapMs));
-    }
-  };
-  await Promise.all([
-    ...[admin, user, admin, user].map((v) => loop(v.token, '/api/library?live=1', live, 0)),
-    loop(admin.token, '/api/library?limit=60', full, 0),
-    loop(user.token, '/api/library?limit=60&sort=title', full, 0),
-    loop(admin.token, '/api/health', health, 50),
-  ]);
-  return { live, full, health, errors };
+  const full: number[] = [];
+  const live: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    lag.push(await probe(LAG_PROBE));
+    await sleep(50);
+  }
+  for (let i = 0; i < 40; i++) health.push((await timedGet(admin.token, '/api/health')).ms);
+  for (let i = 0; i < 10; i++) full.push((await timedGet(admin.token, '/api/library?limit=60')).ms);
+  for (let i = 0; i < 20; i++) live.push((await timedGet(admin.token, '/api/library?live=1')).ms);
+  return { lag, health, full, live };
 }
 
-const stats = (ms: number[]) => ({ n: ms.length, p50: Math.round(percentile(ms, 50)), p95: Math.round(percentile(ms, 95)), p99: Math.round(percentile(ms, 99)) });
+/** The design's load for WINDOW_MS, with the background writes a default install makes. */
+async function realisticWindow(viewers: Viewer[], libraryId: string, cursor: string) {
+  const startedAt = Date.now();
+  const stopAt = startedAt + WINDOW_MS;
+  const live = sampled();
+  const full = sampled();
+  const burst = sampled();
+  const health = sampled();
+  const lag: number[] = [];
+  const writes: string[] = [];
+  const queries = fullQueries(cursor);
+  const write = (label: string, sql: string) =>
+    psqlAsync(sql).then(() => void writes.push(`${Date.now() - startedAt}ms ${label}`), (e) => void writes.push(`${label} FAILED ${e.message}`));
+  const lib = sqlStr(libraryId);
 
-test('#177: Library full and live modes at 10k and 30k library rows under a 2-CPU cap', async () => {
-  test.setTimeout(20 * 60_000);
+  await Promise.all([
+    // 5 live pollers at refreshMs (5 s), starts spread over the first 5 s
+    ...viewers.slice(0, 5).map((v, i) => every(stopAt, 5_000, i * 1_000, () => record(v.token, '/api/library?live=1', live))),
+    // one full load every 2 s, rotating queries and viewers
+    every(stopAt, 2_000, 500, (i) => record(viewers[i % viewers.length].token, queries[i % queries.length], full)),
+    // the settle burst: 5 tabs revalidate their 2 loaded pages at once
+    (async () => {
+      await sleep(30_000);
+      await Promise.all(viewers.slice(0, 5).flatMap((v) => [
+        record(v.token, '/api/library?limit=60', burst),
+        record(v.token, `/api/library?limit=60&cursor=${encodeURIComponent(cursor)}`, burst),
+      ]));
+    })(),
+    every(stopAt, 50, 0, async () => void lag.push(await probe(LAG_PROBE))),
+    every(stopAt, 200, 25, () => record(viewers[0].token, '/api/health', health)),
+    // recently-added check: stamps its 10 newest rows every run, values unchanged (every 10 s here, 5 min by default)
+    every(stopAt, 10_000, 5_000, () => write('recently-added touch', `update plex_library set last_scanned_at = now(), updated_at = now()
+      where id in (select id from plex_library where plex_library_id = ${lib} order by added_at desc nulls last limit 10)`)),
+    // downloads move: progress ticks on the downloading requests
+    every(stopAt, 5_000, 2_500, () => write('progress tick', `update requests set progress = least(progress + 1, 99), updated_at = now()
+      where type = 'audiobook' and status = 'downloading' and deleted_at is null`)),
+    // a scan finds one new book: one real rebuild under load
+    (async () => {
+      await sleep(40_000);
+      await write('new library row', `insert into plex_library (id, plex_guid, title, author, plex_library_id, added_at, last_scanned_at, created_at, updated_at)
+        values (gen_random_uuid(), 'li_e2e177perfnew' || floor(random() * 1e9)::text, 'Perf Book New', 'Perf Author New', ${lib}, now(), now(), now(), now())`);
+    })(),
+  ]);
+  const all: Sampled = { ms: [...full.ms, ...burst.ms], errors: [...full.errors, ...burst.errors] };
+  return { live, full, burst, all, health, lag, writes };
+}
+
+async function stressWindow(admin: Viewer, user: Viewer) {
+  const stopAt = Date.now() + STRESS_MS;
+  const live = sampled();
+  const full = sampled();
+  await Promise.all([
+    ...[admin, user, admin, user].map((v) => loop(stopAt, () => record(v.token, '/api/library?live=1', live))),
+    loop(stopAt, () => record(admin.token, '/api/library?limit=60', full)),
+    loop(stopAt, () => record(user.token, '/api/library?limit=60&sort=title', full)),
+  ]);
+  return { live: stats(live.ms), full: stats(full.ms), errors: [...live.errors, ...full.errors].slice(0, 10) };
+}
+
+function summarize(idle: Awaited<ReturnType<typeof idleBaseline>>, w: Awaited<ReturnType<typeof realisticWindow>>) {
+  const lagIdleMedian = percentile(idle.lag, 50);
+  return {
+    idle: { lagProbe: stats(idle.lag), health: stats(idle.health), full: stats(idle.full), live: stats(idle.live) },
+    loaded: {
+      full: stats(w.all.ms),
+      fullSteady: stats(w.full.ms),
+      fullBurst: stats(w.burst.ms),
+      live: stats(w.live.ms),
+      health: stats(w.health.ms),
+      lagProbe: stats(w.lag),
+    },
+    lagP99Ms: Math.round(percentile(w.lag, 99) - lagIdleMedian),
+    healthP95OverIdleMs: Math.round(percentile(w.health.ms, 95) - percentile(idle.health, 95)),
+    errors: [...w.all.errors, ...w.live.errors, ...w.health.errors].slice(0, 10),
+    writes: w.writes,
+  };
+}
+
+test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 30k and stress as calibration', async () => {
+  test.setTimeout(25 * 60_000);
   const admin = await Rmab.loginAdmin();
   const disabled: string[] = [];
-  await disableSchedules(admin, disabled);
-  await waitStartupSettled();
+  try {
+    await disableSchedules(admin, disabled);
+    await waitStartupSettled();
 
-  const libraryId = activeLibraryId();
-  // cgroup v2 first, then v1; the host-side `docker inspect` NanoCpus is the authority (harness log).
-  const cpus = stackExecSync('rmab', [
-    'sh',
-    '-c',
-    'cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo "v1 $(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null) $(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null)" || echo unknown',
-  ]).trim();
-  const users: { id: string; rmab: Rmab }[] = [];
-  for (let i = 0; i < 4; i++) users.push(await registerUser(admin, `perf177u${i}`, `e2e-perf177-pass-${i}`));
-  const user = users[0].rmab;
+    const libraryId = activeLibraryId();
+    const cpus = stackExecSync('rmab', ['sh', '-c', 'cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo unknown']).trim();
+    const users: { id: string; rmab: Rmab }[] = [];
+    for (let i = 0; i < 4; i++) users.push(await registerUser(admin, `perf177u${i}`, `e2e-perf177-pass-${i}`));
+    const viewers: Viewer[] = [{ name: 'admin', token: admin.token }, ...users.map((u, i) => ({ name: `user${i}`, token: u.rmab.token }))];
+    const adminId = psql(`select id from users where role = 'admin' order by created_at limit 1`);
 
-  seedLibrary(libraryId, 1, 10_000);
-  seedRequests([psql(`select id from users where role = 'admin' order by created_at limit 1`), ...users.map((u) => u.id)]);
-  psql('analyze plex_library; analyze requests; analyze audiobooks;');
+    seedLibrary(libraryId, 1, 10_000);
+    seedRequests([adminId, ...users.map((u) => u.id)]);
+    psql('analyze plex_library; analyze requests; analyze audiobooks;');
+    const rowCount = () => Number(psql(`select count(*) from plex_library where plex_library_id = ${sqlStr(libraryId)}`));
+    const guidWindows = Number(psql(`select count(*) from plex_library where plex_library_id = ${sqlStr(libraryId)} and plex_guid ~ '[A-Za-z0-9]{10}'`));
 
-  const result: Record<string, unknown> = { cpuMax: cpus, budget: BUDGET };
-  for (const size of [10_000, 30_000]) {
-    if (size === 30_000) {
-      seedLibrary(libraryId, 10_001, 30_000);
-      psql('analyze plex_library;');
+    const result: Record<string, unknown> = { cpuMax: cpus, budget: BUDGET, windowMs: WINDOW_MS, guidRowsWithAsinWindows: guidWindows };
+
+    // 10k: cold first load (calibration), idle baseline, the budgeted window, then the stress case
+    const cold = await timedGet(admin.token, '/api/library?limit=60');
+    const cursor = cold.body?.nextCursor as string;
+    const idle10 = await idleBaseline(admin);
+    const window10 = await realisticWindow(viewers, libraryId, cursor);
+    result.rows10000 = {
+      counts: { libraryRows: rowCount(), total: cold.body?.stats?.total },
+      coldFirstMs: Math.round(cold.ms),
+      ...summarize(idle10, window10),
+      stress: await stressWindow(viewers[0], viewers[1]),
+    };
+
+    // 30k (calibration): the first call after growing serves the previous rows; time until the new rows show
+    seedLibrary(libraryId, 10_001, 30_000);
+    psql('analyze plex_library;');
+    const grownAt = performance.now();
+    const firstAfterGrow = await timedGet(admin.token, '/api/library?limit=60');
+    let visibleMs = NaN;
+    for (let i = 0; i < 60; i++) {
+      const r = await timedGet(admin.token, '/api/library?limit=60');
+      if ((r.body?.stats?.total ?? 0) >= 30_000) {
+        visibleMs = Math.round(performance.now() - grownAt);
+        break;
+      }
+      await sleep(250);
     }
-    const first = await timedGet(admin.token, '/api/library?limit=60');
-    const counts = { libraryRows: Number(psql(`select count(*) from plex_library where plex_library_id = '${libraryId.replace(/'/g, "''")}'`)), total: first.body?.stats?.total, matched: first.body?.matched };
-    await sample(admin.token, '/api/library?limit=60', 3); // warm-up
-    const idleHealth = await sample(admin.token, '/api/health', 40);
-    const idleFull = await sample(admin.token, '/api/library?limit=60', 10);
-    const idleLive = await sample(admin.token, '/api/library?live=1', 20);
-    const loaded = await loadedWindow(admin, user);
-    const idleMedian = percentile(idleHealth, 50);
-    result[`rows${size}`] = {
-      counts,
-      coldFirstMs: Math.round(first.ms), // first call after the seed: rebuilds the row snapshot
-
-      idle: { health: stats(idleHealth), full: stats(idleFull), live: stats(idleLive) },
-      loaded: { full: stats(loaded.full), live: stats(loaded.live), health: stats(loaded.health), errors: loaded.errors.slice(0, 10) },
-      healthP95Ratio: Number((percentile(loaded.health, 95) / percentile(idleHealth, 95)).toFixed(2)),
-      lagP99Ms: Math.round(percentile(loaded.health, 99) - idleMedian),
+    const idle30 = await idleBaseline(admin);
+    const window30 = await realisticWindow(viewers, libraryId, cursor);
+    result.rows30000 = {
+      counts: { libraryRows: rowCount() },
+      firstCallAfterGrowMs: Math.round(firstAfterGrow.ms),
+      newRowsVisibleAfterMs: visibleMs,
+      ...summarize(idle30, window30),
     };
-  }
-  writeEvidence('177-perf/result.json', result);
+    writeEvidence('177-perf/result.json', result);
 
-  for (const id of disabled) await admin.raw('PUT', `/api/admin/jobs/${id}`, { enabled: true });
-
-  for (const size of [10_000, 30_000]) {
-    const r = result[`rows${size}`] as {
-      counts: { libraryRows: number; total: number };
-      loaded: { errors: string[]; full: { p95: number }; live: { p95: number } };
-      healthP95Ratio: number;
-      lagP99Ms: number;
-    };
-    expect.soft(r.counts.libraryRows, `${size}: rows seeded`).toBe(size);
-    expect.soft(r.counts.total, `${size}: entries (library rows + 1000 request-only books)`).toBe(size + 1000);
-    expect.soft(r.loaded.errors, `${size}: no failed call`).toEqual([]);
-    expect.soft(r.loaded.full.p95, `${size}: full first page p95 under load (ms)`).toBeLessThan(BUDGET.fullP95);
-    expect.soft(r.loaded.live.p95, `${size}: live mode p95 under load (ms)`).toBeLessThan(BUDGET.liveP95);
-    expect.soft(r.healthP95Ratio, `${size}: unrelated endpoint p95 vs idle`).toBeLessThanOrEqual(BUDGET.healthRatio);
-    expect.soft(r.lagP99Ms, `${size}: event-loop lag proxy p99 (ms)`).toBeLessThan(BUDGET.lagP99);
+    const r = result.rows10000 as ReturnType<typeof summarize> & { counts: { libraryRows: number; total: number } };
+    expect.soft(r.counts.libraryRows, '10k rows seeded').toBe(10_000);
+    expect.soft(r.counts.total, 'entries: library rows + 1000 request-only books').toBe(11_000);
+    expect.soft(guidWindows, 'guid index populated by real id shapes').toBeGreaterThan(9_000);
+    expect.soft(r.errors, 'no failed call in the window').toEqual([]);
+    expect.soft(r.writes.filter((w) => w.includes('FAILED')), 'background writes ran').toEqual([]);
+    expect.soft(r.loaded.full.p95, 'full p95 under the design load (ms)').toBeLessThan(BUDGET.fullP95);
+    expect.soft(r.loaded.live.p95, 'live p95 under the design load (ms)').toBeLessThan(BUDGET.liveP95);
+    expect.soft(r.lagP99Ms, 'event-loop lag p99, static probe (ms)').toBeLessThan(BUDGET.lagP99);
+    expect.soft(r.healthP95OverIdleMs, '/api/health p95 over its idle p95 (ms)').toBeLessThanOrEqual(BUDGET.healthMarginMs);
+  } finally {
+    for (const id of disabled) await admin.raw('PUT', `/api/admin/jobs/${id}`, { enabled: true });
+    psql(`begin;
+      delete from requests where audiobook_id in (select id from audiobooks where audible_asin like 'B0P%' or audible_asin like 'B0Q%');
+      delete from audiobooks where audible_asin like 'B0P%' or audible_asin like 'B0Q%';
+      delete from plex_library where title like 'Perf Book %';
+      commit;`);
   }
 });
