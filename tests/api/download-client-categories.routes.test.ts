@@ -66,7 +66,7 @@ function fakeList(url: string): string[] {
   return answer ?? [];
 }
 
-const req = (body: unknown) => ({ json: async () => body, headers: new Headers({ 'content-type': 'application/json' }) }) as any;
+const req = (body: unknown) => ({ json: async () => body, headers: new Headers({ 'content-type': 'application/json' }) }) as never;
 const stored = () => JSON.parse(store.values.download_clients || '[]');
 const qbit = { type: 'qbittorrent', name: 'qBittorrent', url: 'http://qbit:8080', username: 'u', password: 'p' };
 const sab = { type: 'sabnzbd', name: 'SABnzbd', url: 'http://sab:8081', password: 'key' };

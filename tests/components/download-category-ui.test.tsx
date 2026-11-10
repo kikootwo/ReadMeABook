@@ -26,7 +26,7 @@ function openModal(type: 'qbittorrent' | 'sabnzbd' | 'deluge', names: string[], 
       onClose={() => undefined}
       mode={initialClient ? 'edit' : 'add'}
       clientType={type}
-      initialClient={initialClient as any}
+      initialClient={initialClient as never}
       onSave={onSave}
       apiMode="wizard"
       downloadDir="/downloads"
@@ -110,7 +110,7 @@ describe('Category field in the modal', () => {
 describe('Category line on the card', () => {
   const base = { id: 'c1', name: 'qBittorrent', url: 'http://qbit:8080', enabled: true };
   const card = (client: Record<string, unknown>) =>
-    render(<DownloadClientCard client={{ ...base, type: 'qbittorrent', ...client } as any} onEdit={() => undefined} onDelete={() => undefined} />);
+    render(<DownloadClientCard client={{ ...base, type: 'qbittorrent', ...client } as never} onEdit={() => undefined} onDelete={() => undefined} />);
 
   it('no line for the default', () => {
     card({ category: 'readmeabook' });

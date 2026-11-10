@@ -31,10 +31,10 @@ const body = (downloadClient: unknown) => ({
     downloadClient,
     paths: { download_dir: '/downloads', media_dir: '/media' },
   }),
-}) as any;
+}) as never;
 
 const storedClients = () => {
-  const call = prismaMock.configuration.upsert.mock.calls.find(([arg]: any[]) => arg.where.key === 'download_clients');
+  const call = prismaMock.configuration.upsert.mock.calls.find((call: unknown[]) => (call[0] as { where: { key: string } }).where.key === 'download_clients');
   return call ? JSON.parse(call[0].create.value) : null;
 };
 

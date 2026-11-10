@@ -14,7 +14,7 @@ const axiosMock = vi.hoisted(() => ({
   create: vi.fn(() => clientMock),
   post: vi.fn(),
   get: vi.fn(),
-  isAxiosError: (error: any) => Boolean(error?.isAxiosError),
+  isAxiosError: (error: { isAxiosError?: boolean } | undefined) => Boolean(error?.isAxiosError),
 }));
 
 vi.mock('axios', () => ({ default: axiosMock, ...axiosMock }));
@@ -23,8 +23,9 @@ const MAGNET = 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567';
 
 function service(category: string, owned?: boolean) {
   const s = new QBittorrentService('http://qb', 'user', 'pass', '/downloads', category, false, undefined, owned);
-  (s as any).cookie = 'SID=test';
-  const add = vi.spyOn(s as any, 'addMagnetLink').mockResolvedValue({ id: 'h', alreadyInClient: false });
+  const internals = s as unknown as { cookie: string; addMagnetLink: (...args: unknown[]) => Promise<unknown> };
+  internals.cookie = 'SID=test';
+  const add = vi.spyOn(internals, 'addMagnetLink').mockResolvedValue({ id: 'h', alreadyInClient: false });
   return { s, add };
 }
 
