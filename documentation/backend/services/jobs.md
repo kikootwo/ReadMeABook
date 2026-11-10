@@ -57,13 +57,15 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - 10s delay between checks (prevents excessive logging)
 - Only logs progress at 5% intervals or first 5%
 - Auto-reschedules until complete/failed
+- **Client reports `failed`** (#332, `client-failure.ts`): automatic grab + release fault → block, request `searching`, next automatic search (`clientFailures` + 1, Bull `jobId` `next-release-<historyId>`), at most 3 grabs in a row; hand-picked/ebook grabs and not-the-release's-fault failures → `failed`; an older download never changes the request. Rule table: [release-blocklist.md](../../admin-features/release-blocklist.md#next-release-after-a-client-failure-332)
+- Every re-queue (progress, save-path wait, connection back-off) carries `clientFailures` when set (`requeueMonitor`)
 - qBittorrent finished but still outside its save path: 30 s grace (5 re-checks), then one `warn` and organize from the incomplete folder (#520, [qbittorrent.md](../../phase3/qbittorrent.md#completion--relocation-grace))
 - **Cancelled/deleted requests** (`src/lib/utils/request-stop-guard.ts`):
   - Guarded writes are one conditional `updateMany` (`where: { id, deletedAt: null, status: { not: 'cancelled' } }`); 0 rows → leave the request alone. No request id → writes nothing (an unfiltered `updateMany` would hit every row)
   - Guarded sites:
     - `search_indexers`: `searching` claim (0 rows → no search), both `awaiting_search` writes (0 rows → not re-queued for the scheduled re-search jobs) and its `failed` write
     - `download_torrent`: `downloading` claim (0 rows → nothing added to the client) and its permanent-error `failed` write
-    - `monitor_download`: each poll first reads the request (cancelled, soft-deleted or missing → stop: no client call, no write, no re-queue); re-checked before queuing `organize_files`; client-failure branch and PATH 3 `failed` writes (0 rows → no blocklist entry, no `request_error`)
+    - `monitor_download`: each poll first reads the request (cancelled, soft-deleted or missing → stop: no client call, no write, no re-queue); re-checked before queuing `organize_files`; client-failure branch (`searching` or `failed`) and PATH 3 `failed` writes (0 rows → no blocklist entry, no search, no `request_error`)
     - `organize_files`: audiobook and ebook `processing` claim (0 rows → not imported)
     - `job-queue.service.ts` `failed` handlers for `monitor_download` (history `failed` only when the request row was written) and `download_torrent`
     - `download_torrent`: after creating its row, a cancel that landed during the add runs the cancel's download step (no monitor job)
@@ -74,7 +76,8 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 **search_indexers:**
 - No torrents found → 'awaiting_search' status (not failed)
 - Allows automatic retry via scheduled job
-- Upstream release-date gate: 4 enqueue sites (`request-creator.service`, `retry-missing-torrents.processor`, `monitor-rss-feeds.processor`, `bookdate/swipe/route`) check `shouldSkipAutoSearch` against `indexer.skip_unreleased`; gated requests are created/kept in `awaiting_release` and `addSearchJob` is not called. Manual search bypasses the gate.
+- Upstream release-date gate: 4 enqueue sites (`request-creator.service`, `retry-missing-torrents.processor`, `monitor-rss-feeds.processor`, `bookdate/swipe/route`) check `shouldSkipAutoSearch` against `indexer.skip_unreleased`; gated requests are created/kept in `awaiting_release` and `addSearchJob` is not called. Manual search bypasses the gate, and so does the next-release search after a client failure (`client-failure.ts`, #332: the book was already grabbed).
+- Next-release search (`clientFailures` > 0) that finds nothing usable with every indexer search answered → `failed` "Download failed; no other release found: …" + one `request_error` (not `awaiting_search`). Every grab it queues carries `clientFailures` (`?? 0`).
 
 **organize_files:**
 - No audiobook files found → 'awaiting_import' status
@@ -106,10 +109,13 @@ All payloads now include `jobId` (database job ID) automatically added by the jo
 
 ```typescript
 // search_indexers
-{jobId: string, requestId: string, audiobook: {id, title, author}}
+{jobId: string, requestId: string, audiobook: {id, title, author, asin?}, clientFailures?: number}
 
-// monitor_download
-{jobId: string, requestId: string, downloadHistoryId: string, downloadClientId: string, downloadClient: 'qbittorrent'|'transmission'}
+// download_torrent (clientFailures: automatic grabs only, #332)
+{jobId: string, requestId: string, audiobook: {id, title, author}, torrent, alternateTorrents?, clientFailures?: number}
+
+// monitor_download (clientFailures absent = hand-picked)
+{jobId: string, requestId: string, downloadHistoryId: string, downloadClientId: string, downloadClient: DownloadClientType, lastProgress?, stallCount?, pathWaitCount?, connectionFailureCount?, clientFailures?: number}
 
 // organize_files
 {jobId: string, requestId: string, audiobookId: string, downloadPath: string, targetPath: string}
