@@ -877,9 +877,9 @@ describe('processMonitorDownload', () => {
     expect(result.progress).toBe(35); // Should be converted to 35 (not 0.35)
 
     // Verify database was updated with correct percentage (0-100, not 0.0-1.0)
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'req-8' },
+        where: { id: 'req-8', status: 'downloading' },
         data: expect.objectContaining({
           progress: 35, // Should be 35, not 0.35
         }),
