@@ -3,7 +3,7 @@
  * Documentation: documentation/phase3/qbittorrent.md
  *
  * ReadMeABook creates or re-paths only its own category; one that already existed is used in
- * Manual mode (autoTMM=false + savepath) and never touched. Lookups try the exact name first.
+ * Manual mode (autoTMM=false + savepath) and never touched. The owned lookup is the exact name only.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,14 +68,36 @@ describe('qBittorrent category ownership', () => {
     expect(add).toHaveBeenCalledWith(MAGNET, 'audiobooks-rmab', undefined, undefined);
   });
 
-  it('an owned category in another case is edited on the client\'s key, not created twice, and the add sends that key', async () => {
+  it('an owned category matches only its exact spelling: another app\'s "AudioBooks" is never edited', async () => {
     clientMock.get.mockResolvedValue({ data: { AudioBooks: { savePath: '/old' } } });
     const { s, add } = service('audiobooks', true);
 
     await s.addTorrent(MAGNET);
 
-    expect(categoryCalls()).toEqual([{ url: '/torrents/editCategory', category: 'AudioBooks', savePath: '/downloads' }]);
-    expect(add).toHaveBeenCalledWith(MAGNET, 'AudioBooks', undefined, undefined);
+    expect(categoryCalls()).toEqual([{ url: '/torrents/createCategory', category: 'audiobooks', savePath: '/downloads' }]);
+    expect(add).toHaveBeenCalledWith(MAGNET, 'audiobooks', undefined, undefined);
+  });
+
+  it('a hand-made "ReadMeABook" is not taken over: ReadMeABook creates its own "readmeabook"', async () => {
+    clientMock.get.mockResolvedValue({ data: { ReadMeABook: { savePath: '/other' } } });
+    const { s } = service('readmeabook');
+
+    await s.addTorrent(MAGNET);
+
+    expect(categoryCalls()).toEqual([{ url: '/torrents/createCategory', category: 'readmeabook', savePath: '/downloads' }]);
+  });
+
+  it('a category list that is not a plain object is unreadable: no create or edit, the add uses Manual mode', async () => {
+    for (const data of ['<html>login</html>', ['readmeabook'], null]) {
+      clientMock.post.mockClear();
+      clientMock.get.mockResolvedValue({ data });
+      const { s, add } = service('audiobooks', true);
+      await s.addTorrent(MAGNET);
+      expect(categoryCalls()).toEqual([]);
+      expect(add).toHaveBeenCalledWith(MAGNET, 'audiobooks', undefined, '/downloads');
+      clientMock.get.mockResolvedValue({ data });
+      await expect(s.getCategories()).rejects.toThrow('Failed to get qBittorrent categories: Unrecognised qBittorrent category list');
+    }
   });
 
   it('an exact match wins over another case: the other app\'s "Books" is never edited', async () => {

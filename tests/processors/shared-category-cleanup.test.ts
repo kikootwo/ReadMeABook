@@ -2,9 +2,11 @@
  * Component: Download Cleanup in a Category ReadMeABook Did Not Create (real filesystem)
  * Documentation: documentation/phase3/file-organization.md
  *
- * A usenet category that already existed in the client (another app's) can put that app's files
- * next to the job. Cleanup then unlinks only the verified imported files and removes a folder only
- * when it became empty; ReadMeABook's own category keeps the whole-folder removal.
+ * The mode comes from the job as the client reports it (its category and folder), never from the
+ * setting alone, and fails closed. ReadMeABook's own category keeps the whole-folder removal; any
+ * other job unlinks only the verified imported files and removes a folder only when it became
+ * empty, never above the job folder; a job with no folder of its own, or a client that can't be
+ * read, removes nothing.
  */
 
 import * as fs from 'fs';
@@ -18,7 +20,11 @@ const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.f
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
 const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }));
 const postProcess = vi.hoisted(() => vi.fn(async () => undefined));
-const usenet = vi.hoisted(() => ({ config: null as null | Record<string, unknown> }));
+const usenet = vi.hoisted(() => ({
+  config: null as null | Record<string, unknown>,
+  job: null as null | Error | { category: string; downloadPath?: string },
+  categoryFolder: null as null | Error | string,
+}));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizerMock }));
@@ -33,6 +39,16 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
     getAllClients: async () => [],
     getClientForProtocol: async () => usenet.config,
+    createFreshService: async () => ({
+      getDownload: async () => {
+        if (usenet.job instanceof Error) throw usenet.job;
+        return usenet.job;
+      },
+      getCategoryFolder: async () => {
+        if (usenet.categoryFolder instanceof Error) throw usenet.categoryFolder;
+        return usenet.categoryFolder;
+      },
+    }),
     getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess }),
   }),
 }));
@@ -58,8 +74,9 @@ function useCompletedDownload(downloadPath: string) {
   );
 }
 
-function organizeAllCopied(target: string, sources: string[]) {
+function organizeAllCopied(target: string, sources: string[], cover?: string) {
   organizerMock.organize.mockResolvedValue({
+    coverRecord: cover ? { source: cover, target: path.join(target, 'cover.jpg'), status: 'copied', verified: true } : undefined,
     success: true,
     targetPath: target,
     filesMovedCount: sources.length,
@@ -103,6 +120,9 @@ describe('cleanup in a usenet category ReadMeABook did not create', () => {
     configMock.get.mockImplementation(async (key: string) =>
       key === 'prowlarr_indexers' ? JSON.stringify([{ id: 7, protocol: 'usenet', removeAfterProcessing: true }]) : null
     );
+    usenet.config = { type: 'sabnzbd', category: 'books' }; // no ownedCategory: it already existed
+    usenet.job = null;
+    usenet.categoryFolder = null;
   });
 
   afterEach(() => {
@@ -110,12 +130,17 @@ describe('cleanup in a usenet category ReadMeABook did not create', () => {
   });
 
   const target = () => path.join(media, 'Author', 'Book');
+  /** The job as SABnzbd reports it: in `category`, at `folder`; the category writes to `categoryFolder` */
+  const reports = (category: string, folder: string, categoryFolder: string | null | Error) => {
+    usenet.job = { category, downloadPath: folder };
+    usenet.categoryFolder = categoryFolder;
+  };
 
   it('another app\'s file next to the job survives; only the imported files go', async () => {
-    usenet.config = { type: 'sabnzbd', category: 'books' }; // no ownedCategory: it already existed
-    const folder = path.join(downloads, 'other-app');
+    const folder = path.join(downloads, 'other-app', 'Book.Name');
     const parts = ['Book - 01.mp3', path.join('CD2', 'Book - 02.mp3')].map((n) => mkfile(path.join(folder, n)));
     const foreign = mkfile(path.join(folder, 'Other Book.epub'), 'other app');
+    reports('books', folder, path.join(downloads, 'other-app'));
     useCompletedDownload(folder);
     organizeAllCopied(target(), parts);
 
@@ -127,10 +152,27 @@ describe('cleanup in a usenet category ReadMeABook did not create', () => {
     expect(postProcess).toHaveBeenCalledWith('nzo_1');
   });
 
-  it('a folder holding only the imported files is removed once empty', async () => {
-    usenet.config = { type: 'sabnzbd', category: 'books' };
-    const folder = path.join(downloads, 'books', 'Book.Name');
-    const parts = ['Part 1.mp3', 'Part 2.mp3'].map((n) => mkfile(path.join(folder, n)));
+  it('the job folder goes once empty, but never the other app\'s category folder above it', async () => {
+    const categoryFolder = path.join(downloads, 'books');
+    const folder = path.join(categoryFolder, 'Book.Name');
+    const parts = ['Part 1.mp3', '...And Then.mp3'].map((n) => mkfile(path.join(folder, n)));
+    const cover = mkfile(path.join(folder, 'cover.jpg'), 'jpeg');
+    reports('books', folder, categoryFolder);
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts, cover);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(folder)).toBe(false); // a name starting with ".." and the cover went too
+    expect(fs.existsSync(categoryFolder)).toBe(true);
+  });
+
+  it('ReadMeABook\'s own category keeps the whole-folder removal (extras go with it)', async () => {
+    usenet.config = { type: 'sabnzbd', category: 'books', ownedCategory: 'books' };
+    const folder = path.join(downloads, 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    mkfile(path.join(folder, 'release.nfo'), 'nfo');
+    reports('Books', folder, new Error('not asked for an own category'));
     useCompletedDownload(folder);
     organizeAllCopied(target(), parts);
 
@@ -139,16 +181,54 @@ describe('cleanup in a usenet category ReadMeABook did not create', () => {
     expect(fs.existsSync(folder)).toBe(false);
   });
 
-  it('ReadMeABook\'s own category keeps the whole-folder removal (extras go with it)', async () => {
-    usenet.config = { type: 'sabnzbd', category: 'books', ownedCategory: 'books' };
-    const folder = path.join(downloads, 'Book.Name');
+  it('switched back to readmeabook while the job was in another app\'s category: the job decides (careful)', async () => {
+    usenet.config = { type: 'sabnzbd', category: 'readmeabook' };
+    const folder = path.join(downloads, 'other-app', 'Book.Name');
     const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
-    mkfile(path.join(folder, 'release.nfo'), 'nfo');
+    const foreign = mkfile(path.join(folder, 'notes.nfo'), 'other app');
+    reports('books', folder, path.join(downloads, 'other-app'));
     useCompletedDownload(folder);
     organizeAllCopied(target(), parts);
 
     await runOrganize(folder);
 
-    expect(fs.existsSync(folder)).toBe(false);
+    expect(fs.existsSync(parts[0])).toBe(false);
+    expect(fs.readFileSync(foreign, 'utf8')).toBe('other app');
+  });
+
+  it('a job with no folder of its own (the category\'s folder) removes nothing: another app\'s .mp3 stays', async () => {
+    const folder = path.join(downloads, 'other-app');
+    const parts = ['Book - 01.mp3'].map((n) => mkfile(path.join(folder, n)));
+    const foreign = mkfile(path.join(folder, 'Other Book - 01.mp3'), 'other app audio');
+    reports('books', `${folder}/`, folder);
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), [...parts, foreign]); // the organizer imports every audio file there
+
+    await runOrganize(folder);
+
+    expect(fs.readFileSync(foreign, 'utf8')).toBe('other app audio');
+    expect(fs.existsSync(parts[0])).toBe(true);
+    expect(postProcess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the usenet client was removed', () => { usenet.config = null; }],
+    ['the usenet client was replaced by another type', () => { usenet.config = { type: 'nzbget', category: 'readmeabook' }; }],
+    ['the job can\'t be read', () => { usenet.job = new Error('ECONNREFUSED'); }],
+    ['the job reports no category', () => { usenet.job = { category: '', downloadPath: '/x' }; }],
+    ['the category\'s folder can\'t be read', () => { usenet.categoryFolder = new Error('ECONNREFUSED'); }],
+    ['the category\'s folder is unknown', () => { usenet.categoryFolder = null; }],
+  ])('%s: nothing is removed', async (_label, arrange) => {
+    const folder = path.join(downloads, 'books', 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    reports('books', folder, path.join(downloads, 'books'));
+    arrange();
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(parts[0])).toBe(true);
+    expect(postProcess).not.toHaveBeenCalled();
   });
 });

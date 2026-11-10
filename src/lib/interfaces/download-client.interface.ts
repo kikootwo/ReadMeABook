@@ -305,6 +305,12 @@ export interface IDownloadClient {
   getCategories(): Promise<string[]>;
 
   /**
+   * Usenet clients: the folder a category writes jobs to, as the client sees it (unmapped).
+   * Null when unknown; throws when the client can't be read.
+   */
+  getCategoryFolder?(category: string): Promise<string | null>;
+
+  /**
    * Set the category/label for a download.
    * - qBittorrent: Sets torrent category
    * - Transmission: Sets torrent label

@@ -12,6 +12,7 @@ import { fetchDownloadSource } from '@/lib/integrations/download-source';
 import { urlForLog } from '@/lib/utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
 import { findCategory, sameCategory } from '@/lib/utils/download-category';
+import { nzbgetCategoryFolder } from './nzbget-category-folder';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -471,6 +472,13 @@ export class NZBGetService implements IDownloadClient {
       logger.error('Failed to get categories', { error: message });
       throw new Error(`Failed to get NZBGet categories: ${message}`);
     }
+  }
+
+  /** The folder `category` writes jobs to, as NZBGet sees it; null when unknown, throws when unreadable */
+  async getCategoryFolder(category: string): Promise<string | null> {
+    const config = await this.rpc<NZBGetConfigItem[]>('config');
+    if (!Array.isArray(config)) throw new Error('no config returned');
+    return nzbgetCategoryFolder(config, category);
   }
 
   /** Not applicable for usenet clients */

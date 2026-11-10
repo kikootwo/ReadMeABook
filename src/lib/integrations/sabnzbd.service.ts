@@ -12,7 +12,7 @@ import { fetchDownloadSource, type SourceAuth } from '@/lib/integrations/downloa
 import { urlForLog } from '@/lib/utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
 import { findCategory } from '@/lib/utils/download-category';
-import { parseSabCategories } from './sabnzbd-categories';
+import { parseSabCategories, sabCategoryFolder } from './sabnzbd-categories';
 import {
   duplicateOfNewJob,
   findExistingJob,
@@ -985,6 +985,12 @@ export class SABnzbdService implements IDownloadClient {
       logger.error('Failed to get categories', { error: message });
       throw new Error(`Failed to get SABnzbd categories: ${message}`);
     }
+  }
+
+  /** The folder `category` writes jobs to, as SABnzbd sees it; null when unknown, throws when unreadable */
+  async getCategoryFolder(category: string): Promise<string | null> {
+    const config = await this.getConfig();
+    return sabCategoryFolder(config.completeDir, config.categories, category);
   }
 
   /** Not applicable for usenet clients */

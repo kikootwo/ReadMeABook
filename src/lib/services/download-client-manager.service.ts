@@ -259,6 +259,11 @@ export class DownloadClientManager {
     return service.getCategories();
   }
 
+  /** A fresh, uncached service for one careful read (see listCategories) */
+  async createFreshService(config: DownloadClientConfig): Promise<IDownloadClient> {
+    return this.createService(config);
+  }
+
   /**
    * Create qBittorrent service instance
    */

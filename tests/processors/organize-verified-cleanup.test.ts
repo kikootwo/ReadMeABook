@@ -49,7 +49,9 @@ vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
 vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
     getAllClients: async () => [],
-    getClientForProtocol: async () => null,
+    // The job is in ReadMeABook's own category, as SABnzbd reports it (shared-category-cleanup.ts)
+    getClientForProtocol: async () => ({ type: 'sabnzbd', category: 'readmeabook' }),
+    createFreshService: async () => ({ getDownload: async () => ({ category: 'readmeabook', downloadPath: '/client/job' }) }),
     getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess }),
   }),
 }));

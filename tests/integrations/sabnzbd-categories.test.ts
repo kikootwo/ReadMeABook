@@ -8,7 +8,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SABnzbdService } from '@/lib/integrations/sabnzbd.service';
-import { parseSabCategories } from '@/lib/integrations/sabnzbd-categories';
+import { parseSabCategories, sabCategoryFolder } from '@/lib/integrations/sabnzbd-categories';
 
 const clientMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 const axiosMock = vi.hoisted(() => ({ create: vi.fn(() => clientMock), get: vi.fn(), isAxiosError: vi.fn(() => false) }));
@@ -36,14 +36,39 @@ describe('SABnzbd categories', () => {
         { name: '*', dir: '' },
         { name: 'books', dir: 'books' },
       ]);
-      expect(parseSabCategories({ readmeabook: { dir: '' } })).toEqual([{ name: 'readmeabook', dir: '' }]);
+      expect(parseSabCategories({ '*': { dir: '' }, readmeabook: { dir: '' } })).toEqual([{ name: '*', dir: '' }, { name: 'readmeabook', dir: '' }]);
     });
 
-    it('throws on an array without "*" or an unrecognised shape (fails closed)', () => {
+    it('throws on an array or object without "*" or an unrecognised shape (fails closed)', () => {
       expect(() => parseSabCategories([{ name: 'books', dir: '' }])).toThrow(/no "\*"/);
+      expect(() => parseSabCategories({ readmeabook: { dir: '' } })).toThrow(/no "\*"/);
+      expect(() => parseSabCategories({})).toThrow(/no "\*"/);
       expect(() => parseSabCategories([{ dir: 'x' }])).toThrow('Unrecognised SABnzbd category list');
       expect(() => parseSabCategories('books')).toThrow('Unrecognised SABnzbd category list');
       expect(() => parseSabCategories(undefined)).toThrow('Unrecognised SABnzbd category list');
+    });
+  });
+
+  describe('sabCategoryFolder', () => {
+    const cats = sabArray({ name: 'books', dir: 'other-app' }, { name: 'flat', dir: 'flat*' }, { name: 'abs', dir: '/srv/abs' }, { name: 'root', dir: '' });
+    it('is the category dir under complete_dir, an absolute dir as is, or complete_dir itself', () => {
+      const parsed = parseSabCategories(cats);
+      expect(sabCategoryFolder('/downloads/', parsed, 'Books')).toBe('/downloads/other-app');
+      expect(sabCategoryFolder('/downloads', parsed, 'flat')).toBe('/downloads/flat'); // `*` only turns off job folders
+      expect(sabCategoryFolder('/downloads', parsed, 'abs')).toBe('/srv/abs');
+      expect(sabCategoryFolder('/downloads', parsed, 'root')).toBe('/downloads');
+    });
+    it('is null for a category SABnzbd does not list, or an unknown complete_dir', () => {
+      const parsed = parseSabCategories(cats);
+      expect(sabCategoryFolder('/downloads', parsed, 'movies')).toBeNull();
+      expect(sabCategoryFolder('', parsed, 'books')).toBeNull();
+    });
+    it('getCategoryFolder reads SABnzbd and throws when it cannot', async () => {
+      const service = new SABnzbdService('http://sab', 'key');
+      clientMock.get.mockResolvedValueOnce(realConfig(cats));
+      expect(await service.getCategoryFolder('books')).toBe('/data/complete/other-app');
+      clientMock.get.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      await expect(service.getCategoryFolder('books')).rejects.toThrow('ECONNREFUSED');
     });
   });
 
@@ -110,6 +135,18 @@ describe('SABnzbd categories', () => {
 
       const form = clientMock.post.mock.calls[0]?.[1];
       expect(form?.getBuffer?.().toString()).toContain('books');
+      expect(setConfigCalls()).toEqual([]);
+    });
+
+    it('a grab with a list it cannot read still adds the job with its cat and sends no set_config', async () => {
+      clientMock.get.mockResolvedValue(realConfig({ audiobooks: { dir: 'x' } })); // object form without "*"
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('<nzb/>'), headers: { 'content-type': 'application/x-nzb' }, status: 200 });
+      clientMock.post.mockResolvedValueOnce({ data: { status: true, nzo_ids: ['SABnzbd_nzo_2'] } });
+      const service = new SABnzbdService('http://sab', 'key', 'audiobooks', '/downloads', false, undefined, true);
+
+      await service.addNZB('http://prowlarr/download/2');
+
+      expect(clientMock.post.mock.calls[0]?.[1]?.getBuffer?.().toString()).toContain('audiobooks');
       expect(setConfigCalls()).toEqual([]);
     });
   });

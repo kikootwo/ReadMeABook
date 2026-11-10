@@ -14,7 +14,7 @@ import { RMABLogger } from '../utils/logger';
 import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
-import { findCategory, ownsCategory, sameCategory } from '../utils/download-category';
+import { ownsCategory, sameCategory } from '../utils/download-category';
 import { qbittorrentProbeList } from './torrent-probe';
 import { acceptedAddId, candidateIds, decodedMagnet, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, TorrentListUnavailableError, validTorrentId } from './qbittorrent-ids';
 import {
@@ -47,6 +47,14 @@ const logger = RMABLogger.create('QBittorrent');
  */
 function placementFields(savePath?: string): Record<string, string> {
   return savePath === undefined ? { autoTMM: 'true' } : { autoTMM: 'false', savepath: savePath };
+}
+
+type QbitCategory = { savePath?: string; save_path?: string };
+
+/** qBittorrent's category map; any other body (a proxy page, an array) is not a list and throws */
+function qbitCategoryMap(data: unknown): Record<string, QbitCategory> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Unrecognised qBittorrent category list');
+  return data as Record<string, QbitCategory>;
 }
 
 export interface AddTorrentOptions {
@@ -563,8 +571,9 @@ export class QBittorrentService implements IDownloadClient {
         headers: this.authHeaders(),
       });
 
-      const categories = categoriesResponse.data || {};
-      const key = findCategory(Object.keys(categories), category);
+      // Exact name only: qBittorrent names are case-sensitive and ReadMeABook creates this spelling
+      const categories = qbitCategoryMap(categoriesResponse.data);
+      const key = Object.prototype.hasOwnProperty.call(categories, category) ? category : null;
       const existingCategory = key ? categories[key] : undefined;
 
       if (!key || !existingCategory) {
@@ -828,7 +837,7 @@ export class QBittorrentService implements IDownloadClient {
         headers: this.authHeaders(),
       });
 
-      return Object.keys(response.data || {});
+      return Object.keys(qbitCategoryMap(response.data));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('Failed to get categories', { error: message });

@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NZBGetService } from '@/lib/integrations/nzbget.service';
+import { nzbgetCategoryFolder } from '@/lib/integrations/nzbget-category-folder';
 
 const clientMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 const axiosMock = vi.hoisted(() => ({ create: vi.fn(() => clientMock), get: vi.fn(), isAxiosError: vi.fn(() => false) }));
@@ -40,6 +41,18 @@ describe('NZBGet categories', () => {
   it('getCategories throws when NZBGet can\'t be read', async () => {
     clientMock.post.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     await expect(nzbget('readmeabook').getCategories()).rejects.toThrow('Failed to get NZBGet categories: ECONNREFUSED');
+  });
+
+  it('getCategoryFolder: the category DestDir, else DestDir plus the name unless AppendCategoryDir is off', async () => {
+    rpc({ config });
+    expect(await nzbget('readmeabook').getCategoryFolder('AudioBooks')).toBe('/old');
+    const plain = [{ Name: 'DestDir', Value: '/dst/' }, { Name: 'Category1.Name', Value: 'Books' }, { Name: 'Category1.DestDir', Value: '' }];
+    expect(nzbgetCategoryFolder(plain, 'books')).toBe('/dst/Books');
+    expect(nzbgetCategoryFolder([...plain, { Name: 'AppendCategoryDir', Value: 'no' }], 'books')).toBe('/dst/');
+    expect(nzbgetCategoryFolder(plain, 'movies')).toBeNull();
+    expect(nzbgetCategoryFolder([{ Name: 'DestDir', Value: '${MainDir}/dst' }, plain[1]], 'books')).toBeNull();
+    clientMock.post.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    await expect(nzbget('readmeabook').getCategoryFolder('books')).rejects.toThrow('ECONNREFUSED');
   });
 
   it('an owned category in another case is updated in its own slot, not added to a new one', async () => {
