@@ -70,16 +70,17 @@ export async function hasMarkedAvailableRequests(): Promise<boolean> {
 /**
  * The mark route's write for a book already in the library: guard, then `{explicit: true}` alone
  * (no GET). Idempotent: ABS answers `updated: false` when the flag is already on. Never throws.
- * `cause` tells the guard from a failed write; `reason` is the full text for the log.
+ * `cause` tells the guard, a 403 on the write (permission) and any other failed write apart;
+ * `reason` is the full text for the log.
  */
 export async function markItemExplicitNow(
   absItemId: string
-): Promise<{ written: true } | { written: false; cause: 'guard' | 'write'; reason: string }> {
+): Promise<{ written: true } | { written: false; cause: 'guard' | 'permission' | 'write'; reason: string }> {
   if (!(await canKeyUserSeeExplicit())) return { written: false, cause: 'guard', reason: EXPLICIT_ACCESS_REASON };
   const outcome = await writeABSItem(absItemId, { explicit: true });
   if (outcome.explicit === 'set' || outcome.explicit === 'present') return { written: true };
   if (outcome.httpStatus === 403) {
-    return { written: false, cause: 'write', reason: "the Audiobookshelf API key's user needs permission to update items" };
+    return { written: false, cause: 'permission', reason: "the Audiobookshelf API key's user needs permission to update items" };
   }
   return { written: false, cause: 'write', reason: `the write failed (${outcome.error ?? 'unknown error'})` };
 }

@@ -110,14 +110,15 @@ describe('PUT /api/requests/[id]/explicit', () => {
   const writeTimeout = () => writeMock.mockResolvedValue({ tags: 'none', addedTags: [], explicit: 'failed', error: 'aborted due to timeout' });
   const REQUESTER_MSG = "Saved. Audiobookshelf wasn't updated; an admin needs to check it.";
   const GUARD_MSG = "Saved. Audiobookshelf wasn't updated: its API user can't see explicit content.";
-  const WRITE_MSG = "Saved. Audiobookshelf wasn't updated; the next library scan tries again.";
+  const PERMISSION_MSG = "Saved. Audiobookshelf wasn't updated: its API user can't edit items.";
+  const WRITE_MSG = "Saved. Audiobookshelf wasn't updated; a full library scan retries it, or remove and re-add the mark.";
 
   it.each([
     ['requester', "the key user can't see explicit books", guardFails, REQUESTER_MSG],
     ['requester', 'a 403 on the write', write403, REQUESTER_MSG],
     ['requester', 'a timeout', writeTimeout, REQUESTER_MSG],
     ['admin', "the key user can't see explicit books", guardFails, GUARD_MSG],
-    ['admin', 'a 403 on the write', write403, WRITE_MSG],
+    ['admin', 'a 403 on the write', write403, PERMISSION_MSG],
     ['admin', 'a timeout', writeTimeout, WRITE_MSG],
   ] as const)('%s, %s: saved; a short message by viewer, no raw error text', async (viewer, _label, arrange, message) => {
     if (viewer === 'admin') as('admin');

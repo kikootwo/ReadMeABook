@@ -29,7 +29,8 @@ const json = (status: number, error: string, message: string) => NextResponse.js
 const NOT_UPDATED = {
   requester: "Saved. Audiobookshelf wasn't updated; an admin needs to check it.",
   guard: "Saved. Audiobookshelf wasn't updated: its API user can't see explicit content.",
-  write: "Saved. Audiobookshelf wasn't updated; the next library scan tries again.",
+  permission: "Saved. Audiobookshelf wasn't updated: its API user can't edit items.",
+  write: "Saved. Audiobookshelf wasn't updated; a full library scan retries it, or remove and re-add the mark.",
 };
 
 /** "N other requests for this book are still marked", counting only requests that can still flag it. */
