@@ -23,7 +23,7 @@ src/components/
 ## Key Components
 
 **Layout**
-- **Header** ✅ - Top nav, search input, user menu with "Change Password" option (local users only), logout
+- **Header** ✅ - Top nav, search input, user menu with "Change Password" option (local users only), theme switch (System / Light / Dark, see [Theme Switch](#theme-switch)), logout
 - **Sidebar** - Admin side nav
 - **Footer** - Version, links
 
@@ -203,6 +203,7 @@ interface UnifiedPaginationProps {
 - **useAudiobooks** - `{audiobooks, isLoading, error, totalPages, hasMore}`
 - **useAudiobookDetails** ✅ - `{audiobook, isLoading, error}` - Fetches individual audiobook by ASIN
 - **useRequest** - `{createRequest, cancelRequest, isLoading}`
+- **useThemeChoice** ✅ - `ThemeChoice` applied to `<html>` (`'system' | 'light' | 'dark'`), live; see [Theme Switch](#theme-switch)
 - **useSeriesSearch** ✅ - `{series, isLoading, hasData, error, retry}`: trimmed query (no request when blank), no automatic retry on error, `error.status` from `fetchJSON`, `retry` = `mutate()`
 
 ## Styling
@@ -213,7 +214,19 @@ interface UnifiedPaginationProps {
 - Button: `bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md`
 - Grid: `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6`
 
-**Dark Mode:** Use `dark:` variant
+**Dark Mode:** Use `dark:` variant (it follows the theme choice below; never hard-code dark colours or read `prefers-color-scheme` in JS)
+
+## Theme Switch
+
+**Status:** ✅ System / Light / Dark per browser (#557), System by default (= device setting, the behaviour before the switch)
+
+- **Control:** `ThemeSwitch` (`src/components/layout/ThemeSwitch.tsx`) in the header user menu (between Change Password and Logout; the avatar menu is also the 375 px menu). `role="radiogroup"` "Theme" of three `<button role="radio">` (System `ComputerDesktopIcon`, Light `SunIcon`, Dark `MoonIcon`); one tab stop (selected), Arrow keys / Home / End move + select, click selects. Applies at once; menu stays open
+- **Constants:** `src/lib/constants/theme.ts`: `THEME_STORAGE_KEY='theme'` (localStorage), `THEME_ATTRIBUTE='data-theme'` (on `<html>`), `THEME_CHOICES=['system','light','dark']`, `DEFAULT_THEME_CHOICE='system'`. System = nothing stored, no attribute
+- **Helpers:** `src/lib/utils/theme.ts`: `THEME_INIT_SCRIPT`, `parseThemeChoice` (unknown → system), `applyThemeChoice` (attribute + storage; storage errors ignored), `readAppliedThemeChoice` (from `<html>`), `subscribeToThemeChoice` (MutationObserver). Hook `useThemeChoice()` (`useSyncExternalStore`, server snapshot system)
+- **No flash:** `src/app/layout.tsx` renders `THEME_INIT_SCRIPT` inline in `<head>` (before CSS/body) + `suppressHydrationWarning` on `<html>`. Script: stored `light`/`dark` → `data-theme`, anything else or blocked storage → none (System). Also re-applies on a `storage` event (another tab; key or `clear()`)
+- **CSS (`src/app/globals.css`):** `@custom-variant dark` = `[data-theme=dark]` (and descendants) OR (`prefers-color-scheme: dark` AND not under `[data-theme=light]`). `:root` `--background`/`--foreground` + `color-scheme` follow the same rule (`color-scheme` makes native controls/scrollbars match). Specificity unchanged (`:where`). System needs no JS: live device changes apply through the media query
+- **Tests:** `tests/components/theme-variant.test.ts` compiles the real `globals.css` and checks choice x device for `dark:` and `:root`; `tests/lib/utils/theme.test.ts` (init script: missing/invalid/blocked storage, storage event); `tests/components/layout/ThemeSwitch.test.tsx`; e2e `e2e/specs/regressions/557-theme-switch.spec.ts` (colour-scheme emulation, reload, first parse, live change)
+- **Ignores the choice:** anything styled without `dark:` (hard-coded colours, inline styles, images) looks the same in every mode
 
 ## Responsive Breakpoints
 

@@ -1,8 +1,28 @@
 @import "tailwindcss";
 
+/*
+ * Theme choice (documentation/frontend/components.md#theme-switch). <html data-theme> is set
+ * before first paint from the stored choice (src/lib/constants/theme.ts):
+ *   absent (System) -> follow the device (prefers-color-scheme), exactly as before the switch
+ *   "light" -> never dark      "dark" -> always dark
+ * The dark variant and the :root rules below apply the same rule; every rule keeps the
+ * specificity it had without the switch (:where adds none).
+ */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-theme="light"], [data-theme="light"] *)) {
+      @slot;
+    }
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -13,10 +33,17 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:where(:not([data-theme="light"])) {
     --background: #0a0a0a;
     --foreground: #ededed;
+    color-scheme: dark;
   }
+}
+
+:root:where([data-theme="dark"]) {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  color-scheme: dark;
 }
 
 body {

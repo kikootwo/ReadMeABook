@@ -121,6 +121,7 @@
 - **Component catalog (cards, badges, forms)** → [frontend/components.md](frontend/components.md)
 - **RequestCard, StatusBadge, ProgressBar** → [frontend/components.md](frontend/components.md)
 - **Pages: home, search, requests, profile** → [frontend/components.md](frontend/components.md)
+- **Dark mode, theme switch (System / Light / Dark), `dark:` variant, no-flash script** → [frontend/components.md](frontend/components.md#theme-switch)
 - **Home page sections (per-user, configurable)** → [features/home-sections.md](features/home-sections.md)
 
 ## Library View
