@@ -34,6 +34,8 @@ interface DownloadClientModalProps {
     localPath?: string;
     category?: string;
     ownedCategory?: string;
+    /** Wizard only: the display-only preview saved with the client */
+    categoryInClient?: boolean;
     customPath?: string;
     postImportCategory?: string;
   };
@@ -268,9 +270,12 @@ export function DownloadClientModal({
 
   const cleanCustomPath = customPath.replace(/^\/+|\/+$/g, '').trim();
   const downloadsTo = cleanCustomPath ? `${downloadDir}/${cleanCustomPath}` : downloadDir;
-  // Edit mode: a saved category that isn't ReadMeABook's own shows the note before any Test
+  // Edit mode: a saved category that isn't ReadMeABook's own shows the note before any Test. A wizard
+  // client has no ownership yet (setup complete decides), so only the client's list from its last save counts
   const savedShared = mode === 'edit' && !!initialClient && sameCategory(category, initialClient.category)
-    && isSharedCategory(type, initialClient.category, initialClient.ownedCategory);
+    && (apiMode === 'wizard'
+      ? !!initialClient.categoryInClient
+      : isSharedCategory(type, initialClient.category, initialClient.ownedCategory));
   const categoryInClient = savedShared || existsInClient(type, category, availableCategories, initialClient?.ownedCategory);
   const usenetFolder = categoryInClient && (type === 'sabnzbd' || type === 'nzbget')
     ? `${typeName}'s “${normalizeCategory(type, category)}” folder (ReadMeABook must be able to read it)`

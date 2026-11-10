@@ -13,8 +13,11 @@ import { DownloadClientCard } from '@/components/admin/download-clients/Download
 
 const fetchMock = vi.fn();
 
-/** Wizard-mode modal; Test passes and the client lists `names` */
-function openModal(type: 'qbittorrent' | 'sabnzbd' | 'deluge', names: string[], initialClient?: Record<string, unknown>) {
+/** Wizard-mode modal (unless `apiMode` says otherwise); Test passes and the client lists `names` */
+function openModal(
+  type: 'qbittorrent' | 'sabnzbd' | 'deluge', names: string[], initialClient?: Record<string, unknown>,
+  apiMode: 'wizard' | 'settings' = 'wizard'
+) {
   fetchMock.mockImplementation(async (url: string) => ({
     ok: true,
     json: async () => (url.includes('categories') ? { success: true, categories: names } : { success: true, message: 'Connected' }),
@@ -28,7 +31,7 @@ function openModal(type: 'qbittorrent' | 'sabnzbd' | 'deluge', names: string[], 
       clientType={type}
       initialClient={initialClient as never}
       onSave={onSave}
-      apiMode="wizard"
+      apiMode={apiMode}
       downloadDir="/downloads"
     />
   );
@@ -87,15 +90,36 @@ describe('Category field in the modal', () => {
     expect(screen.queryByText(/Already in/)).not.toBeInTheDocument();
   });
 
-  it('edit mode: a saved category that is not ReadMeABook\'s own shows the note before any Test', () => {
+  it('settings edit: a saved category that is not ReadMeABook\'s own shows the note before any Test', () => {
     openModal('sabnzbd', [], {
       id: 'c1', type: 'sabnzbd', name: 'SABnzbd', url: 'http://client:1234', password: 'key', enabled: true,
       disableSSLVerify: false, remotePathMappingEnabled: false, category: 'books',
-    });
+    }, 'settings');
     expect(screen.getByText("Already in SABnzbd. ReadMeABook won't change it; downloads use its folder and settings.")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
     typeCategory('readmeabook');
     expect(screen.queryByText(/Already in/)).not.toBeInTheDocument();
+  });
+
+  it('wizard edit: the note only when the client\'s list had the name (ownership is decided at setup complete)', async () => {
+    const onSave = openModal('sabnzbd', [], {
+      id: 'c1', type: 'sabnzbd', name: 'SABnzbd', url: 'http://client:1234', password: 'key', enabled: true,
+      disableSSLVerify: false, remotePathMappingEnabled: false, category: 'audiobooks',
+    });
+    expect(screen.queryByText(/Already in/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Downloads to: SABnzbd/)).not.toBeInTheDocument();
+    await testConnection();
+    expect(screen.queryByText(/Already in/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ category: 'audiobooks', categoryInClient: false })));
+  });
+
+  it('wizard edit: a name the client listed keeps the note', () => {
+    openModal('sabnzbd', [], {
+      id: 'c1', type: 'sabnzbd', name: 'SABnzbd', url: 'http://client:1234', password: 'key', enabled: true,
+      disableSSLVerify: false, remotePathMappingEnabled: false, category: 'books', categoryInClient: true,
+    });
+    expect(screen.getByText("Already in SABnzbd. ReadMeABook won't change it; downloads use its folder and settings.")).toBeInTheDocument();
   });
 
   it('a late answer from an earlier Test never replaces a newer one', async () => {
