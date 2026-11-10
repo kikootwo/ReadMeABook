@@ -247,5 +247,27 @@ describe('requester tag eligibility by path and step (#232)', () => {
       expect(result.considered).toBe(1);
       expect(state.tagCalls).toEqual([{ itemId: 'item-b1', tags: ['req:carol'] }]);
     });
+
+    // Listed ids are read 1,000 at a time; the delivered books go in the first read only
+    it.each([[999, 1], [1000, 1], [1001, 2], [2000, 2], [2001, 3]])('%i listed items: %i reads, no id lost or doubled at a chunk edge', async (count, expectedReads) => {
+      const ids = Array.from({ length: count }, (_, i) => `item-${i}`);
+      ids.forEach((itemId, i) => {
+        book(`b${i}`, { absItemId: itemId });
+        request(`r-${i}`, `b${i}`, 'u-carol', 'available');
+      });
+      const { applyRequesterTags } = await import('@/lib/services/audiobookshelf/requester-tags');
+
+      const result = await applyRequesterTags({ deliveredBookIds: ['b0'], listedItems: ids.map((id) => listed(id)), logger, mode: 'backfill' });
+
+      const ors = prismaMock.request.findMany.mock.calls.map((c) => c[0].where.OR as Array<Record<string, any>>);
+      expect(ors).toHaveLength(expectedReads);
+      const readIds = ors.map((or) => or.find((c) => c.audiobook)!.audiobook.absItemId.in as string[]);
+      readIds.forEach((chunk, i) => expect(chunk).toEqual(ids.slice(i * 1000, (i + 1) * 1000)));
+      expect(ors.map((or) => or.filter((c) => c.audiobookId).length)).toEqual([1, ...Array(expectedReads - 1).fill(0)]);
+      expect(result).toMatchObject({ considered: count, tagged: count });
+      const tagged = state.tagCalls.map((c) => c.itemId);
+      expect(new Set(tagged).size).toBe(count);
+      expect(tagged).toEqual(expect.arrayContaining([ids[0], ids[count - 1], ...ids.slice(998, 1002)]));
+    });
   });
 });
