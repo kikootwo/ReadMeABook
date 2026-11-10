@@ -78,7 +78,8 @@ describe('Admin requests routes', () => {
     const payload = await response.json();
 
     expect(payload.requests).toHaveLength(1);
-    expect(payload.requests[0].torrentUrl).toBe('http://torrent');
+    expect(payload.requests[0].requestId).toBe('req-1');
+    expect(payload.requests[0].torrentUrl).toBeUndefined();
   });
 
   it('returns paginated requests with default params', async () => {

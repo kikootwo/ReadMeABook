@@ -278,6 +278,28 @@ describe('Request by ID API routes', () => {
     });
   });
 
+  it.each([
+    ['an owner', { id: 'user-1', role: 'user' }, undefined],
+    ['an admin', { id: 'admin-1', role: 'admin' }, { downloadUrl: 'http://prowlarr:9696/1/download?link=abc' }],
+  ])('a retry answers %s with the stored pick as the GET does', async (_label, user, expectedPick) => {
+    authRequest.user = user;
+    authRequest.json.mockResolvedValue({ action: 'retry' });
+    prismaMock.request.findFirst
+      .mockResolvedValueOnce({ id: 'req-3', userId: 'user-1', status: 'failed' })
+      .mockResolvedValueOnce({ id: 'req-3', userId: 'user-1', audiobook: { id: 'ab-2', title: 'Title', author: 'Author' } });
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-3', status: 'pending', audiobook: { id: 'ab-2' },
+      selectedTorrent: { downloadUrl: 'http://prowlarr:9696/1/download?apikey=test-prowlarr-key&link=abc' },
+    });
+
+    const { PATCH } = await import('@/app/api/requests/[id]/route');
+    const payload = await (await PATCH({} as never, { params: Promise.resolve({ id: 'req-3' }) })).json();
+
+    expect(payload.success).toBe(true);
+    expect(JSON.stringify(payload)).not.toContain('test-prowlarr-key');
+    expect(payload.request.selectedTorrent).toEqual(expectedPick);
+  });
+
   it('retries an import via qBittorrent download history', async () => {
     authRequest.json.mockResolvedValue({ action: 'retry' });
     prismaMock.request.findFirst
