@@ -57,6 +57,7 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 1. Download completes in `/downloads/[torrent-name]/` or `/downloads/[filename]` (single file)
 1b. **Path stored** in `DownloadHistory.downloadPath` (mapped local path) for retry reliability — avoids reconstructing path from `torrentName` which may differ from actual folder name
 2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files; `selectedFiles` (`/` separators) filter the walk. Multi-disc sources (`CD1/`, `Disc 2/`) are then ordered disc by disc for the merge, copy and rename numbering, and a Manual/Bulk import of the book's own library folder stops here with nothing changed: [multi-disc-folders.md](../features/multi-disc-folders.md)
+2b. **Chapter merge** (if enabled, multi-file books): the request shows "Merging chapters" with its progress while ffmpeg runs, else "Organizing files": [chapter-merging.md](../features/chapter-merging.md#merge-progress-216)
 3. Read media directory and path template from database config (`media_dir`, `audiobook_path_template`)
 4. Apply template to create target path: `[media_dir]/[template result]/`
 5. **Tag metadata** (if enabled, before the move) - writes correct title, author, narrator, ASIN, series, description, genre, publisher, subtitle, language to tagged copies of the audio files

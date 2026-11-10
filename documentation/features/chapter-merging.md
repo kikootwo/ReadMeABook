@@ -324,6 +324,15 @@ All chapter merging decisions are **fully logged** for user transparency:
 3. Mark request as "available" (not failed)
 4. User can manually merge later or enable setting
 
+### Merge progress (#216)
+- **Shown:** processing requests read "Organizing files", or "Merging chapters" + percent + bar while the merge's ffmpeg runs. Labels from `requestPhase(status, progress)` (`src/lib/constants/request-statuses.ts`), shared by the My Requests card (Profile too), the admin request table (muted line `Merging chapters · 42%` under the badge; `/api/admin/requests` carries `progress`) and the Library card ([library-view.md](library-view.md)). No ETA, no setting. Downloaded and every other status unchanged. Details modal unchanged.
+- **Carrier:** `request.progress`, no schema change. While `processing` it is 100, except 0-99 while the merge's ffmpeg runs (contract: [database.md](../backend/database.md)).
+- **Merger:** `MergeOptions.onProgress(percent)`: 0 just before spawn, each whole-percent change of the newest `time=` in a stderr chunk (hours `\d+`), `floor`, capped at 99; 100 in a `finally` once ffmpeg exits (success, non-zero exit, spawn error, timeout). Total ≤ 0 or merge stopped before ffmpeg → never called. Called inside try/catch (a throw from the stderr listener would end the process). Log throttle and stderr buffer unchanged.
+- **Reporter:** `src/lib/utils/merge-progress.ts` `createMergeProgressReporter(requestId, logger)`, one per audiobook organize (`organize-files.processor.ts` → `PlacementOptions.onMergeProgress` → `MergeOptions.onProgress`). First value and 100 written at once; between them a changed percent at most once per 10 s (`MERGE_PROGRESS_WRITE_INTERVAL_MS`; the newest held-back value is written when the interval ends). Writes are `updateMany where { id, status: 'processing', deletedAt: null }` + `updatedAt`, one at a time; errors logged and dropped. **Closed** after `report(100)` or `settle()`: later calls do nothing (ffmpeg's last stats line after a timeout kill arrives after the 100). The processor awaits `settle()` after `organize()` (writes 100 if a lower value was written) before any status write. ≤ ~102 writes per merge.
+- **Restart:** `resetInterruptedMergeProgress()` in app init, before the scheduler starts (non-fatal): `processing` rows with progress < 100 → 100 (ffmpeg dies with the process).
+- **Ebooks, single files, merge off/skipped/failed:** "Organizing files" throughout; a failed merge shows the bar, then "Organizing files" for the fallback.
+- **Known:** queued manual/bulk imports read "Organizing files" while they wait for a worker. During the `+faststart` pass the bar sits at 99.
+
 **Failure scenarios with logging:**
 - Feature disabled → Logs: "Chapter merging disabled in settings"
 - Too few files → Logs: "Only X file(s) - not enough for chapter merge"
