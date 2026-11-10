@@ -2,15 +2,17 @@
  * Component: Shared Torrent Guard
  * Documentation: documentation/admin-features/request-deletion.md
  *
- * Several requests can share one torrent (e.g. re-requesting the same book, a series pack).
- * Before a torrent is removed from the client, every caller checks the other active requests
- * that use it. Request deletion: any of them keeps it. Scheduled seeding cleanup: each of them
- * keeps it unless it is finished and its own indexer's seeding requirement is met (#283).
+ * Several requests can share one torrent (e.g. re-requesting the same book, a series pack). Before a
+ * torrent is removed from the client, request delete, the seeding cleanup and the cancel step all ask
+ * `torrentHolds()`, which applies one rule (`holdOf()`, table in request-deletion.md#shared-torrent-holds):
+ * an active request keeps it until it is finished and done seeding (#283); a deleted or cancelled one keeps
+ * a finished torrent it owns only until its own indexer's rule is met (#545).
  */
 
 import { prisma } from '../db';
 import { torrentHashForms } from '../integrations/torrent-ids';
 import type { SeedingEvaluation } from './seeding-policy';
+import { resolveOwnership } from './torrent-ownership';
 
 export interface ActiveRequestRef {
   id: string;
@@ -23,7 +25,7 @@ export const FINISHED_REQUESTS = [
   { type: 'ebook', status: 'downloaded' },
 ] as const;
 
-/** Another active request using the torrent, with its selected row(s) for that torrent */
+/** Another request using the torrent, with its selected row(s) for that torrent */
 export interface TorrentSibling extends ActiveRequestRef {
   type: string;
   /** Its book record (shared by every request for the book); the organizer completes it after a successful copy */
@@ -43,37 +45,48 @@ export interface TorrentSiblingDownload {
   indexerName: string | null;
   downloadClient: string | null;
   createdAt: Date;
-  /** Read by the cancelled-download step: a sibling whose rows here are all 'removed' no longer uses the torrent */
+  /** 'removed': the request no longer uses the torrent through this row */
   downloadStatus?: string | null;
+  /** Ownership (#423): deleted and cancelled requests hold only through a row that owns the torrent */
+  addedByRmab?: boolean | null;
 }
 
-function otherActiveRequestsWhere(requestId: string, torrentHash: string) {
-  return {
-    id: { not: requestId },
-    deletedAt: null,
-    downloadHistory: {
-      some: {
-        torrentHash: { in: torrentHashForms(torrentHash) },
-        selected: true,
-      },
-    },
-  };
+/** A request whose selected row is this torrent: active (not deleted) or soft-deleted */
+export interface TorrentUser extends TorrentSibling {
+  deleted: boolean;
 }
 
 /**
- * Active (not deleted) requests other than `requestId` whose selected
- * download is the torrent `torrentHash` (hex and base32 forms, in either letter case, match each other). Empty when there is no hash.
- * Request deletion keeps the torrent while this is not empty.
+ * - `active`: an active request that owns the torrent; it removes the torrent itself once it lets go
+ * - `until_met`: the hold ends, but the holder may never remove the torrent itself (a deleted or
+ *   cancelled request, or an active one that only took the torrent over): a soft-deleted candidate stays
+ * - `forever`: nothing releases it (a cancelled request with unlimited seeding)
  */
-export async function otherActiveRequestsUsingTorrent(
-  requestId: string,
-  torrentHash: string | null | undefined
-): Promise<ActiveRequestRef[]> {
-  if (!torrentHash) return [];
-  return prisma.request.findMany({
-    where: otherActiveRequestsWhere(requestId, torrentHash),
-    select: { id: true, status: true },
-  });
+export type HoldKind = 'active' | 'until_met' | 'forever';
+
+export interface TorrentHold {
+  requestId: string;
+  kind: HoldKind;
+  reason: string;
+}
+
+export interface HoldCheck {
+  /** The configured client type the torrent is in */
+  clientType: string;
+  /** The client's added time for the torrent (`resolveOwnership` of the other requests' rows) */
+  addedAt: Date | undefined;
+  /** A row's own indexer rule by the client's answer for a finished torrent; null = the torrent is partial */
+  seeding: ((row: TorrentSiblingDownload) => SeedingEvaluation) | null;
+}
+
+const NOT_REMOVED = { OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }] };
+const recordedFor = (row: { downloadClient: string | null }) => row.downloadClient || 'qbittorrent';
+
+/** Rows recorded for `clientType` (a row without a client is qBittorrent's) */
+function recordedForClient(clientType: string) {
+  return clientType === 'qbittorrent'
+    ? { OR: [{ downloadClient: null }, { downloadClient: '' }, { downloadClient: 'qbittorrent' }] }
+    : { downloadClient: clientType };
 }
 
 /**
@@ -98,23 +111,28 @@ export async function otherActiveRequestsUsingNzb(
   });
 }
 
-/** Same requests as `otherActiveRequestsUsingTorrent`, with type and their selected rows for this torrent (seeding cleanup) */
+const SIBLING_ROW_SELECT = {
+  id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true, downloadStatus: true, addedByRmab: true,
+} as const;
+
+/**
+ * Active (not deleted) requests other than `requestId` whose selected download is the torrent `torrentHash`
+ * (hex and base32 forms, in either letter case, match each other), with their selected rows for it
+ */
 export async function otherActiveRequestsSharingTorrent(
   requestId: string,
   torrentHash: string | null | undefined
 ): Promise<TorrentSibling[]> {
   if (!torrentHash) return [];
+  const forms = torrentHashForms(torrentHash);
   return prisma.request.findMany({
-    where: otherActiveRequestsWhere(requestId, torrentHash),
+    where: { id: { not: requestId }, deletedAt: null, downloadHistory: { some: { torrentHash: { in: forms }, selected: true } } },
     select: {
       id: true,
       status: true,
       type: true,
       audiobook: { select: { status: true, filePath: true, completedAt: true } },
-      downloadHistory: {
-        where: { torrentHash: { in: torrentHashForms(torrentHash) }, selected: true },
-        select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true, downloadStatus: true },
-      },
+      downloadHistory: { where: { torrentHash: { in: forms }, selected: true }, select: SIBLING_ROW_SELECT },
     },
   });
 }
@@ -125,13 +143,7 @@ export interface SoftDeletedHolder {
   downloadHistory: TorrentSiblingDownload[];
 }
 
-const NOT_REMOVED = { OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }] };
-
-/**
- * Cancelled-download cleanup only: soft-deleted requests other than `requestId` whose selected row for
- * `torrentHash` is not 'removed' (a deleted request can keep its finished torrent to seed). The caller
- * lets each go once its own indexer's rule is met; such a holder never keeps a partial torrent.
- */
+/** Soft-deleted requests other than `requestId` whose selected row for `torrentHash` is not 'removed' */
 export async function softDeletedHoldersOfTorrent(
   requestId: string,
   torrentHash: string | null | undefined
@@ -140,13 +152,7 @@ export async function softDeletedHoldersOfTorrent(
   const row = { torrentHash: { in: torrentHashForms(torrentHash) }, selected: true, ...NOT_REMOVED };
   return prisma.request.findMany({
     where: { id: { not: requestId }, deletedAt: { not: null }, downloadHistory: { some: row } },
-    select: {
-      id: true,
-      downloadHistory: {
-        where: row,
-        select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true },
-      },
-    },
+    select: { id: true, downloadHistory: { where: row, select: SIBLING_ROW_SELECT } },
   });
 }
 
@@ -172,6 +178,20 @@ export async function sameBookGrabInProgress(
   });
 }
 
+/** Client states that are clearly a partial download (a state in neither this set nor completed/seeding is unclear) */
+export const PARTIAL_TORRENT_STATES = new Set(['downloading', 'queued', 'paused']);
+
+/**
+ * The torrent is partial only when nothing says it finished: a partial state, progress < 1, no completed
+ * time, and its row not recorded completed. A recheck reports progress < 1 on a finished torrent.
+ */
+export function clearlyPartial(
+  info: { status: string; progress: number; completedAt?: Date },
+  rowStatus: string | null | undefined
+): boolean {
+  return PARTIAL_TORRENT_STATES.has(info.status) && info.progress < 1 && !info.completedAt && rowStatus !== 'completed';
+}
+
 /**
  * A library scan can mark an audiobook `available` while its organize is still copying (#283).
  * Only the organizer completes the book record with a `filePath`, after the copy; it must have done
@@ -184,10 +204,10 @@ function importedSince(book: SiblingBookRecord | null, row: TorrentSiblingDownlo
 }
 
 /**
- * Seeding cleanup only (#283): why `sibling` still needs the torrent, or null when it lets it go.
- * It lets it go only when it is finished (an audiobook also imported by RMAB since it took the
- * torrent), every row it has for the torrent was recorded for `clientType`, and its own indexer's
- * requirement is met (`seeding(row)`, by the same client answer).
+ * Why an active `sibling` still needs a finished torrent, or null when it lets it go (#283). It lets
+ * it go only when it is finished (an audiobook also imported by RMAB since it took the torrent), every
+ * row it has for the torrent was recorded for `clientType`, and its own indexer's requirement is met
+ * (`seeding(row)`, by the same client answer).
  */
 export function siblingKeepsTorrent(
   sibling: TorrentSibling,
@@ -200,8 +220,7 @@ export function siblingKeepsTorrent(
   const rows = sibling.downloadHistory ?? [];
   if (rows.length === 0) return 'no download row for this torrent';
   for (const row of rows) {
-    const recordedFor = row.downloadClient || 'qbittorrent';
-    if (recordedFor !== clientType) return `recorded for ${recordedFor}`;
+    if (recordedFor(row) !== clientType) return `recorded for ${recordedFor(row)}`;
     if (sibling.type === 'audiobook' && !importedSince(sibling.audiobook, row)) {
       return 'no RMAB import since it took this torrent';
     }
@@ -210,4 +229,83 @@ export function siblingKeepsTorrent(
     if (!met) return `still seeding for ${row.indexerName ?? 'its indexer'}: ${progress}`;
   }
   return null;
+}
+
+/**
+ * The rule (#545): whether `user` keeps the torrent, and of which kind, or null.
+ * - Only its live rows count (not 'removed'); none: it never keeps it.
+ * - Deleted or cancelled: keeps a finished torrent only through a live row that owns it
+ *   (`resolveOwnership` on the client's added time, recorded for the configured client) until that
+ *   row's own rule is met; a cancelled one with unlimited seeding keeps it forever. Never a partial one.
+ * - Active: keeps a partial torrent; a finished one per `siblingKeepsTorrent`. With no live row that
+ *   owns the torrent it can never remove it itself, so the hold is `until_met`.
+ */
+export function holdOf(user: TorrentUser, check: HoldCheck): TorrentHold | null {
+  const live = (user.downloadHistory ?? []).filter((row) => row.downloadStatus !== 'removed');
+  if (live.length === 0) return null;
+  const owned = live.filter((row) => recordedFor(row) === check.clientType
+    && resolveOwnership({ addedByRmab: row.addedByRmab ?? null, createdAt: row.createdAt, downloadStatus: row.downloadStatus }, check.addedAt).owned);
+  const hold = (kind: HoldKind, reason: string): TorrentHold => ({ requestId: user.id, kind, reason });
+
+  if (user.deleted || user.status === 'cancelled') {
+    if (!check.seeding) return null;
+    const state = user.deleted ? 'deleted' : 'cancelled';
+    for (const row of owned) {
+      const { unlimited, met, progress } = check.seeding(row);
+      if (unlimited) {
+        // A deleted request with unlimited seeding is forgotten by the seeding cleanup without a removal
+        if (user.deleted) continue;
+        return hold('forever', `${state}, unlimited seeding (${row.indexerName ?? 'no indexer'})`);
+      }
+      if (!met) return hold('until_met', `${state}, still seeding for ${row.indexerName ?? 'its indexer'}: ${progress}`);
+    }
+    return null;
+  }
+
+  const kind: HoldKind = owned.length > 0 ? 'active' : 'until_met';
+  if (!check.seeding) return hold(kind, `${user.type ?? 'request'} ${user.status}`);
+  const reason = siblingKeepsTorrent({ ...user, downloadHistory: live }, check.clientType, check.seeding);
+  return reason ? hold(kind, reason) : null;
+}
+
+/**
+ * Every request other than `requestId` that keeps the torrent `torrentHash`, by `holdOf()`. Soft-deleted
+ * requests are read only for a finished torrent (they never keep a partial one).
+ */
+export async function torrentHolds(requestId: string, torrentHash: string | null | undefined, check: HoldCheck): Promise<TorrentHold[]> {
+  if (!torrentHash) return [];
+  const active = (await otherActiveRequestsSharingTorrent(requestId, torrentHash))
+    .map((sibling): TorrentUser => ({ ...sibling, deleted: false }));
+  const deleted = check.seeding
+    ? (await softDeletedHoldersOfTorrent(requestId, torrentHash))
+      .map((holder): TorrentUser => ({ ...holder, status: 'deleted', type: 'request', audiobook: null, deleted: true }))
+    : [];
+  return [...active, ...deleted].flatMap((user) => holdOf(user, check) ?? []);
+}
+
+/** For a log line: `id (reason), id (reason)` */
+export function describeHolds(holds: TorrentHold[]): string {
+  return holds.map((h) => `${h.requestId} (${h.reason})`).join(', ');
+}
+
+/**
+ * The torrent is gone from `clientType`: every other request's selected row for it recorded for that
+ * client says so too (deleted ones included). Returns the number of rows marked.
+ */
+export async function markOtherRowsRemoved(
+  requestId: string,
+  torrentHash: string | null | undefined,
+  clientType: string
+): Promise<number> {
+  if (!torrentHash) return 0;
+  const { count } = await prisma.downloadHistory.updateMany({
+    where: {
+      requestId: { not: requestId },
+      selected: true,
+      torrentHash: { in: torrentHashForms(torrentHash) },
+      AND: [NOT_REMOVED, recordedForClient(clientType)],
+    },
+    data: { downloadStatus: 'removed' },
+  });
+  return count;
 }

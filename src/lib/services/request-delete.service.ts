@@ -36,7 +36,7 @@ export interface DeleteRequestResult {
    * emptied folder itself could not be removed (e.g. `could not be removed (EBUSY)`).
    */
   folderKept?: { folder: string; files: KeptFile[]; more: number; error?: string };
-  /** Torrents left in the client because another active request still uses them. */
+  /** Torrents left in the client because another request still keeps them (shared-torrent rule). */
   torrentsKeptShared: number;
   /** Torrents left in the client because RMAB did not add them (it never removes those). */
   torrentsKeptNotOwned: number;
@@ -55,7 +55,7 @@ export interface DeleteRequestResult {
  *      so or can't tell) is left exactly as it is: never removed, never changed
  *    - If both limits are 0 (or no indexer config): keep seeding forever, no monitoring
  *    - If incomplete download, or every set limit met: delete torrent + files,
- *      unless another active request still uses the torrent
+ *      unless another request still keeps the torrent (shared-torrent rule)
  *    - Otherwise: keep in the client for the cleanup job
  * 3. Remove what the import placed in the stored folder (its audio; cover and junk
  *    only when nothing else is left; the folder only when empty, #526), only when the

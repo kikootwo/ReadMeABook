@@ -14,7 +14,7 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType, IDownloadClient } from '../interfaces/download-client.interface';
 import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
-import { FINISHED_REQUESTS, otherActiveRequestsSharingTorrent, siblingKeepsTorrent } from '../utils/shared-torrent';
+import { FINISHED_REQUESTS, describeHolds, markOtherRowsRemoved, torrentHolds } from '../utils/shared-torrent';
 import { createIndexerConfigLookup, describeIgnoredIndexerId, parseSavedIndexers } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership } from '../utils/torrent-ownership';
 import { cleanUpCancelledDownloads } from './cleanup-cancelled-downloads';
@@ -31,7 +31,7 @@ const MAX_PROBE_ERRORS_IN_A_ROW = 3;
 // Completed requests + soft-deleted requests (orphaned downloads), each with a finished selected download.
 // IMPORTANT: Only cleanup requests that are truly complete and not being actively processed.
 // NOTE: Multiple requests can share the same torrent hash (e.g., re-requesting same audiobook, a series pack);
-// a torrent is deleted only when every other active request using it is finished and done seeding too (#283).
+// a torrent is deleted only when no other request keeps it (torrentHolds: #283, #545).
 // NOTE: Ebooks downloaded via indexer search use torrent clients and need seeding cleanup too.
 //       Direct HTTP ebook downloads are naturally skipped (no torrent hash / unknown client type).
 const CANDIDATES = {
@@ -235,36 +235,38 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
 
       logger.info(`Download ${downloadInfo.name} (${indexerName}) has met seeding requirement: ${progress}`);
 
-      // CRITICAL: every other active (non-deleted) request using this download must be finished, and
-      // done seeding by its own indexer's rule (same client answer); any other one keeps it
-      const siblings = await otherActiveRequestsSharingTorrent(request.id, downloadHistory.torrentHash);
-      const keeping = siblings.flatMap((sibling) => {
-        const reason = siblingKeepsTorrent(sibling, clientType, (row) => evaluateSeeding(
+      // CRITICAL: every other request using this download must let it go (torrentHolds, same client answer)
+      const holds = await torrentHolds(request.id, downloadHistory.torrentHash, {
+        clientType,
+        addedAt: downloadInfo.addedAt,
+        seeding: (row) => evaluateSeeding(
           lookupIndexer({ indexerId: row.indexerId, indexerName: row.indexerName ?? '', protocol }).config, downloadInfo
-        ));
-        return reason ? [`${sibling.id} (${reason})`] : [];
+        ),
       });
-      if (keeping.length > 0) {
-        logger.info(`Skipping download deletion - ${keeping.length} other active request(s) still using this download: ${keeping.join(', ')}`);
+      if (holds.length > 0) {
+        logger.info(`Skipping download deletion - ${holds.length} other request(s) still need this download: ${describeHolds(holds)}`);
 
-        // If this is a soft-deleted request, hard delete it but DON'T delete the download
         if (request.deletedAt) {
-          await prisma.request.delete({ where: { id: request.id } });
-          logger.info(`Hard-deleted orphaned request ${request.id} (kept shared download for active requests)`);
+          const waitFor = holds.filter((hold) => hold.kind === 'until_met');
+          if (waitFor.length > 0) {
+            // Nobody else may ever come back to remove it: this soft-deleted request stays and is probed next run
+            logger.info(`Kept deleted request ${request.id} until ${waitFor.map((hold) => hold.requestId).join(', ')} let(s) the download go`);
+          } else {
+            // Hard delete it but DON'T delete the download (an active owner, or nothing, removes it later)
+            await prisma.request.delete({ where: { id: request.id } });
+            logger.info(`Hard-deleted orphaned request ${request.id} (kept shared download for other requests)`);
+          }
         }
 
         return 'seeding';
       }
 
-      // Safe to delete - no other active request needs this download
+      // Safe to delete - no other request needs this download
       await client.deleteDownload(clientId, true); // true = delete files
       deletedHashes.add(clientId.toLowerCase());
-      if (siblings.length > 0) {
-        // Their rows say the torrent is gone too (a row RMAB did not add never gets here on its own)
-        const siblingRowIds = siblings.flatMap((sibling) => sibling.downloadHistory.map((row) => row.id));
-        await prisma.downloadHistory.updateMany({ where: { id: { in: siblingRowIds } }, data: { downloadStatus: 'removed' } });
-        logger.info(`Download was shared with ${siblings.length} finished request(s) (${siblings.map((s) => s.id).join(', ')}): marked removed for them too`);
-      }
+      // Their rows say the torrent is gone too (a row RMAB did not add never gets here on its own)
+      const marked = await markOtherRowsRemoved(request.id, downloadHistory.torrentHash, clientType);
+      if (marked > 0) logger.info(`Download was shared: ${marked} other request row(s) marked removed too`);
 
       // If this is a soft-deleted request (orphaned download), hard delete it now
       if (request.deletedAt) {
