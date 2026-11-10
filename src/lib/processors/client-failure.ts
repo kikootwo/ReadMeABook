@@ -168,21 +168,33 @@ export async function notifyChainEndedFailed(
   await notifyRequestError(requestId, message, logger);
 }
 
-/**
- * True when an earlier run of this failure already got past its request write: the next search
- * has a `jobs` row, or the download row is `failed` and the request has left `downloading` and
- * `searching` (the next search ended, or the request already failed). A cut run that wrote
- * `searching` but queued nothing is not handled: this run queues the search.
- */
-async function failureAlreadyHandled(requestId: string, downloadHistoryId: string): Promise<boolean> {
-  const searchJob = await prisma.job.findFirst({
-    where: { bullJobId: nextReleaseSearchJobId(downloadHistoryId) },
-    select: { id: true },
-  });
+/** True when this download's next search was queued: its `jobs` row has the Bull id, or Bull keeps the job */
+async function nextSearchQueued(downloadHistoryId: string, logger: JobLogger): Promise<boolean> {
+  const bullJobId = nextReleaseSearchJobId(downloadHistoryId);
+  const searchJob = await prisma.job.findFirst({ where: { bullJobId }, select: { id: true } });
   if (searchJob) return true;
-  const history = await prisma.downloadHistory.findUnique({ where: { id: downloadHistoryId }, select: { downloadStatus: true } });
-  if (history?.downloadStatus !== 'failed') return false;
-  const request = await prisma.request.findUnique({ where: { id: requestId }, select: { status: true } });
+  try {
+    // A kill between queue.add and the jobs-row update leaves the row without its Bull id
+    return await getJobQueueService().hasBullJob(bullJobId);
+  } catch (error) {
+    logger.warn('Could not look up the next search in the queue', { error: error instanceof Error ? error.message : String(error) });
+    return false;
+  }
+}
+
+/**
+ * True when an earlier run of this failure already got past its request write. Two signals:
+ * - Automatic runs only: the next search was queued. A hand-picked run never queues one, and
+ *   Retry download can resume monitoring of a download whose earlier failure in a chain left
+ *   that search behind; that resumed run must still end the request.
+ * - The request has left `downloading` and `searching` (the next search ended, or the request
+ *   already failed). The monitor marks the download row `failed` before this runs, so that row
+ *   says nothing about earlier runs.
+ * A cut run that wrote `searching` but queued nothing is not handled: this run queues the search.
+ */
+async function failureAlreadyHandled(input: ClientFailureInput): Promise<boolean> {
+  if (input.clientFailures !== undefined && (await nextSearchQueued(input.downloadHistoryId, input.logger))) return true;
+  const request = await prisma.request.findUnique({ where: { id: input.requestId }, select: { status: true } });
   return !MOVE_ON_FROM.includes(request?.status ?? '');
 }
 
@@ -274,7 +286,7 @@ export async function handleClientReportedFailure(input: ClientFailureInput): Pr
     return 'stale';
   }
 
-  if (await failureAlreadyHandled(requestId, downloadHistoryId)) {
+  if (await failureAlreadyHandled(input)) {
     if (await getRequestStopReason(requestId)) return 'stopped';
     logger.info(`Download ${downloadHistoryId}'s failure was already handled for request ${requestId}; request left unchanged`);
     await recordWithoutRequestChange(input, failureText, releaseFault);

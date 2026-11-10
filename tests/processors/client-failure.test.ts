@@ -22,6 +22,8 @@ const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } 
 
 const request = {
   id: 'req-1',
+  status: 'downloading',
+  deletedAt: null,
   audiobook: { id: 'book-1', title: 'Book', author: 'Author', audibleAsin: 'B00TEST' },
   user: { plexUsername: 'user' },
 };
@@ -254,8 +256,8 @@ describe('handleClientReportedFailure', () => {
   });
 
   it('an error after the next search is queued stays inside: no failed write, no second search', async () => {
-    // First read: the audiobook for the search. Second read: the notification lookup, which throws.
-    prismaMock.request.findUnique.mockResolvedValueOnce(request).mockRejectedValueOnce(new Error('connection reset'));
+    // Reads: the rerun guard's status, the audiobook for the search, then the notification lookup throws
+    prismaMock.request.findUnique.mockResolvedValueOnce(request).mockResolvedValueOnce(request).mockRejectedValueOnce(new Error('connection reset'));
 
     await expect(handleClientReportedFailure(input())).resolves.toBe('next_release');
 

@@ -1017,6 +1017,14 @@ export class JobQueueService {
   }
 
   /**
+   * True while Bull keeps a job with this Bull id, in any state (until removeOnComplete/removeOnFail
+   * prunes it). Reads Bull itself, so it sees a job whose `jobs` row never got its bullJobId.
+   */
+  async hasBullJob(bullJobId: string): Promise<boolean> {
+    return (await this.queue.getJob(bullJobId)) !== null;
+  }
+
+  /**
    * Get queue statistics
    */
   async getQueueStats(): Promise<QueueStats> {

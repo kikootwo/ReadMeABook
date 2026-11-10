@@ -190,6 +190,8 @@ describe('processMonitorDownload', () => {
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.request.findUnique.mockResolvedValue({
       id: 'req-3',
+      status: 'downloading',
+      deletedAt: null,
       audiobook: { title: 'Book', author: 'Author' },
       user: { plexUsername: 'user' },
     });

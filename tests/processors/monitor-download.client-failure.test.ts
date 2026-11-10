@@ -111,8 +111,9 @@ describe('processMonitorDownload carries the automatic chain count (#332)', () =
 
   it('an error after the next search is queued never reaches the generic failure path', async () => {
     managerMock.getClientServiceForProtocol.mockResolvedValue(qbitReporting({ status: 'failed', errorMessage: 'qBittorrent reported an error' }));
-    // Reads: cancel guard, search audiobook, then the notification lookup throws
+    // Reads: cancel guard, the rerun guard's status, search audiobook, then the notification lookup throws
     prismaMock.request.findUnique
+      .mockResolvedValueOnce(activeRequest)
       .mockResolvedValueOnce(activeRequest)
       .mockResolvedValueOnce(activeRequest)
       .mockRejectedValueOnce(new Error('connection reset'));
