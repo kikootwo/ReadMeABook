@@ -86,30 +86,36 @@ export async function resolveActiveLibrary(): Promise<ActiveLibrary> {
   return { backend: 'plex', libraryId: plex.libraryId || null };
 }
 
-/** Load 1 and Load 2 in one read-only snapshot. No library configured → no rows. */
-export async function loadLibraryData(
-  libraryId: string | null
-): Promise<{ rows: LibraryRowRecord[]; requests: RequestRecord[] }> {
-  const requestsQuery = prisma.request.findMany({
+/**
+ * Load 1's version: row count and newest updated_at for one library. Every plex_library write goes
+ * through Prisma (@updatedAt, including updateMany), so any insert, update or delete changes it.
+ */
+export async function libraryRowsVersion(libraryId: string): Promise<string> {
+  const agg = await prisma.plexLibrary.aggregate({
+    where: { plexLibraryId: libraryId },
+    _count: { _all: true },
+    _max: { updatedAt: true },
+  });
+  return `${agg._count._all}:${agg._max.updatedAt?.getTime() ?? 0}`;
+}
+
+/** Load 1: the active library's rows, in id order (cached by snapshot.ts). */
+export async function loadLibraryRows(libraryId: string): Promise<LibraryRowRecord[]> {
+  const rows = await prisma.plexLibrary.findMany({
+    where: { plexLibraryId: libraryId },
+    select: LIBRARY_ROW_SELECT,
+    orderBy: { id: 'asc' },
+  });
+  return rows as LibraryRowRecord[];
+}
+
+/** Load 2: qualifying audiobook requests. Read fresh on every full-mode call. */
+export async function loadLibraryRequests(): Promise<RequestRecord[]> {
+  const requests = await prisma.request.findMany({
     where: LIBRARY_REQUEST_WHERE,
     select: LIBRARY_REQUEST_SELECT,
   });
-  if (!libraryId) {
-    const [requests] = await prisma.$transaction([requestsQuery], { isolationLevel: 'RepeatableRead' });
-    return { rows: [], requests: requests as RequestRecord[] };
-  }
-  const [rows, requests] = await prisma.$transaction(
-    [
-      prisma.plexLibrary.findMany({
-        where: { plexLibraryId: libraryId },
-        select: LIBRARY_ROW_SELECT,
-        orderBy: { id: 'asc' },
-      }),
-      requestsQuery,
-    ],
-    { isolationLevel: 'RepeatableRead' }
-  );
-  return { rows: rows as LibraryRowRecord[], requests: requests as RequestRecord[] };
+  return requests as RequestRecord[];
 }
 
 /** audible_cache minutes by uppercase ASIN (request-only books; the duration sort). */

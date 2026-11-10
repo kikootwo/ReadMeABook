@@ -8,13 +8,14 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 ## Key Details
 - **Route:** `src/app/api/library/route.ts`, `requireAuth` (all roles; refuses deleted/pending accounts). **Not** on `API_TOKEN_ALLOWED_ENDPOINTS`.
 - **Engine:** `src/lib/library-view/` (kept apart from `src/lib/services/library/`, the backend adapters):
-  - `service.ts` (full + live pipelines), `params.ts` (strict query parsing), `cursor.ts` (opaque keyset cursor), `loader.ts` (Prisma loads, live query), `merge.ts` (pure merge/derive), `query.ts` (pure filter/facets/sort/page/groups), `enrich.ts` (per-page covers/size/admin path), `serialize.ts` (the one gating choke point), `asin-rule.ts` (the ASIN rule), `types.ts` (exported response types), `constants.ts`.
-- **Pipeline (full mode):** load (one RepeatableRead transaction) → merge → derive → filter/facet/sort/page → page enrichment → serialize per viewer.
+  - `service.ts` (full + live pipelines), `params.ts` (strict query parsing), `cursor.ts` (opaque keyset cursor), `loader.ts` (Prisma loads, live query), `snapshot.ts` (Load 1 cache), `merge.ts` (pure merge/derive), `query.ts` (pure filter/facets/sort/page/groups), `enrich.ts` (per-page covers/size/admin path), `serialize.ts` (the one gating choke point), `asin-rule.ts` (the ASIN rule), `types.ts` (exported response types), `constants.ts`.
+- **Pipeline (full mode):** Load 1 (snapshot cache) + Load 2 (fresh) → merge → derive → filter/facet/sort/page → page enrichment → serialize per viewer.
 - **Active library id:** ABS `audiobookshelf.library_id`, Plex `plex_audiobook_library_id` (bookdate/library pattern). Never `audiobookshelf.ebook_library_id`. None configured → 200 with RMAB entries only, `libraryConfigured:false`.
 
 ## Loads
 - **Load 1 (`plex_library`, active id only):** id, plexGuid, title, author, narrator, duration, year, asin, addedAt, createdAt, cachedLibraryCoverPath. Never `file_path` (a real ABS folder since #495), `thumb_url` (Plex token), `summary`.
 - **Load 2 (`requests`):** `where { type:'audiobook', deletedAt:null, status:{ not:'cancelled' } }` (route test asserts it). Includes requests of soft-deleted accounts (#503). Explicit select; never `file_format`, `ebook_auto_retry_count`, `custom_search_terms`, `placed_ebook_files`, `approval_bypassed_by`, `cancelled_at`, `auto_rerequest_count`. `libraryAsin`/`absItemId` are selected only for the cover rule and never serialized.
+- **Load 1 snapshot (`snapshot.ts`):** one module-level slot holding the prepared rows (link/ASIN indexes, frozen scan-only entries). Key `backend|libraryId|count:max(updated_at)` (`libraryRowsVersion`, read before the rows load, so a write during the load forces a rebuild next call). Safety TTL `SNAPSHOT_MAX_AGE_MS` (10 min). Concurrent misses share one build; a stale build finishing late never takes the slot; a failed build is not cached. Valid because every `plex_library` write goes through Prisma `@updatedAt` (no raw SQL writes). Load 2 and enrichment are never cached.
 - **Durations** of request-only books from `audible_cache` by ASIN (duration sort).
 - The engine drops any non-`audiobook`, cancelled or deleted request again, so ebook rows never change a count.
 
@@ -96,5 +97,7 @@ One list of everything in the configured Plex/Audiobookshelf library plus every 
 
 ## Known limits
 - Format is never shown (`audiobooks.file_format` is overwritten by the ebook organize); no library path; ASIN drift (#284) can show a book twice; series only on RMAB books; one active library.
+- Load 1 and Load 2 are separate reads (no shared transaction): a scan landing between them can show a just-delivered book once as request-only; the next call corrects it.
+- Cold full call at 30k rows pays the row load and prepare (~110 ms engine, plus the Prisma read); warm calls skip both.
 
 ## Related: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md), [backend/database.md](../backend/database.md), [integrations/ebook-sidecar.md](../integrations/ebook-sidecar.md)

@@ -88,7 +88,12 @@ test('#177: Library full and live modes at 10k and 30k library rows under a 2-CP
   await waitStartupSettled();
 
   const libraryId = activeLibraryId();
-  const cpus = stackExecSync('rmab', ['sh', '-c', 'cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo unknown']).trim();
+  // cgroup v2 first, then v1; the host-side `docker inspect` NanoCpus is the authority (harness log).
+  const cpus = stackExecSync('rmab', [
+    'sh',
+    '-c',
+    'cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo "v1 $(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null) $(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null)" || echo unknown',
+  ]).trim();
   const users: { id: string; rmab: Rmab }[] = [];
   for (let i = 0; i < 4; i++) users.push(await registerUser(admin, `perf177u${i}`, `e2e-perf177-pass-${i}`));
   const user = users[0].rmab;
@@ -113,6 +118,8 @@ test('#177: Library full and live modes at 10k and 30k library rows under a 2-CP
     const idleMedian = percentile(idleHealth, 50);
     result[`rows${size}`] = {
       counts,
+      coldFirstMs: Math.round(first.ms), // first call after the seed: rebuilds the row snapshot
+
       idle: { health: stats(idleHealth), full: stats(idleFull), live: stats(idleLive) },
       loaded: { full: stats(loaded.full), live: stats(loaded.live), health: stats(loaded.health), errors: loaded.errors.slice(0, 10) },
       healthP95Ratio: Number((percentile(loaded.health, 95) / percentile(idleHealth, 95)).toFixed(2)),

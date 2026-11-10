@@ -2,7 +2,7 @@
  * Component: Library view service (full mode pipeline and live mode)
  * Documentation: documentation/features/library-view.md
  *
- * Full: load → merge → derive → filter/facet/sort/page → page enrichment → serialize per viewer.
+ * Full: load (rows from the snapshot cache, requests fresh) → merge → derive → filter/facet/sort/page → page enrichment → serialize per viewer.
  * Live: live audiobook requests only, mapped to entry ids without running the engine.
  */
 
@@ -10,8 +10,9 @@ import { ebookSourcesEnabled } from '@/lib/services/ebook-sources';
 import { LIVE_FAST_REFRESH_MS, LIVE_FAST_STATUSES, LIVE_SLOW_REFRESH_MS } from './constants';
 import { encodeCursor } from './cursor';
 import { enrichPage } from './enrich';
-import { loadDurations, loadLibraryData, loadLiveRequests, resolveActiveLibrary } from './loader';
+import { loadDurations, loadLibraryRequests, loadLiveRequests, resolveActiveLibrary } from './loader';
 import { applyDurations, mergeLibrary, requestOnlyAsins } from './merge';
+import { getPreparedLibrary } from './snapshot';
 import type { FullModeParams } from './params';
 import { runQuery } from './query';
 import { serializeItem } from './serialize';
@@ -19,9 +20,9 @@ import type { LibraryLiveItem, LibraryLiveResponse, LibraryResponse, LibraryView
 
 export async function getLibraryPage(params: FullModeParams, viewer: LibraryViewer): Promise<LibraryResponse> {
   const { backend, libraryId } = await resolveActiveLibrary();
-  const { rows, requests } = await loadLibraryData(libraryId);
+  const [library, requests] = await Promise.all([getPreparedLibrary(backend, libraryId), loadLibraryRequests()]);
 
-  const entries = mergeLibrary(rows, requests);
+  const entries = mergeLibrary(library, requests);
   applyDurations(entries, await loadDurations(requestOnlyAsins(entries)));
 
   const result = runQuery(entries, params.filters, params.spec, params.cursorTuple, params.limit);

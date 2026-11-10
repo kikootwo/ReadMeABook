@@ -11,6 +11,8 @@ import { vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { USERS, request, row } from './fixtures';
 
+let installs = 0;
+
 export const CANARY = {
   absFolder: '/audiobookshelf/media/CANARY-abs-folder/Book',
   placedEbook: '/media/ebooks/CANARY-placed-ebook.epub',
@@ -81,7 +83,9 @@ export function installStack(m: Mocks, stack = seedStack(), opts: { libraryId?: 
     if (key === 'ebook_indexer_search_enabled') return opts.ebookSources === false ? 'false' : 'true';
     return null;
   });
-  m.prisma.$transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+  // A new row version per install: the snapshot cache (module state) never carries rows across tests.
+  m.prisma.plexLibrary.aggregate ??= vi.fn();
+  m.prisma.plexLibrary.aggregate.mockResolvedValue({ _count: { _all: stack.rows.length }, _max: { updatedAt: new Date(++installs) } });
   m.prisma.plexLibrary.findMany.mockResolvedValue(stack.rows);
   m.prisma.request.findMany.mockImplementation(async (args: any) => {
     if (args?.where?.type === 'ebook') return [];

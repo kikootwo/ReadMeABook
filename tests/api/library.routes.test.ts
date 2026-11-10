@@ -63,7 +63,15 @@ describe('GET /api/library', () => {
     const select = JSON.stringify(args.select);
     for (const key of ['filePath', 'thumbUrl', 'summary']) expect(select).not.toContain(`"${key}"`);
     expect(configMock.get).not.toHaveBeenCalledWith('audiobookshelf.ebook_library_id');
-    expect(prismaMock.$transaction.mock.calls[0][1]).toEqual({ isolationLevel: 'RepeatableRead' });
+    expect(prismaMock.plexLibrary.aggregate.mock.calls[0][0].where).toEqual({ plexLibraryId: 'abs-lib-1' });
+  });
+
+  it('reuses the row snapshot while the version holds; requests are read fresh every call', async () => {
+    await call();
+    await call('q=dune');
+    expect(prismaMock.plexLibrary.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.plexLibrary.aggregate).toHaveBeenCalledTimes(2);
+    expect(prismaMock.request.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.type === 'audiobook').length).toBeGreaterThanOrEqual(2);
   });
 
   it('uses the Plex library id in Plex mode', async () => {

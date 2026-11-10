@@ -5,7 +5,7 @@
 
 import { RMABLogger } from '@/lib/utils/logger';
 import { SORT_KEY_LENGTH, STATUS_GROUP_OF } from './constants';
-import { buildAsinIndex, matchByAsin } from './asin-rule';
+import { buildAsinIndex, matchByAsin, type AsinIndex } from './asin-rule';
 import type { LibraryEntry, LibraryRowRecord, RequestRecord, StatusGroup } from './types';
 
 const logger = RMABLogger.create('LibraryView.Merge');
@@ -116,10 +116,36 @@ function requestOnlyEntry(primary: RequestRecord): LibraryEntry {
 }
 
 /**
+ * The request-independent half of the merge for one set of library rows: link and ASIN indexes and
+ * each row's scan-only entry. Immutable once built, so the snapshot cache (snapshot.ts) shares it
+ * across calls; entries for rows a request claims are built per call.
+ */
+export interface PreparedLibrary {
+  rows: readonly LibraryRowRecord[];
+  byGuid: ReadonlyMap<string, LibraryRowRecord>;
+  index: AsinIndex<LibraryRowRecord>;
+  scanEntries: readonly LibraryEntry[];
+}
+
+export function prepareLibrary(rows: readonly LibraryRowRecord[]): PreparedLibrary {
+  return {
+    rows,
+    byGuid: new Map(rows.map((row) => [row.plexGuid, row])),
+    index: buildAsinIndex(rows),
+    // Shared across calls by the snapshot cache: frozen so a downstream write throws, not leaks.
+    scanEntries: rows.map((row) => Object.freeze(libraryEntry(row, null))),
+  };
+}
+
+/**
  * Merge the active library's rows with the qualifying audiobook requests. Each library row absorbs
  * at most one book; books folded into another book's row are not listed (debug log).
  */
-export function mergeLibrary(rows: readonly LibraryRowRecord[], requests: readonly RequestRecord[]): LibraryEntry[] {
+export function mergeLibrary(
+  library: PreparedLibrary | readonly LibraryRowRecord[],
+  requests: readonly RequestRecord[]
+): LibraryEntry[] {
+  const { rows, byGuid, index, scanEntries } = 'scanEntries' in library ? library : prepareLibrary(library);
   const books = new Map<string, RequestRecord[]>();
   for (const request of requests) {
     if (!isQualifying(request)) continue;
@@ -128,8 +154,6 @@ export function mergeLibrary(rows: readonly LibraryRowRecord[], requests: readon
     else books.set(request.audiobookId, [request]);
   }
 
-  const byGuid = new Map(rows.map((row) => [row.plexGuid, row]));
-  const index = buildAsinIndex(rows);
   const claims = new Map<string, Claim>();
   const requestOnly: RequestRecord[] = [];
 
@@ -158,7 +182,10 @@ export function mergeLibrary(rows: readonly LibraryRowRecord[], requests: readon
     });
   }
 
-  const entries: LibraryEntry[] = rows.map((row) => libraryEntry(row, claims.get(row.id)?.primary ?? null));
+  const entries: LibraryEntry[] = rows.map((row, i) => {
+    const claim = claims.get(row.id);
+    return claim ? libraryEntry(row, claim.primary) : scanEntries[i];
+  });
   for (const primary of requestOnly) entries.push(requestOnlyEntry(primary));
   return entries;
 }
