@@ -22,8 +22,12 @@ const SWITCH = { name: 'Explicit mark on requests' };
 const storedKey = () => psql(`select coalesce((select value from configuration where key = ${sqlStr(EXPLICIT_KEY)}), '<absent>')`);
 const settingFlag = async (admin: Rmab) => (await admin.get<{ audiobookshelf: Record<string, unknown> }>('/api/admin/settings')).audiobookshelf.explicitMarkEnabled;
 const providersFlag = async () => (await (await fetch(`${urls.rmab()}/api/auth/providers`)).json()).explicitMarkEnabled;
-/** Explicit controls and the word anywhere on the page (checkboxes, pills, menu items, text). */
-const explicitOnPage = async (page: Page) => ({
+/** The page's own providers answer (started before navigation), so a check runs after the flag is known. */
+const pageFlag = (page: Page) => page.waitForResponse((res) => new URL(res.url()).pathname === '/api/auth/providers', { timeout: 60_000 })
+  .then((res) => res.json()).then((b: { explicitMarkEnabled?: unknown }) => b.explicitMarkEnabled);
+/** Explicit controls and the word anywhere on the page (checkboxes, pills, menu items, text), once the flag arrived. */
+const explicitOnPage = async (page: Page, flag: Promise<unknown>) => ({
+  pageFlag: await flag,
   boxes: await page.getByRole('checkbox', { name: /Explicit/ }).count(),
   menuItems: await page.getByRole('menuitem', { name: /explicit/i }).count(),
   word: /explicit/i.test((await page.locator('body').innerText()) ?? ''),
@@ -70,29 +74,32 @@ export async function settingLeg(opts: {
   // The details modal (eve): Request is there, no Explicit row
   {
     const { ctx, page } = await browse(browser, eve.storage, 1280, 900, false);
+    const flag = pageFlag(page);
     await openDetails(page);
     await expect(page.getByRole('button', { name: /Request Audiobook|Interactive Search/ }).first()).toBeVisible({ timeout: 30_000 });
-    r.modal = await explicitOnPage(page);
+    r.modal = await explicitOnPage(page, flag);
     await ctx.close();
   }
   // My Requests (eve) 1280 light: the card, no box
   {
     const { ctx, page, shot } = await browse(browser, eve.storage, 1280, 900, false);
+    const flag = pageFlag(page);
     await page.goto('/requests');
     await expect(page.getByText(book.title).first()).toBeVisible({ timeout: 30_000 });
-    r.myRequests = await explicitOnPage(page);
+    r.myRequests = await explicitOnPage(page, flag);
     await shot(dir, 'my-requests-setting-off-1280-light');
     await ctx.close();
   }
   // Admin table 1280 light: the row and its open actions menu, no pill, no menu item
   {
     const { ctx, page, shot } = await browse(browser, adminStorage, 1280, 900, false);
+    const flag = pageFlag(page);
     await page.goto('/admin');
     const row = page.locator('tr', { has: page.getByText(book.title) });
     await expect(row).toBeVisible({ timeout: 30_000 });
     await row.getByTitle('Actions').click();
     await expect(page.getByRole('menuitem').first()).toBeVisible();
-    r.adminTable = { ...(await explicitOnPage(page)), menuItemsShown: await page.getByRole('menuitem').count() };
+    r.adminTable = { ...(await explicitOnPage(page, flag)), menuItemsShown: await page.getByRole('menuitem').count() };
     await shot(dir, 'admin-table-setting-off-1280-light');
     await ctx.close();
   }
@@ -138,7 +145,7 @@ export async function settingLeg(opts: {
 
 /** The leg's checks (soft). */
 export function expectSettingLeg(r: Record<string, unknown>) {
-  const none = { boxes: 0, menuItems: 0, word: false };
+  const none = { pageFlag: false, boxes: 0, menuItems: 0, word: false };
   expect.soft([r.storedBefore, r.settingBefore, r.providersBefore], 'leg 0: off on a fresh stack (no key stored)').toEqual(['<absent>', false, false]);
   expect.soft([r.postStatus, r.storedMark], 'leg 0: explicit on create ignored while off').toEqual([201, 'false']);
   expect.soft(r.requesterPut, 'leg 0: the requester PUT is refused').toEqual({ status: 403, body: { error: 'FeatureDisabled', message: 'The Explicit mark is turned off in Settings' } });
