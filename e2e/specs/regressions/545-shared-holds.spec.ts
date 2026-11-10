@@ -83,7 +83,7 @@ function insertSibling(s: Sibling): string {
 const deletedAt = (id: string) => psql(`select coalesce(deleted_at::text, '') from requests where id = ${sqlStr(id)}`);
 /** The request's row on the torrent: 'gone' once the request is hard-deleted */
 const rowStatus = (id: string) => (requestExists(id) ? downloadRow(id)?.status ?? '' : 'gone');
-const deletesOf = (deletes: { hashes: string[] }[], hash: string) => deletes.filter((d) => d.hashes.includes(hash.toLowerCase()));
+const deletesOf = <T extends { hashes: string[] }>(deletes: T[], hash: string): T[] => deletes.filter((d) => d.hashes.includes(hash.toLowerCase()));
 
 test('545 deleted and cancelled requests keep a shared torrent only through a row they own, until their own rule is met', async () => {
   test.setTimeout(30 * 60_000);
