@@ -36,6 +36,8 @@ test('a job with no folder of its own: cleanup removes nothing in the category f
   const c = new CaseRun('usenet-no-job-folder', DIR);
   const rmab = await Rmab.loginAdmin();
   await fakeArr.seedCategory('sab', 'audio', 'shared-app*');
+  // The scenario first: the indexer save writes the live Prowlarr list, which needs the usenet indexer in it
+  await loadScenario('phm', 'usenet', 'phm-m4b');
   c.save('indexer-config.json', await setRemoveAfterProcessing(rmab, 2, true));
   // A real .mp3 (so the import takes it as audio), owned by the app user like a download
   sh(`f=$(find /fixtures/martian-mp3 -name '*.mp3' | sort | head -1); mkdir -p ${q(FOLDER)}; cp "$f" ${q(FOREIGN)}; chown -R ${PUID}:${PGID} ${q(FOLDER)}`, { service: 'fake-arr' });
@@ -45,7 +47,6 @@ test('a job with no folder of its own: cleanup removes nothing in the category f
   c.save('put.json', put);
   c.check(`stored audio, not ReadMeABook's own (${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'audio' && put.stored?.ownedCategory === undefined, 'control');
 
-  await loadScenario('phm', 'usenet', 'phm-m4b');
   c.save('listing-before.txt', listing(FOLDER));
   const run = await grabAndImport(c, rmab, 'phm');
   c.save('listing-after.txt', listing(FOLDER));
