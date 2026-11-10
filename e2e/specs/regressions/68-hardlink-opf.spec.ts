@@ -138,7 +138,8 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
         await openPaths(page);
         await expect(page.getByTestId('library-files-section')).toHaveCount(0);
         await expect(page.getByRole('radio')).toHaveCount(0);
-        const block = (id: string) => page.locator('div.rounded-lg').filter({ has: page.locator(`#${id}`) });
+        // The innermost box holding the checkbox (the Paths card around them is rounded too)
+        const block = (id: string) => page.locator('div.rounded-lg').filter({ has: page.locator(`#${id}`) }).last();
         await regionShot(page, block('metadata-tagging-settings'), block('chapter-merging-settings'), `paths-plex-${view.name}`);
       } finally {
         await ctx.close();
