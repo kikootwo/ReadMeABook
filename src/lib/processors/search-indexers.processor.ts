@@ -15,6 +15,7 @@ import { filterBlockedResults } from '../utils/filter-blocked-results';
 import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { isLastAttempt, notifyChainEndedFailed, notifyRequestError, type BullAttempt } from './client-failure';
+import { PAST_SEARCH_STATUSES } from '../constants/request-statuses';
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
@@ -44,6 +45,12 @@ async function failChainIfNothingLeft(
   return { success: false, message, requestId };
 }
 
+/** After a guarded write found no row: the request's status, or null when cancelled, deleted or gone (#591) */
+async function movedOnStatus(requestId: string): Promise<string | null> {
+  const row = await prisma.request.findUnique({ where: { id: requestId }, select: { status: true, deletedAt: true } });
+  return !row || row.deletedAt || row.status === 'cancelled' ? null : row.status;
+}
+
 /**
  * Process search indexers job
  * Searches configured indexers for audiobook torrents
@@ -56,8 +63,16 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
   logger.info(`Processing request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching, unless it was cancelled or deleted
-    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }))) {
+    // Update request status to searching, unless it was cancelled or deleted, or is past
+    // searching: a search queued before an Interactive Search pick adds no second download (#591)
+    if (!(await updateRequestUnlessStopped(
+      requestId, { status: 'searching', searchAttempts: { increment: 1 } }, { notIn: PAST_SEARCH_STATUSES }
+    ))) {
+      const status = await movedOnStatus(requestId);
+      if (status) {
+        logger.info(`Request ${requestId} is already ${status}, skipping search`);
+        return { success: true, message: `Request is already ${status}, search skipped`, requestId };
+      }
       logger.info(`Request ${requestId} is cancelled or deleted, skipping search`);
       return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };
     }
@@ -336,6 +351,15 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
     }
     logger.info(`========================================================`);
     logger.info(`Selected best result: ${bestResult.title} (final score: ${bestResult.finalScore.toFixed(1)})`);
+
+    // The pick goes ahead only while the request is still this search's `searching`: an
+    // Interactive Search pick (`downloading`, or `awaiting_approval`) or a cancel during the search wins (#591)
+    if (!(await updateRequestUnlessStopped(requestId, {}, { onlyIn: ['searching'] }))) {
+      const status = await movedOnStatus(requestId);
+      const message = `Request ${status ? `moved to ${status}` : 'was cancelled or deleted'} during the search, no download queued`;
+      logger.info(`${message} (request ${requestId})`);
+      return { success: true, message, requestId };
+    }
 
     // Trigger download job with best result
     const jobQueue = getJobQueueService();

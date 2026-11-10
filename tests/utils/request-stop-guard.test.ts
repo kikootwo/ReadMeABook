@@ -45,6 +45,17 @@ describe('request stop guard', () => {
     });
   });
 
+  it('narrows the same conditional write with notIn or onlyIn, still refusing cancelled (#591)', async () => {
+    const { updateRequestUnlessStopped } = await import('@/lib/utils/request-stop-guard');
+
+    await updateRequestUnlessStopped('req-1', { status: 'searching' }, { notIn: ['downloading', 'available'] });
+    await updateRequestUnlessStopped('req-1', {}, { onlyIn: ['searching', 'cancelled'] });
+    expect(prismaMock.request.updateMany.mock.calls.map(([args]) => args.where)).toEqual([
+      { id: 'req-1', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'available'] } },
+      { id: 'req-1', deletedAt: null, status: { in: ['searching'] } },
+    ]);
+  });
+
   it('returns false when the conditional update matches no row', async () => {
     prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
     const { markRequestFailedUnlessStopped } = await import('@/lib/utils/request-stop-guard');

@@ -230,7 +230,8 @@ describe('processSearchIndexers', () => {
     expect(prismaMock.request.update).not.toHaveBeenCalled();
     expect(result).toMatchObject({ success: true, requestId: 'req-c' });
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'req-c', deletedAt: null, status: { not: 'cancelled' } },
+      // also refuses requests past searching (#591)
+      where: { id: 'req-c', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available'] } },
       data: expect.objectContaining({ status: 'searching' }),
     }));
     expect(prowlarrMock.searchWithVariations).not.toHaveBeenCalled();

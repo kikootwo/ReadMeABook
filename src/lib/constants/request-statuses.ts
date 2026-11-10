@@ -74,6 +74,13 @@ export const SEARCHABLE_STATUSES = [
   'awaiting_release',
 ] as const;
 
+/**
+ * Past searching: a download is under way or done (#591). A queued automatic search skips a
+ * request in one of these (no `searching` write, nothing queued). Not COMPLETED_STATUSES:
+ * that list lacks the two in-flight statuses, where a search would add a second download.
+ */
+export const PAST_SEARCH_STATUSES = ['downloading', 'processing', 'downloaded', 'available'] as const;
+
 /** Audiobook request statuses POST /api/requests/[id]/fetch-ebook accepts (admin). */
 export const EBOOK_FETCHABLE_STATUSES = ['downloaded', 'available'] as const;
 
