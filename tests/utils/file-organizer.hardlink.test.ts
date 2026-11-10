@@ -16,7 +16,11 @@ const fsState = vi.hoisted(() => ({
   chmodCalls: [] as string[],
   linkCalls: [] as Array<{ source: string; target: string; opfThere: boolean }>,
   failLinksFrom: null as null | { dir: string; code: string },
+  failLinkNamed: null as null | { name: string; code: string },
+  fakeSymlinks: new Set<string>(),
 }));
+const placeState = vi.hoisted(() => ({ audioCalls: [] as unknown[][] }));
+const opfState = vi.hoisted(() => ({ failWrite: null as null | string }));
 const rootsState = vi.hoisted(() => ({ roots: null as null | { mediaDir: string; downloadRoots: string[]; otherRoots: string[] } }));
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -32,9 +36,35 @@ vi.mock('fs/promises', async (importOriginal) => {
     fsState.linkCalls.push({ source: src, target: String(target), opfThere: nodeFs.existsSync(nodePath.join(nodePath.dirname(String(target)), 'metadata.opf')) });
     const fail = fsState.failLinksFrom;
     if (fail && src.startsWith(fail.dir)) throw Object.assign(new Error(`${fail.code}: injected`), { code: fail.code });
+    const named = fsState.failLinkNamed;
+    if (named && nodePath.basename(src) === named.name) throw Object.assign(new Error(`${named.code}: injected`), { code: named.code });
     return actual.link(source as string, target as string);
   }) as typeof actual.link;
-  return { ...actual, default: { ...actual, chmod, link }, chmod, link };
+  const lstat = (async (p: unknown, options?: unknown) => {
+    const result = await (actual.lstat as (...a: unknown[]) => Promise<object>)(p, options);
+    if (!fsState.fakeSymlinks.has(nodePath.resolve(String(p)))) return result;
+    return Object.assign(Object.create(Object.getPrototypeOf(result)), result, { isSymbolicLink: () => true, isFile: () => false });
+  }) as typeof actual.lstat;
+  return { ...actual, default: { ...actual, chmod, link, lstat }, chmod, link, lstat };
+});
+
+// Every placeAudio call (the copy loop), to pin that a copy fallback is Copy mode
+vi.mock('@/lib/utils/organize-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils/organize-copy')>();
+  const placeAudio = (async (...args: Parameters<typeof actual.placeAudio>) => {
+    placeState.audioCalls.push(args);
+    return actual.placeAudio(...args);
+  }) as typeof actual.placeAudio;
+  return { ...actual, placeAudio };
+});
+
+vi.mock('@/lib/utils/opf-sidecar', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils/opf-sidecar')>();
+  const writeOpfSidecar = (async (...args: Parameters<typeof actual.writeOpfSidecar>) => {
+    if (opfState.failWrite) throw Object.assign(new Error(`${opfState.failWrite}: injected`), { code: opfState.failWrite });
+    return actual.writeOpfSidecar(...args);
+  }) as typeof actual.writeOpfSidecar;
+  return { ...actual, writeOpfSidecar };
 });
 
 vi.mock('@/lib/db', () => ({
@@ -69,7 +99,6 @@ vi.mock('@/lib/utils/chapter-merger', async (importOriginal) => {
 import { FileOrganizer, type PlacementOptions } from '@/lib/utils/file-organizer';
 import { tagMultipleFiles, addMp4FreeformTags } from '@/lib/utils/metadata-tagger';
 import { detectChapterFiles, mergeChapters } from '@/lib/utils/chapter-merger';
-import { OUTSIDE_SOURCE } from '@/lib/utils/book-link';
 
 let root: string;
 let media: string;
@@ -108,6 +137,10 @@ describe('FileOrganizer hard link placement', () => {
     fsState.chmodCalls = [];
     fsState.linkCalls = [];
     fsState.failLinksFrom = null;
+    fsState.failLinkNamed = null;
+    fsState.fakeSymlinks.clear();
+    placeState.audioCalls = [];
+    opfState.failWrite = null;
     vi.mocked(tagMultipleFiles).mockClear();
     vi.mocked(addMp4FreeformTags).mockClear();
     vi.mocked(detectChapterFiles).mockClear();
@@ -208,16 +241,114 @@ describe('FileOrganizer hard link placement', () => {
     expect(fsState.linkCalls.filter((c) => c.source.endsWith('.mp3'))).toEqual([]);
   });
 
-  it('a source outside the download folders is neither linked nor copied, even when the rest falls back', async () => {
+  describe('a source outside the download folders (Manual Import, Bulk Import from the media folder)', () => {
+    let shelf: string;
+    beforeEach(() => {
+      shelf = path.join(media, 'Old Shelf', 'Book');
+      write(path.join(shelf, 'Part 1.mp3'), 'one');
+      write(path.join(shelf, 'Part 2.mp3'), 'two');
+    });
+
+    it('Hard link (copy if not possible) copies the whole book, as Copy mode does, and says why', async () => {
+      const result = await organize({ filePlacement: 'hardlink', writeOpf: true }, shelf);
+
+      expect(result.success).toBe(true);
+      expect(result.linkFallback).toEqual({ code: 'OUTSIDE', words: 'the files are not in a download folder' });
+      expect(result.records!.map((r) => [path.basename(r.target), r.status, !!r.linked])).toEqual([['Part 1.mp3', 'copied', false], ['Part 2.mp3', 'copied', false]]);
+      expect(ino(path.join(book, 'Part 1.mp3'))).not.toBe(ino(path.join(shelf, 'Part 1.mp3')));
+      expect(fsState.linkCalls.filter((c) => c.source.endsWith('.mp3'))).toEqual([]);
+      expect(fs.existsSync(path.join(book, 'metadata.opf'))).toBe(true);
+    });
+
+    it('Hard link only imports nothing and gives that reason', async () => {
+      const result = await organize({ filePlacement: 'hardlink_only', writeOpf: true }, shelf);
+
+      expect(result.success).toBe(false);
+      expect(result.linkRefused).toEqual({ code: 'OUTSIDE', words: 'the files are not in a download folder' });
+      expect(fs.existsSync(book)).toBe(false);
+      expect(fs.readdirSync(shelf).sort()).toEqual(['Part 1.mp3', 'Part 2.mp3']);
+    });
+
+    it('a Bulk Import of a book already in its place resolves to in place under Hard link', async () => {
+      write(path.join(book, 'Part 1.mp3'), 'one');
+      const result = await organize({ filePlacement: 'hardlink' }, book);
+
+      expect(result.success).toBe(true);
+      expect(result.records!.map((r) => r.status)).toEqual(['identical']);
+      expect(fs.readFileSync(path.join(book, 'Part 1.mp3'), 'utf8')).toBe('one');
+    });
+  });
+
+  describe('one file that cannot be linked safely decides the whole book', () => {
+    it('Hard link (copy if not possible): a third file that is a symbolic link makes the book Copy mode, call for call', async () => {
+      configState.values.set('chapter_merging_enabled', 'false');
+      const files = ['Part 1.mp3', 'Part 2.mp3', 'Part 3.mp3'].map((name, i) => write(path.join(source, name), `part ${i}`));
+      fsState.fakeSymlinks.add(path.resolve(files[2]));
+
+      await organize({ writeOpf: true, metadataTaggingEnabled: false });
+      const copyCalls = placeState.audioCalls;
+      fs.rmSync(path.join(media, 'Ann Writer, Ben Co-Writer'), { recursive: true });
+      placeState.audioCalls = [];
+
+      const result = await organize({ filePlacement: 'hardlink', writeOpf: true });
+
+      expect(result.linkFallback).toMatchObject({ code: 'SYMLINK' });
+      expect(fsState.linkCalls.filter((c) => c.source.endsWith('.mp3'))).toEqual([]);
+      expect(copyCalls).toHaveLength(3);
+      expect(placeState.audioCalls).toEqual(copyCalls);
+    });
+
+    it('Hard link only: a symbolic link among the files imports nothing', async () => {
+      write(path.join(source, 'Part 1.mp3'), 'one');
+      const link = write(path.join(source, 'Part 2.mp3'), 'two');
+      fsState.fakeSymlinks.add(path.resolve(link));
+
+      const result = await organize({ filePlacement: 'hardlink_only', writeOpf: true });
+
+      expect(result.linkRefused).toMatchObject({ code: 'SYMLINK', words: 'a download file is a symbolic link' });
+      expect(fs.existsSync(book)).toBe(false);
+    });
+  });
+
+  describe('a failure in the middle of the link pass leaves no link and no OPF of this run', () => {
+    const five = () => [1, 2, 3, 4, 5].map((n) => write(path.join(source, `Part ${n}.mp3`), `part ${n}`));
+
+    it('Hard link (copy if not possible): an error on file 3 of 5 removes links 1 and 2, then copies the book', async () => {
+      const sources = five();
+      fsState.failLinkNamed = { name: 'Part 3.mp3', code: 'EACCES' };
+
+      const result = await organize({ filePlacement: 'hardlink', writeOpf: true });
+
+      expect(result.success).toBe(true);
+      expect(result.linkFallback).toMatchObject({ code: 'EACCES' });
+      expect(result.linkedCount ?? 0).toBe(0);
+      for (const s of sources) expect(fs.statSync(s).nlink).toBe(1);
+      expect(result.records!.every((r) => r.status === 'copied' && !r.linked)).toBe(true);
+      expect(fs.readdirSync(book).sort()).toEqual(['Part 1.mp3', 'Part 2.mp3', 'Part 3.mp3', 'Part 4.mp3', 'Part 5.mp3', 'metadata.opf']);
+    });
+
+    it('Hard link only: an error on file 3 of 5 removes links 1 and 2 and the OPF', async () => {
+      const sources = five();
+      fsState.failLinkNamed = { name: 'Part 3.mp3', code: 'EIO' };
+
+      const result = await organize({ filePlacement: 'hardlink_only', writeOpf: true });
+
+      expect(result.linkRefused).toMatchObject({ code: 'EIO' });
+      expect(result.linkLeftBehind ?? []).toEqual([]);
+      for (const s of sources) expect(fs.statSync(s).nlink).toBe(1);
+      expect(fs.existsSync(book)).toBe(false);
+    });
+  });
+
+  it('a metadata.opf that cannot be written is reported for the request, and the book is still imported', async () => {
     write(path.join(source, 'Part 1.mp3'), 'one');
-    const elsewhere = path.join(root, 'elsewhere', 'Book');
-    write(path.join(elsewhere, 'Part 1.mp3'), 'one');
+    opfState.failWrite = 'EACCES';
 
-    const result = await organize({ filePlacement: 'hardlink' }, elsewhere);
+    const result = await organize({ filePlacement: 'hardlink', writeOpf: true });
 
-    expect(result.success).toBe(false);
-    expect(result.records).toEqual([expect.objectContaining({ status: 'failed', verified: false, reason: OUTSIDE_SOURCE })]);
-    expect(fs.existsSync(path.join(book, 'Part 1.mp3'))).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.opfError).toBe('EACCES');
+    expect(result.linkedCount).toBe(1);
   });
 
   it('copy (the default) is unchanged: tags and merge still run', async () => {

@@ -261,9 +261,10 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       }
     ).finally(() => mergeProgress.settle());
 
-    // Hard link only refused the book: a client download waits in `warn` for Retry (manual imports fail below)
-    if (result.linkRefused && (downloadHistoryId || typeof cleanupSource !== 'boolean')) {
-      return await refuseLinkedImport(requestId, result.linkRefused, logger);
+    // Hard link only refused the book: a client download waits in `warn` for Retry, a manual or bulk import fails
+    if (result.linkRefused) {
+      const manual = !downloadHistoryId && typeof cleanupSource === 'boolean';
+      return await refuseLinkedImport(requestId, { ...result, linkRefused: result.linkRefused }, manual, logger);
     }
     if (!result.success) {
       throw new Error(`File organization failed: ${result.errors.join(', ')}`);

@@ -12,6 +12,7 @@ import {
   FILE_PLACEMENT_LABELS,
   METADATA_MODE_LABELS,
   isLinkPlacement,
+  linkBlockedReason,
   metadataModeOf,
   parseFilePlacement,
   type FilePlacement,
@@ -25,14 +26,17 @@ interface LibraryFilesSectionProps {
 
 const METADATA_MODES: MetadataMode[] = ['tags', 'opf', 'none'];
 
-const radioClass = 'mt-0.5 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50';
+const radioClass = 'mt-0.5 h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500';
 const helpClass = 'text-sm text-gray-600 dark:text-gray-400 mt-2';
+/** A disabled option is dimmed as a whole (circle and words), not only its circle. */
+const optionClass = (disabled: boolean) =>
+  `flex items-start gap-3 text-sm text-gray-800 dark:text-gray-200 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
 
-/** "Last book copied instead of linked: <title> (<reason>), <date>" */
+/** "Last book copied instead of linked: <title> (<reason, CODE>), <date>. Cleared when a book is next linked." */
 function fallbackLine(note: NonNullable<PathsSettings['linkFallbackLast']>): string {
   const date = new Date(note.at);
   const when = Number.isNaN(date.getTime()) ? note.at : date.toLocaleDateString();
-  return `Last book copied instead of linked: ${note.title} (${note.reason}), ${when}`;
+  return `Last book copied instead of linked: ${note.title} (${note.reason}), ${when}. Cleared when a book is next linked.`;
 }
 
 /**
@@ -45,7 +49,8 @@ export function LibraryFilesSection({ paths, onUpdate }: LibraryFilesSectionProp
   const placement = parseFilePlacement(paths.filePlacement);
   const mode = metadataModeOf(paths.metadataTaggingEnabled, paths.metadataOpfEnabled === true);
   const linking = isLinkPlacement(placement);
-  const linkBlocked = mode === 'tags' || paths.chapterMergingEnabled;
+  const blockedBy = linkBlockedReason(mode === 'tags', paths.chapterMergingEnabled);
+  const mergeDisabled = linking && !paths.chapterMergingEnabled;
 
   const setMode = (next: MetadataMode) =>
     onUpdate({ metadataTaggingEnabled: next === 'tags', metadataOpfEnabled: next === 'opf' });
@@ -57,27 +62,30 @@ export function LibraryFilesSection({ paths, onUpdate }: LibraryFilesSectionProp
       <fieldset className="min-w-0">
         <legend className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">File placement</legend>
         <div className="space-y-2">
-          {FILE_PLACEMENTS.map((value: FilePlacement) => (
-            <label key={value} className="flex items-start gap-3 text-sm text-gray-800 dark:text-gray-200">
-              <input
-                type="radio"
-                name="file-placement"
-                value={value}
-                checked={placement === value}
-                disabled={isLinkPlacement(value) && linkBlocked && placement !== value}
-                onChange={() => onUpdate({ filePlacement: value })}
-                className={radioClass}
-              />
-              <span className="min-w-0">{FILE_PLACEMENT_LABELS[value]}</span>
-            </label>
-          ))}
+          {FILE_PLACEMENTS.map((value: FilePlacement) => {
+            const disabled = isLinkPlacement(value) && blockedBy !== null && placement !== value;
+            return (
+              <label key={value} className={optionClass(disabled)}>
+                <input
+                  type="radio"
+                  name="file-placement"
+                  value={value}
+                  checked={placement === value}
+                  disabled={disabled}
+                  onChange={() => onUpdate({ filePlacement: value })}
+                  className={radioClass}
+                />
+                <span className="min-w-0">{FILE_PLACEMENT_LABELS[value]}</span>
+              </label>
+            );
+          })}
         </div>
         <p className={helpClass}>
           A hard link shares one copy with the download, so seeding keeps working. The download and media folders must be on the same mount.
         </p>
-        {linkBlocked && (
+        {blockedBy && (
           <p className={`text-sm mt-2 ${linking ? 'text-red-700 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`} role={linking ? 'alert' : undefined}>
-            Needs Metadata: OPF file or None, and chapter merge off.
+            {blockedBy}
           </p>
         )}
         {linking && (
@@ -95,35 +103,37 @@ export function LibraryFilesSection({ paths, onUpdate }: LibraryFilesSectionProp
       <fieldset className="min-w-0">
         <legend className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Metadata</legend>
         <div className="space-y-2">
-          {METADATA_MODES.map((value) => (
-            <label key={value} className="flex items-start gap-3 text-sm text-gray-800 dark:text-gray-200">
-              <input
-                type="radio"
-                name="metadata-mode"
-                value={value}
-                checked={mode === value}
-                disabled={value === 'tags' && linking && mode !== 'tags'}
-                onChange={() => setMode(value)}
-                className={radioClass}
-              />
-              <span className="min-w-0">{METADATA_MODE_LABELS[value]}</span>
-            </label>
-          ))}
+          {METADATA_MODES.map((value) => {
+            const disabled = value === 'tags' && linking && mode !== 'tags';
+            return (
+              <label key={value} className={optionClass(disabled)}>
+                <input
+                  type="radio"
+                  name="metadata-mode"
+                  value={value}
+                  checked={mode === value}
+                  disabled={disabled}
+                  onChange={() => setMode(value)}
+                  className={radioClass}
+                />
+                <span className="min-w-0">{METADATA_MODE_LABELS[value]}</span>
+              </label>
+            );
+          })}
         </div>
-        <p className={helpClass}>An OPF file leaves the audio files unchanged.</p>
       </fieldset>
 
-      <div className="flex items-start gap-4">
+      <div className={`flex items-start gap-4 ${mergeDisabled ? 'opacity-50' : ''}`}>
         <input
           type="checkbox"
           id="chapter-merging-settings"
           checked={paths.chapterMergingEnabled}
-          disabled={linking && !paths.chapterMergingEnabled}
+          disabled={mergeDisabled}
           onChange={(e) => onUpdate({ chapterMergingEnabled: e.target.checked })}
-          className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+          className="mt-1 h-5 w-5 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
         />
         <div className="flex-1 min-w-0">
-          <label htmlFor="chapter-merging-settings" className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer">
+          <label htmlFor="chapter-merging-settings" className={`block text-sm font-medium text-gray-900 dark:text-gray-100 ${mergeDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
             Auto-merge chapters to M4B
           </label>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">

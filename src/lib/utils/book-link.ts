@@ -1,30 +1,26 @@
 /**
- * Component: Book Hard Link Pass (preconditions, link every file or none)
+ * Component: Book Hard Link Pass (vet every file, link every file or none)
  * Documentation: documentation/features/library-placement.md
  *
  * Every file goes through placeFile({ link }) (organize-copy.ts), so the existing-target
- * rules are the copy's. A book-level refusal removes this run's links again: a book is
- * linked, copied or not imported, never half-linked by one run.
+ * rules are the copy's. Every file is vetted before the first link; any file that can't be
+ * linked safely, and any failure or throw during the pass, makes the whole book `cannot`
+ * after this run's links are removed by name: a book is linked, copied or not imported,
+ * never half-linked by one run.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { collectGuardRoots } from '../processors/organize-cleanup-guard';
-import { canonicalize, isStrictlyInside, type CanonicalPath } from './delete-guard';
+import { canonicalize, isSameEntry, isStrictlyInside, type CanonicalPath } from './delete-guard';
 import { sameIdentity, type FileIdentity } from './copy-file';
 import { placeFile, withTargetLock, type PlaceResult } from './organize-copy';
-import { linkRefusal, type LinkRefusal } from './link-file';
+import { describeRefusal, linkRefusal, refusalFromError, type LinkRefusal } from './link-file';
 import type { RMABLogger } from './logger';
 
 export interface BookLinkFile {
   source: string;
   target: string;
-}
-
-/** A file that is never linked or copied in link mode (a symlink, or outside the download folders). */
-export interface RefusedSource {
-  file: BookLinkFile;
-  reason: string;
 }
 
 export interface BookLinkInput {
@@ -36,12 +32,9 @@ export interface BookLinkInput {
 }
 
 export type BookLinkResult =
-  | { kind: 'placed'; placed: Array<{ file: BookLinkFile; result: PlaceResult }>; refused: RefusedSource[] }
-  | { kind: 'cannot'; refusal: LinkRefusal; refused: RefusedSource[] };
-
-export const SYMLINK_SOURCE = 'the download file is a symbolic link; not imported while File placement is a hard link';
-export const NOT_REGULAR_SOURCE = 'the download file is not a regular file; not imported while File placement is a hard link';
-export const OUTSIDE_SOURCE = 'the file is not in a download folder; not imported while File placement is a hard link';
+  | { kind: 'placed'; placed: Array<{ file: BookLinkFile; result: PlaceResult }> }
+  /** `leftBehind`: names of this run that could not be removed again (never removed recursively). */
+  | { kind: 'cannot'; refusal: LinkRefusal; leftBehind: string[] };
 
 // One link pass (and its rollback) per book folder at a time, so a second job for the same
 // book never reports as in place a link this pass is about to remove
@@ -63,89 +56,152 @@ async function withBookLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-type Precheck =
-  | { eligible: Array<BookLinkFile & { id: FileIdentity }>; refused: RefusedSource[] }
-  | { refusal: LinkRefusal; refused: RefusedSource[] };
+interface Roots { media: CanonicalPath; allowed: CanonicalPath[] }
 
-async function precheck(files: BookLinkFile[], targetDir: string): Promise<Precheck> {
-  const refused: RefusedSource[] = [];
-  let media: CanonicalPath;
-  let allowed: CanonicalPath[];
+/** One file: its identity when it may be linked, else the refusal code. */
+async function vet(
+  source: string, roots: Roots | null, canonicalDir: (dir: string) => Promise<CanonicalPath>
+): Promise<{ code: string } | { id: FileIdentity }> {
+  let stat;
   try {
-    const roots = await collectGuardRoots();
-    media = await canonicalize(roots.mediaDir);
-    allowed = await Promise.all([...roots.downloadRoots, ...(roots.otherRoots ?? [])].map(canonicalize));
-  } catch {
-    return { refusal: linkRefusal('ROOTS'), refused };
+    stat = await fs.lstat(source, { bigint: true });
+  } catch (error) {
+    return { code: refusalFromError(error).code };
   }
-  if (!isStrictlyInside(await canonicalize(targetDir), media)) return { refusal: linkRefusal('TARGET'), refused };
-  const targetDev = (await fs.stat(targetDir, { bigint: true })).dev;
-
-  const eligible: Array<BookLinkFile & { id: FileIdentity }> = [];
-  for (const file of files) {
-    let stat;
-    try {
-      stat = await fs.lstat(file.source, { bigint: true });
-    } catch (error) {
-      refused.push({ file, reason: error instanceof Error ? error.message : String(error) });
-      continue;
-    }
-    if (stat.isSymbolicLink()) { refused.push({ file, reason: SYMLINK_SOURCE }); continue; }
-    if (!stat.isFile()) { refused.push({ file, reason: NOT_REGULAR_SOURCE }); continue; }
-    const real = await canonicalize(file.source);
-    if (!allowed.some((root) => isStrictlyInside(real, root))) { refused.push({ file, reason: OUTSIDE_SOURCE }); continue; }
+  if (stat.isSymbolicLink()) return { code: 'SYMLINK' };
+  if (!stat.isFile()) return { code: 'NOT_REGULAR' };
+  if (roots) {
+    // Not a symlink, so it is inside a folder when its own (canonical) folder is that folder or below it
+    const dir = await canonicalDir(path.dirname(source));
+    const inside = (root: CanonicalPath) => isSameEntry(dir, root) || isStrictlyInside(dir, root);
+    if (!roots.allowed.some(inside)) return { code: 'OUTSIDE' };
     // Audiobookshelf would index both names of one inode
-    if (isStrictlyInside(real, media)) return { refusal: linkRefusal('IN_LIBRARY'), refused };
-    // Equal devices don't prove one mount (two bind mounts of a disk share st_dev); only link() can tell
-    if (stat.dev !== targetDev) return { refusal: linkRefusal('EXDEV'), refused };
-    eligible.push({ ...file, id: { dev: stat.dev, ino: stat.ino } });
+    if (inside(roots.media)) return { code: 'IN_LIBRARY' };
   }
-  return { eligible, refused };
+  return { id: { dev: stat.dev, ino: stat.ino } };
 }
 
-/** Remove the names this pass linked that still are the download file; a replaced name stays. */
-async function rollback(created: Array<{ target: string; id: FileIdentity }>, logger?: RMABLogger | null): Promise<void> {
-  for (const { target, id } of [...created].reverse()) {
+type Precheck = { eligible: Array<BookLinkFile & { id: FileIdentity }> } | { refusal: LinkRefusal };
+
+async function precheck(files: BookLinkFile[], targetDir: string, logger?: RMABLogger | null): Promise<Precheck> {
+  let roots: Roots | null = null;
+  try {
+    const configured = await collectGuardRoots();
+    roots = {
+      media: await canonicalize(configured.mediaDir),
+      allowed: await Promise.all([...configured.downloadRoots, ...(configured.otherRoots ?? [])].map(canonicalize)),
+    };
+  } catch {
+    roots = null;
+  }
+  const targetInside = roots !== null && isStrictlyInside(await canonicalize(targetDir), roots.media);
+  const targetDev = (await fs.stat(targetDir, { bigint: true })).dev;
+
+  // Every file is vetted before the first link; the first unsafe one decides the book
+  const dirs = new Map<string, Promise<CanonicalPath>>();
+  const canonicalDir = (dir: string) => dirs.get(dir) ?? dirs.set(dir, canonicalize(dir)).get(dir)!;
+  const eligible: Array<BookLinkFile & { id: FileIdentity }> = [];
+  let unsafe: string | null = null;
+  for (const file of files) {
+    const vetted = await vet(file.source, roots, canonicalDir);
+    if ('code' in vetted) {
+      await logger?.warn(`Can't hard-link ${path.basename(file.source)}: ${describeRefusal(linkRefusal(vetted.code))}`);
+      unsafe ??= vetted.code;
+    } else {
+      eligible.push({ ...file, id: vetted.id });
+    }
+  }
+  if (!roots) return { refusal: linkRefusal('ROOTS') };
+  if (!targetInside) return { refusal: linkRefusal('TARGET') };
+  if (unsafe) return { refusal: linkRefusal(unsafe) };
+  // Equal devices don't prove one mount (two bind mounts of a disk share st_dev); only link() can tell
+  if (eligible.some((file) => file.id.dev !== targetDev)) return { refusal: linkRefusal('EXDEV') };
+  return { eligible };
+}
+
+const lstatOrNull = (p: string) => fs.lstat(p, { bigint: true }).catch(() => null);
+
+/**
+ * Remove, by name, every link this run made: a name that was not there before the pass and
+ * is now the download file. A name someone else put there stays. Returns the names that
+ * should go and could not (including `failedTarget` when its failed link stayed).
+ */
+async function rollback(
+  files: Array<BookLinkFile & { id: FileIdentity }>,
+  before: Set<string>,
+  created: Array<{ target: string; id: FileIdentity }>,
+  failedTarget: string | null,
+  logger?: RMABLogger | null
+): Promise<string[]> {
+  const candidates = new Map<string, FileIdentity>();
+  for (const file of files) if (!before.has(file.target)) candidates.set(file.target, file.id);
+  for (const { target, id } of created) candidates.set(target, id);
+  const leftBehind: string[] = [];
+  for (const [target, id] of [...candidates].reverse()) {
     await withTargetLock(target, async () => {
-      const stat = await fs.lstat(target, { bigint: true }).catch(() => null);
-      if (stat?.isFile() && sameIdentity({ dev: stat.dev, ino: stat.ino }, id)) {
+      const stat = await lstatOrNull(target);
+      if (!stat) return;
+      const name = path.basename(target);
+      if (stat.isFile() && sameIdentity({ dev: stat.dev, ino: stat.ino }, id)) {
         await fs.unlink(target).catch(async (error: unknown) => {
-          await logger?.warn(`Could not remove the link ${path.basename(target)} again: ${error instanceof Error ? error.message : String(error)}`);
+          leftBehind.push(name);
+          await logger?.warn(`Could not remove the link ${name} again: ${error instanceof Error ? error.message : String(error)}`);
         });
-      } else if (stat) {
-        await logger?.warn(`Left alone: ${path.basename(target)} was replaced while the book was being linked`);
+      } else if (target === failedTarget) {
+        leftBehind.push(name);
+        await logger?.warn(`Could not remove ${name} again: the link made for it failed its check`);
+      } else {
+        await logger?.warn(`Left alone: ${name} was put there by something else while the book was being linked`);
       }
     });
   }
+  return leftBehind;
 }
 
 /**
- * Link the book's files into `targetDir`. Book-level refusals (roots unreadable, folder
- * outside the media folder, download inside it, separate devices, a link error in
- * LINK_UNSUPPORTED, a failed verification, an interrupted copy in the way) remove the
- * links this pass made and return `cannot`. Per-file outcomes (in place, differs, other
- * errors) are returned as placeFile reports them. Refused sources are never linked.
+ * Link the book's files into `targetDir`. Returns `cannot` (after removing this run's links)
+ * when the configured folders can't be read, the folder is outside the media folder, any file
+ * is unsafe (symlink, not a regular file, outside the download folders, inside the media
+ * folder), the devices differ, or any file fails or throws during the pass. Otherwise every
+ * file's placeFile result (linked, in place, or another file by that name left untouched).
  */
 export async function linkBook(input: BookLinkInput): Promise<BookLinkResult> {
   return withBookLock(input.targetDir, async () => {
-    const checked = await precheck(input.files, input.targetDir);
-    if ('refusal' in checked) return { kind: 'cannot', refusal: checked.refusal, refused: checked.refused };
+    let checked: Precheck;
+    try {
+      checked = await precheck(input.files, input.targetDir, input.logger);
+    } catch (error) {
+      return { kind: 'cannot', refusal: refusalFromError(error), leftBehind: [] };
+    }
+    if ('refusal' in checked) return { kind: 'cannot', refusal: checked.refusal, leftBehind: [] };
 
+    const eligible = checked.eligible;
+    const before = new Set<string>();
+    for (const file of eligible) if (await lstatOrNull(file.target)) before.add(file.target);
     const created: Array<{ target: string; id: FileIdentity }> = [];
     const placed: Array<{ file: BookLinkFile; result: PlaceResult }> = [];
-    for (const file of checked.eligible) {
-      const result = await placeFile(file.source, file.target, {
-        fileMode: input.fileMode,
-        compareExisting: input.compareExisting(file.target),
-        link: file.id,
-      });
-      if (result.cannotLink) {
-        await rollback(created, input.logger);
-        return { kind: 'cannot', refusal: result.cannotLink, refused: checked.refused };
+    for (const file of eligible) {
+      let result: PlaceResult;
+      try {
+        result = await placeFile(file.source, file.target, {
+          fileMode: input.fileMode,
+          compareExisting: input.compareExisting(file.target),
+          link: file.id,
+        });
+      } catch (error) {
+        await input.logger?.warn(`Linking ${path.basename(file.target)} failed: ${error instanceof Error ? error.message : String(error)}`);
+        const leftBehind = await rollback(eligible, before, created, null, input.logger);
+        return { kind: 'cannot', refusal: refusalFromError(error), leftBehind };
+      }
+      if (result.status === 'failed') {
+        if (result.reason) await input.logger?.warn(`Linking ${path.basename(file.target)} failed: ${result.reason}`);
+        const failedTarget = result.cannotLink?.code === 'VERIFY' ? file.target : null;
+        const leftBehind = await rollback(eligible, before, created, failedTarget, input.logger);
+        return { kind: 'cannot', refusal: result.cannotLink ?? linkRefusal(/^(E[A-Z]+)\b/.exec(result.reason ?? '')?.[1] ?? 'ERROR'), leftBehind };
       }
       if (result.linked) created.push({ target: result.target, id: file.id });
       placed.push({ file: { source: file.source, target: file.target }, result });
     }
-    return { kind: 'placed', placed, refused: checked.refused };
+    return { kind: 'placed', placed };
   });
 }

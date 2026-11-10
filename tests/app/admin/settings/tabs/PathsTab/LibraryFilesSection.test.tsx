@@ -68,7 +68,7 @@ describe('PathsTab Library files', () => {
     renderTab(BASE, 'audiobookshelf');
     expect(radio(/^Hard link \(copy/).disabled).toBe(true);
     expect(radio(/^Hard link only/).disabled).toBe(true);
-    expect(screen.getByText('Needs Metadata: OPF file or None, and chapter merge off.')).toBeTruthy();
+    expect(screen.getByText('Hard links need Metadata set to OPF file or None.')).toBeTruthy();
 
     fireEvent.click(radio(/^OPF file/));
     expect(seen.paths).toMatchObject({ metadataTaggingEnabled: false, metadataOpfEnabled: true });
@@ -85,9 +85,10 @@ describe('PathsTab Library files', () => {
     expect(seen.paths).toMatchObject({ metadataTaggingEnabled: false, metadataOpfEnabled: false });
   });
 
-  it('merge on disables the hard links too', () => {
+  it('merge on disables the hard links too, and the line names only what is missing', () => {
     renderTab({ ...BASE, metadataTaggingEnabled: false, chapterMergingEnabled: true }, 'audiobookshelf');
     expect(radio(/^Hard link only/).disabled).toBe(true);
+    expect(screen.getByText('Turn off chapter merge to use hard links.')).toBeTruthy();
     fireEvent.click(merge());
     expect(radio(/^Hard link only/).disabled).toBe(false);
   });
@@ -99,17 +100,29 @@ describe('PathsTab Library files', () => {
     expect(radio(/^Hard link \(copy/).checked).toBe(true);
     expect(radio(/^Tags in the audio files/).checked).toBe(true);
     expect(radio(/^OPF file/).checked).toBe(false);
-    expect(screen.getByRole('alert').textContent).toBe('Needs Metadata: OPF file or None, and chapter merge off.');
+    expect(screen.getByRole('alert').textContent).toBe('Hard links need Metadata set to OPF file or None.');
     expect(conflict(seen.paths, 'audiobookshelf')).toBe('Hard links need Metadata set to OPF file or None.');
     fireEvent.click(radio(/^OPF file/));
     expect(conflict(seen.paths, 'audiobookshelf')).toBeNull();
   });
 
   it('shows the last copy fallback while a hard link is selected', () => {
-    const linkFallbackLast = { title: 'A Book', reason: 'the download and library folders are separate mounts (EXDEV)', at: '2026-11-10T12:00:00.000Z' };
+    const linkFallbackLast = { title: 'A Book', reason: 'the download and library folders are separate mounts, EXDEV', at: '2026-11-10T12:00:00.000Z' };
     renderTab({ ...BASE, metadataTaggingEnabled: false, filePlacement: 'hardlink', linkFallbackLast }, 'audiobookshelf');
-    expect(screen.getByTestId('link-fallback-last').textContent).toMatch(
-      /^Last book copied instead of linked: A Book \(the download and library folders are separate mounts \(EXDEV\)\), /
-    );
+    const line = screen.getByTestId('link-fallback-last').textContent!;
+    expect(line).toMatch(/^Last book copied instead of linked: A Book \(the download and library folders are separate mounts, EXDEV\), /);
+    expect(line).toMatch(/\. Cleared when a book is next linked\.$/);
+  });
+
+  it('a disabled option looks disabled: its label is dimmed with the circle, and the circles never shrink', () => {
+    renderTab({ ...BASE, chapterMergingEnabled: true }, 'audiobookshelf');
+    const labelOf = (input: HTMLInputElement) => input.closest('label')!;
+    expect(labelOf(radio(/^Hard link only/)).className).toMatch(/opacity-50/);
+    expect(labelOf(radio(/^Hard link only/)).className).toMatch(/cursor-not-allowed/);
+    expect(labelOf(radio(/^Copy$/)).className).not.toMatch(/opacity-50/);
+    for (const input of screen.getAllByRole('radio')) expect(input.className).toMatch(/\bshrink-0\b/);
+    // Tags and merge both wrong: one short line saying both
+    expect(screen.getByText('Hard links need Metadata set to OPF file or None, and chapter merge off.')).toBeTruthy();
+    expect(screen.queryByText(/An OPF file leaves the audio files unchanged/)).toBeNull();
   });
 });

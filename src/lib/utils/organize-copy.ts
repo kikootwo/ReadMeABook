@@ -158,7 +158,6 @@ async function linkNew(source: string, target: string, expected: FileIdentity): 
   const outcome = await linkInto(source, target, expected);
   if (outcome.kind === 'linked') return { status: 'copied', target, linked: true };
   if (outcome.kind === 'exists') return { status: 'failed', target, reason: 'target appeared during the link', exists: true };
-  if (outcome.kind === 'failed') return { status: 'failed', target, reason: outcome.reason };
   return { status: 'failed', target, reason: describeRefusal(outcome.refusal), cannotLink: outcome.refusal };
 }
 

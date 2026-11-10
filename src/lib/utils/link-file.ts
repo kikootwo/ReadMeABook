@@ -7,11 +7,11 @@
  */
 
 import * as fs from 'fs/promises';
-import { LINK_UNSUPPORTED, type FileIdentity } from './copy-file';
+import { LINK_UNSUPPORTED, sameIdentity, type FileIdentity } from './copy-file';
 
 /** A reason this book can't be hard-linked; the File placement decides what happens next. */
 export interface LinkRefusal {
-  /** errno code (EXDEV, EPERM, ...) or one of ours (VERIFY, PREFIX, ROOTS, TARGET, IN_LIBRARY). */
+  /** errno code (EXDEV, EPERM, EACCES, ...) or one of ours (VERIFY, PREFIX, ROOTS, TARGET, OUTSIDE, ...). */
   code: string;
   /** Plain words for the log and the request message. */
   words: string;
@@ -30,24 +30,39 @@ const CODE_WORDS: Record<string, string> = {
   ROOTS: 'the configured folders could not be read',
   TARGET: 'the book folder is outside the media folder',
   IN_LIBRARY: 'the download is inside the media folder',
+  OUTSIDE: 'the files are not in a download folder',
+  SYMLINK: 'a download file is a symbolic link',
+  NOT_REGULAR: 'a download file is not a regular file',
+  EACCES: 'permission denied',
+  EIO: 'a read or write error',
+  ENOENT: 'a file is missing',
+  ERROR: 'the link failed',
 };
+
+/** Codes whose fix is the mounts (or the files' owner): the only ones the request message gives mount advice for. */
+export const MOUNT_CODES: ReadonlySet<string> = new Set(['EXDEV', 'EPERM']);
 
 export function linkRefusal(code: string): LinkRefusal {
   return { code, words: CODE_WORDS[code] ?? 'the link was refused' };
 }
 
-/** "the download and library folders are separate mounts (EXDEV)" */
+/** The refusal for a thrown error: its errno code when it has one, else ERROR. */
+export function refusalFromError(error: unknown): LinkRefusal {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return linkRefusal(typeof code === 'string' && /^E[A-Z]+$/.test(code) ? code : 'ERROR');
+}
+
+/** "the download and library folders are separate mounts, EXDEV": the one format for logs, requests and the Paths page. */
 export function describeRefusal(refusal: LinkRefusal): string {
-  return `${refusal.words} (${refusal.code})`;
+  return `${refusal.words}, ${refusal.code}`;
 }
 
 export type LinkOutcome =
   | { kind: 'linked' }
   /** The target name appeared meanwhile: the caller applies its existing-target rules. */
   | { kind: 'exists' }
-  | { kind: 'refused'; refusal: LinkRefusal }
-  /** Any other error (ENOENT, EACCES, EIO): a per-file failure, as a failed copy would be. */
-  | { kind: 'failed'; reason: string };
+  /** Any error, or a failed check: the whole book then copies or stops. */
+  | { kind: 'refused'; refusal: LinkRefusal };
 
 async function identityOf(p: string): Promise<{ id: FileIdentity; file: boolean; nlink: bigint } | null> {
   try {
@@ -57,8 +72,6 @@ async function identityOf(p: string): Promise<{ id: FileIdentity; file: boolean;
     return null;
   }
 }
-
-const sameFileIdentity = (a: FileIdentity, b: FileIdentity) => a.dev === b.dev && a.ino !== BigInt(0) && a.ino === b.ino;
 
 /**
  * Hard-link `source` at `target` (which must not exist) and verify the result against
@@ -74,23 +87,17 @@ export async function linkInto(source: string, target: string, expected: FileIde
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code || '';
     if (code === 'EEXIST') return { kind: 'exists' };
-    if (LINK_UNSUPPORTED.has(code)) return { kind: 'refused', refusal: linkRefusal(code) };
-    return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) };
+    return { kind: 'refused', refusal: LINK_UNSUPPORTED.has(code) ? linkRefusal(code) : refusalFromError(error) };
   }
 
   const placed = await identityOf(target);
   const still = await identityOf(source);
   const verified =
-    !!placed && placed.file && sameFileIdentity(placed.id, expected) && placed.nlink >= BigInt(2) &&
-    !!still && still.file && sameFileIdentity(still.id, expected);
+    !!placed && placed.file && sameIdentity(placed.id, expected) && placed.nlink >= BigInt(2) &&
+    !!still && still.file && sameIdentity(still.id, expected);
   if (verified) return { kind: 'linked' };
 
-  try {
-    await fs.unlink(target);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      return { kind: 'failed', reason: `the link could not be verified and ${target} could not be removed again` };
-    }
-  }
+  // A name that can't be removed stays; the book pass reports it (book-link.ts)
+  await fs.unlink(target).catch(() => undefined);
   return { kind: 'refused', refusal: linkRefusal('VERIFY') };
 }

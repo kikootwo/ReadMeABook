@@ -19,8 +19,8 @@ import { checkTaggedChapters, CHAPTER_TABLE_CHANGED } from './chapter-guard';
 import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 import { FILE_PLACEMENT_LABELS, isLinkPlacement, type FilePlacement } from './library-placement';
 import type { LinkRefusal } from './link-file';
-import { missingFolders, runLinkPass, undoRefusedImport } from './organize-link-pass';
-import { writeOpfSidecar, type OpfOutcome } from './opf-sidecar';
+import { createdFolders, placeOpf, runLinkPass, undoRefusedImport } from './organize-link-pass';
+import type { OpfOutcome } from './opf-sidecar';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -75,6 +75,10 @@ export interface OrganizationResult {
   linkFallback?: LinkRefusal;
   /** Hard link only: why nothing was imported. */
   linkRefused?: LinkRefusal;
+  /** Names of this run's links (or metadata.opf) that could not be removed after the link pass failed. */
+  linkLeftBehind?: string[];
+  /** metadata.opf could not be written (error code). */
+  opfError?: string;
 }
 
 export interface PlacementOptions {
@@ -402,8 +406,8 @@ export class FileOrganizer {
       await logger?.info(`Target path: ${targetPath}`);
 
       // Create target directory (the folders this run creates, for a refused import's cleanup)
-      const createdFolders = linking ? await missingFolders(targetPath) : [];
-      await fs.mkdir(targetPath, { recursive: true, mode: this.dirMode });
+      const firstCreated = await fs.mkdir(targetPath, { recursive: true, mode: this.dirMode });
+      const newFolders = linking ? createdFolders(targetPath, firstCreated) : [];
 
       const filenames = await this.planTargetFilenames(audioFiles, audiobook, renameConfig, logger);
       const sourcePathOf = (audioFile: string) =>
@@ -411,38 +415,29 @@ export class FileOrganizer {
       const compareExistingFor = (target: string) =>
         placement?.compareExisting === true || COERCION_CANDIDATE_EXTENSIONS.includes(path.extname(target).toLowerCase());
 
-      // metadata.opf before any audio: once Audiobookshelf has scanned a book, its own metadata wins over a later OPF
-      let opf: OpfOutcome | null = null;
-      if (placement?.writeOpf) {
-        try {
-          opf = await writeOpfSidecar(targetPath, audiobook, this.fileMode);
-          await logger?.info(opf.outcome === 'written' ? 'Wrote metadata.opf' : 'metadata.opf already exists; kept');
-          if (opf.outcome === 'written' && opf.warning) (result.permissionWarnings ??= []).push(opf.warning);
-        } catch (error) {
-          await logger?.warn(`Could not write metadata.opf: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          result.errors.push('Failed to write metadata.opf');
-        }
-      }
+      // metadata.opf before any audio (organize-link-pass.ts)
+      let opf: OpfOutcome | null = placement?.writeOpf ? await placeOpf(targetPath, audiobook, this.fileMode, result, logger) : null;
 
-      // Link pass: the files the copy loop below still places (all of them in copy mode)
-      let copyIndices: Set<number> | null = null;
+      // Link pass; a book that can't be linked has none of this run's links or OPF left
+      let audioPlaced = false;
       if (linking) {
         const pass = await runLinkPass({
           placement: placement!.filePlacement as 'hardlink' | 'hardlink_only',
           sources: audioFiles.map(sourcePathOf), names: filenames, targetPath,
-          fileMode: this.fileMode, compareExisting: compareExistingFor, result, logger,
+          fileMode: this.fileMode, compareExisting: compareExistingFor, result, logger, opf,
         });
         if (pass.kind === 'stop') {
-          await undoRefusedImport(createdFolders, opf, logger);
+          await undoRefusedImport(newFolders, null, logger);
           result.targetPath = targetPath;
           return result;
         }
-        copyIndices = new Set(pass.indices);
+        audioPlaced = pass.kind === 'linked';
+        // The copy fallback is Copy mode: OPF first, then the copy loop for every file
+        if (!audioPlaced && placement?.writeOpf) opf = await placeOpf(targetPath, audiobook, this.fileMode, result, logger);
       }
 
       // Copy audio files (do NOT delete originals - needed for seeding)
-      for (let i = 0; i < audioFiles.length; i++) {
-        if (copyIndices && !copyIndices.has(i)) continue;
+      for (let i = 0; i < audioFiles.length && !audioPlaced; i++) {
         const audioFile = audioFiles[i];
         const originalSourcePath = sourcePathOf(audioFile);
         const filename = filenames[i];

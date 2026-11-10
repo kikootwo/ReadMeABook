@@ -13,20 +13,20 @@ In Audiobookshelf mode an import can hard-link the audio into the library instea
 | (status) | last copy fallback `{title, reason, at}` JSON | `audiobook_link_fallback_last` (cleared by the next linked book) |
 
 - No symlinks. No schema change. The section replaces the tagging checkbox in ABS mode; the chapter-merge checkbox moves into it.
-- **Guards (both ways):** link options disabled while Tags or chapter merge is on; Tags and merge disabled while linking (a selected value stays enabled so a stored conflict can be fixed).
-- **Stored conflict** (e.g. tagging ticked in Plex mode, back to ABS): radios show what is stored; red alert "Needs Metadata: OPF file or None, and chapter merge off."; Save blocked with `pathsPlacementConflict()` text. Import meanwhile links untagged (`effectiveLibrarySettings`).
+- **Guards (both ways):** link options disabled while Tags or chapter merge is on; Tags and merge disabled while linking (a selected value stays enabled so a stored conflict can be fixed). A disabled option is dimmed as a whole (circle and words).
+- **Stored conflict** (e.g. tagging ticked in Plex mode, back to ABS): radios show what is stored; red alert naming only what is missing (`linkBlockedReason()`: the two refusal texts below, or "Hard links need Metadata set to OPF file or None, and chapter merge off."; the same line in gray under disabled options); Save blocked with `pathsPlacementConflict()` text. Import meanwhile links untagged (`effectiveLibrarySettings`).
 - **API** `PUT /api/admin/settings/paths`: `filePlacement` (400 `File placement must be copy, hardlink or hardlink_only`), `metadataOpfEnabled` (400 `metadataOpfEnabled must be true or false`); in ABS mode a link with tags → 400 `Hard links need Metadata set to OPF file or None.`, with merge → 400 `Turn off chapter merge to use hard links.` Absent fields are unchanged; Plex mode never refuses. `GET /api/admin/settings` → `paths.filePlacement`, `paths.metadataOpfEnabled`, `paths.linkFallbackLast`.
 
 ## Import flow
 - `readImportLibrarySettings()` (`src/lib/processors/organize-library-placement.ts`): copy + no OPF returns early (no backend read); otherwise `effectiveLibrarySettings()` (`src/lib/utils/library-placement.ts`). Errors → copy, no OPF.
 - **Enforcement:** `FileOrganizer.organize()` `linking = isLinkPlacement(filePlacement)` forces tagging off and skips chapter merge; `placeFile({link})` → `linkNew` never chmods. No chown exists. A linked book is never tagged, merged, cover-embedded or chmod-ed.
-- **OPF** (`src/lib/utils/opf-sidecar.ts`): written create-only before the audio (ABS reads the first `*.opf`; its own metadata.json wins on later scans). An existing `metadata.opf` is kept. Escaped text, control chars stripped, no DTD. Order: title, subtitle, `dc:creator opf:role="aut"`, `nrt`, publisher, date (4-digit year), language, `dc:identifier opf:scheme="ASIN"`, description (≤16 KiB), subjects (≤20), `calibre:series` + `calibre:series_index`. Author split keeps `, Jr.`-style suffixes. Cover is copied as `cover.jpg` as before.
+- **OPF** (`src/lib/utils/opf-sidecar.ts`, written by `placeOpf()`): created before the audio; a failed write is said on the request (`metadata.opf could not be written (<CODE>)`) (ABS reads the first `*.opf`; its own metadata.json wins on later scans). An existing `metadata.opf` is kept. Escaped text, control chars stripped, no DTD. Order: title, subtitle, `dc:creator opf:role="aut"`, `nrt`, publisher, date (4-digit year), language, `dc:identifier opf:scheme="ASIN"`, description (≤16 KiB), subjects (≤20), `calibre:series` + `calibre:series_index`. Author split keeps `, Jr.`-style suffixes. Cover is copied as `cover.jpg` as before.
 - **Link pass** (`organize-link-pass.ts` → `book-link.ts` `linkBook` under a book lock):
-  - Precheck: guard roots readable (`ROOTS`), book folder inside media (`TARGET`), each source lstat'd: symlink / not regular / outside download roots → per-file refusal, never copied; source inside media → `IN_LIBRARY`; other device → `EXDEV`.
-  - `linkInto()` (`link-file.ts`): `fs.link`, then verify target lstat = precheck dev/ino, regular, nlink ≥ 2, source unchanged; failed verify unlinks the new name by name → `VERIFY`. An interrupted copy in the library (`PREFIX`) refuses.
-  - Book can't be linked → this run's links rolled back (only names whose identity still matches).
-- **Hard link (copy if not possible):** whole book copied; request status line `copied, not hard-linked (<reason>)`; Paths page line "Last book copied instead of linked: <title> (<reason>), <date>".
-- **Hard link only:** nothing imported; own OPF and created folders removed; request → `warn` (Retry) with `Not imported: hard link not possible (<words>, <CODE>). Nothing was copied. Fix the mounts, or set File placement to Hard link (copy if not possible), then retry.` One notification, no retry count, no auto-block. Manual import → failed with the import message.
+  - Precheck vets EVERY file before the first link: symlink (`SYMLINK`), not a regular file (`NOT_REGULAR`), outside the download roots + `/bookdrop` (`OUTSIDE`: Manual Import, Bulk Import from the media folder), inside media (`IN_LIBRARY`). Then: roots unreadable (`ROOTS`), book folder outside media (`TARGET`), first unsafe file, other device (`EXDEV`). Any one makes the whole book `cannot`; an unsafe file is never linked.
+  - `linkInto()` (`link-file.ts`): `fs.link`, then verify target lstat = precheck dev/ino, regular, nlink ≥ 2, source unchanged; failed verify unlinks the new name by name → `VERIFY`. An interrupted copy in the library (`PREFIX`) refuses. Any other link error (EACCES, EIO, ...) is a refusal too.
+  - **Never half-linked:** any refusal, error or throw during the pass → `rollback()` (`book-link.ts`) removes by name every name that wasn't there before the pass and is the download file, then `runLinkPass` removes this run's `metadata.opf` (by identity), before the copy or the refusal. A name that can't be removed is never deleted recursively: it is named in the log and on the request (`could not remove …` / `Could not remove: …`).
+- **Hard link (copy if not possible):** the book is imported exactly as Copy mode imports it (OPF, then the same `placeAudio` calls for every file: it copies what Copy mode copies and refuses what Copy mode refuses); request status line `copied, not hard-linked (<words>, <CODE>)`; Paths page line "Last book copied instead of linked: <title> (<words>, <CODE>), <date>. Cleared when a book is next linked."
+- **Hard link only:** nothing imported; created folders removed (plain rmdir). Client download → `warn` (Retry); manual or bulk import → `failed`. Message (`linkRefusedMessage()`): `Not imported: hard link not possible (<words>, <CODE>). Nothing was copied. <advice>` with advice by code: EXDEV/EPERM `Fix the mounts, or set File placement to Hard link (copy if not possible), then retry.`; OUTSIDE `Only files in a download folder can be hard-linked: set File placement to Hard link (copy if not possible), then retry.`; others `Set File placement to Hard link (copy if not possible) to copy the book instead, then retry.` (imports: `then run the import again`). Written only if the request wasn't cancelled or deleted meanwhile (`updateRequestUnlessStopped`); then one notification. No retry count, no auto-block.
 
 ## Refusal words (`linkRefusal(code)`)
 | Code | Words |
@@ -41,10 +41,16 @@ In Audiobookshelf mode an import can hard-link the audio into the library instea
 | ROOTS | the configured folders could not be read |
 | TARGET | the book folder is outside the media folder |
 | IN_LIBRARY | the download is inside the media folder |
+| OUTSIDE | the files are not in a download folder |
+| SYMLINK | a download file is a symbolic link |
+| NOT_REGULAR | a download file is not a regular file |
+| EACCES / EIO / ENOENT / ERROR | permission denied / a read or write error / a file is missing / the link failed |
+
+One format everywhere (`describeRefusal`): `<words>, <CODE>`.
 
 ## Deleting
 - Every delete path unlinks names: download cleanup (whole folder or `removeImportedFilesOnly`) leaves the library file at nlink 1; request delete leaves the download byte-identical.
-- Request delete treats `metadata.opf` like `cover.jpg` (removed only when nothing unrecorded stays).
+- Request delete treats `metadata.opf` like `cover.jpg` in every mode (removed only when nothing unrecorded stays), so a `metadata.opf` RMAB didn't write goes with the folder too.
 
 ## Critical Issues
 - Separate ZFS datasets, btrfs subvolumes, Unraid pools and separate bind mounts return EXDEV even on one disk: mount one parent folder holding both downloads and media.

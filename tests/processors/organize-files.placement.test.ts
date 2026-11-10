@@ -38,6 +38,12 @@ const ok = (extra: Record<string, unknown> = {}) => ({
 
 const placementArg = () => organizerMock.organize.mock.calls[0][6] as Record<string, unknown>;
 const requestWrites = () => prismaMock.request.update.mock.calls.map((c: unknown[]) => (c[0] as { data: Record<string, unknown> }).data);
+// Writes through updateRequestUnlessStopped (skips a cancelled or deleted request); the first is the 'processing' one
+const guardedWrites = () => prismaMock.request.updateMany.mock.calls.map((c: unknown[]) => (c[0] as { data: Record<string, unknown> }).data);
+const OUTSIDE = { code: 'OUTSIDE', words: 'the files are not in a download folder' };
+const refusedResult = (linkRefused: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+  success: false, targetPath: '/media/Author/Book', filesMovedCount: 0, errors: ['Hard link not possible'], audioFiles: [], records: [], linkRefused, ...extra,
+});
 
 async function run(payload: Record<string, unknown> = {}) {
   const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
@@ -118,7 +124,8 @@ describe('processOrganizeFiles: File placement and metadata.opf', () => {
     const result = await run();
 
     expect(result.success).toBe(false);
-    const writes = requestWrites();
+    expect(requestWrites()).toHaveLength(0);
+    const writes = guardedWrites().filter((d) => d.status !== 'processing');
     expect(writes).toHaveLength(1);
     expect(writes[0].status).toBe('warn');
     expect(writes[0].errorMessage).toBe(
@@ -131,19 +138,100 @@ describe('processOrganizeFiles: File placement and metadata.opf', () => {
     expect(prismaMock.audiobook.update).not.toHaveBeenCalled();
   });
 
-  it('Hard link only refused on a manual import fails it with the import message', async () => {
-    organizerMock.organize.mockResolvedValue({
-      success: false, targetPath: '/media/Author/Book', filesMovedCount: 0,
-      errors: ['Hard link not possible (the download and library folders are separate mounts (EXDEV)); nothing was imported'],
-      audioFiles: [], records: [], linkRefused: { code: 'EXDEV', words: 'the download and library folders are separate mounts' },
-    });
+  it('Hard link only refused on a manual import fails it with the reason and the advice for an import', async () => {
+    organizerMock.organize.mockResolvedValue(refusedResult({ code: 'EXDEV', words: 'the download and library folders are separate mounts' }));
 
-    const result = await run({ downloadHistoryId: undefined, cleanupSource: false, downloadPath: '/imports/book' });
+    const result = await run({ downloadHistoryId: undefined, cleanupSource: true, downloadPath: '/imports/book' });
 
     expect(result.success).toBe(false);
-    expect(requestWrites()[0]).toMatchObject({ status: 'failed' });
-    expect(String(requestWrites()[0].errorMessage)).toMatch(/^Import from \/imports\/book did not complete: Hard link not possible/);
+    const writes = guardedWrites().filter((d) => d.status !== 'processing');
+    expect(writes).toEqual([expect.objectContaining({ status: 'failed' })]);
+    expect(writes[0].errorMessage).toBe(
+      'Not imported: hard link not possible (the download and library folders are separate mounts, EXDEV). Nothing was copied. ' +
+        'Fix the mounts, or set File placement to Hard link (copy if not possible), then run the import again.'
+    );
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
     expect(blocklistMock.addAutoBlock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Manual Import', { cleanupSource: true, selectedFiles: ['Part 1.mp3'] }],
+    ['Bulk Import', { cleanupSource: false }],
+  ])('%s from the media folder under Hard link only: not imported, says the files are not in a download folder', async (_label, payload) => {
+    organizerMock.organize.mockResolvedValue(refusedResult(OUTSIDE));
+
+    await run({ downloadHistoryId: undefined, downloadPath: '/media/Old Shelf/Book', ...payload });
+
+    const writes = guardedWrites().filter((d) => d.status !== 'processing');
+    expect(writes).toEqual([expect.objectContaining({ status: 'failed' })]);
+    expect(writes[0].errorMessage).toBe(
+      'Not imported: hard link not possible (the files are not in a download folder, OUTSIDE). Nothing was copied. ' +
+        'Only files in a download folder can be hard-linked: set File placement to Hard link (copy if not possible), then run the import again.'
+    );
+    expect(String(writes[0].errorMessage)).not.toMatch(/mounts|Fix the folder/);
+  });
+
+  it.each([
+    ['Manual Import', { cleanupSource: true }],
+    ['Bulk Import', { cleanupSource: false }],
+  ])('%s from the media folder under Hard link (copy if not possible): copied, with the reason on the request and the Paths page', async (_label, payload) => {
+    stored.values.set('audiobook_file_placement', 'hardlink');
+    organizerMock.organize.mockResolvedValue(ok({ linkFallback: OUTSIDE }));
+
+    await run({ downloadHistoryId: undefined, downloadPath: '/media/Old Shelf/Book', ...payload });
+
+    const downloaded = requestWrites().find((d) => d.status === 'downloaded')!;
+    expect(downloaded.errorMessage).toBe('copied, not hard-linked (the files are not in a download folder, OUTSIDE)');
+    const upsert = prismaMock.configuration.upsert.mock.calls.find((c: unknown[]) => (c[0] as { where: { key: string } }).where.key === 'audiobook_link_fallback_last');
+    expect(JSON.parse((upsert![0] as { update: { value: string } }).update.value)).toMatchObject({ reason: 'the files are not in a download folder, OUTSIDE' });
+  });
+
+  it('a request cancelled during a Hard link only import is not set to warn and not notified', async () => {
+    organizerMock.organize.mockResolvedValue(refusedResult({ code: 'EXDEV', words: 'the download and library folders are separate mounts' }));
+    // 'processing' is written, then the request is cancelled before the refusal is saved
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+
+    const result = await run();
+
+    expect(result.success).toBe(false);
+    expect(requestWrites()).toHaveLength(0);
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['VERIFY', 'the link could not be verified'],
+    ['TARGET', 'the book folder is outside the media folder'],
+    ['SYMLINK', 'a download file is a symbolic link'],
+  ])('Hard link only, %s: the advice fits the reason (no mount advice)', async (code, words) => {
+    organizerMock.organize.mockResolvedValue(refusedResult({ code, words }));
+
+    await run();
+
+    const [write] = guardedWrites().filter((d) => d.status !== 'processing');
+    expect(write.errorMessage).toBe(
+      `Not imported: hard link not possible (${words}, ${code}). Nothing was copied. ` +
+        'Set File placement to Hard link (copy if not possible) to copy the book instead, then retry.'
+    );
+  });
+
+  it('names the links that could not be removed again', async () => {
+    organizerMock.organize.mockResolvedValue(refusedResult({ code: 'EIO', words: 'a read or write error' }, { linkLeftBehind: ['Part 1.mp3'] }));
+
+    await run();
+
+    const [write] = guardedWrites().filter((d) => d.status !== 'processing');
+    expect(String(write.errorMessage)).toMatch(/ Could not remove: Part 1\.mp3\.$/);
+  });
+
+  it('a metadata.opf that could not be written is said on the request', async () => {
+    stored.values.set('audiobook_file_placement', 'hardlink');
+    stored.values.set('metadata_opf_enabled', 'true');
+    organizerMock.organize.mockResolvedValue(ok({ linkedCount: 1, opfError: 'EACCES' }));
+
+    await run();
+
+    const downloaded = requestWrites().find((d) => d.status === 'downloaded')!;
+    expect(downloaded.errorMessage).toBe('metadata.opf could not be written (EACCES)');
   });
 
   it('a copy fallback says so on the request and keeps the Paths page line', async () => {
@@ -153,11 +241,11 @@ describe('processOrganizeFiles: File placement and metadata.opf', () => {
     await run();
 
     const downloaded = requestWrites().find((d) => d.status === 'downloaded')!;
-    expect(downloaded.errorMessage).toBe('copied, not hard-linked (the download and library folders are separate mounts (EXDEV))');
+    expect(downloaded.errorMessage).toBe('copied, not hard-linked (the download and library folders are separate mounts, EXDEV)');
     const upsert = prismaMock.configuration.upsert.mock.calls.find((c: unknown[]) => (c[0] as { where: { key: string } }).where.key === 'audiobook_link_fallback_last');
     expect(upsert).toBeDefined();
     expect(JSON.parse((upsert![0] as { update: { value: string } }).update.value)).toMatchObject({
-      title: 'Book', reason: 'the download and library folders are separate mounts (EXDEV)',
+      title: 'Book', reason: 'the download and library folders are separate mounts, EXDEV',
     });
   });
 });

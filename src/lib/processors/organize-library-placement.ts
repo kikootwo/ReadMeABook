@@ -7,7 +7,8 @@ import { prisma } from '../db';
 import type { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { getJobQueueService } from '../services/job-queue.service';
-import { describeRefusal, type LinkRefusal } from '../utils/link-file';
+import { describeRefusal, MOUNT_CODES, type LinkRefusal } from '../utils/link-file';
+import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import {
   FILE_PLACEMENT_KEY,
   LINK_FALLBACK_KEY,
@@ -83,29 +84,40 @@ export async function recordLinkOutcome(result: OrganizationResult, title: strin
   }
 }
 
-/** The request's message when Hard link only refused a book. */
-export function linkRefusedMessage(refusal: LinkRefusal): string {
-  return (
-    `Not imported: hard link not possible (${refusal.words}, ${refusal.code}). Nothing was copied. ` +
-    'Fix the mounts, or set File placement to Hard link (copy if not possible), then retry.'
-  );
+/**
+ * The request's message when Hard link only refused a book: the reason, then advice that
+ * fits it (mount advice only for EXDEV and EPERM), then any name that could not be removed.
+ */
+export function linkRefusedMessage(refusal: LinkRefusal, options: { manual?: boolean; leftBehind?: string[] } = {}): string {
+  const again = options.manual ? 'run the import again' : 'retry';
+  const copyMode = 'set File placement to Hard link (copy if not possible)';
+  const advice = MOUNT_CODES.has(refusal.code)
+    ? `Fix the mounts, or ${copyMode}, then ${again}.`
+    : refusal.code === 'OUTSIDE'
+      ? `Only files in a download folder can be hard-linked: ${copyMode}, then ${again}.`
+      : `Set File placement to Hard link (copy if not possible) to copy the book instead, then ${again}.`;
+  const stuck = options.leftBehind?.length ? ` Could not remove: ${options.leftBehind.join(', ')}.` : '';
+  return `Not imported: hard link not possible (${describeRefusal(refusal)}). Nothing was copied. ${advice}${stuck}`;
 }
 
 /**
- * Hard link only, client download: the request goes to `warn` with Retry (which re-runs the
- * import on the same download), one notification. Returned, never thrown, so no queue retry,
- * no import-attempt count and no auto-block of a good release.
+ * Hard link only refused the book. A client download goes to `warn` with Retry (which
+ * re-runs the import on the same download); a manual or bulk import fails (its folder and
+ * choices exist only in the job). One notification, and only when the request was written:
+ * a request cancelled or deleted meanwhile is left as it is. Returned, never thrown, so no
+ * queue retry, no import-attempt count and no auto-block of a good release.
  */
 export async function refuseLinkedImport(
   requestId: string,
-  refusal: LinkRefusal,
+  result: Pick<OrganizationResult, 'linkLeftBehind'> & { linkRefused: LinkRefusal },
+  manual: boolean,
   logger: RMABLogger
 ): Promise<{ success: false; message: string; requestId: string }> {
-  const message = linkRefusedMessage(refusal);
-  await prisma.request.update({
-    where: { id: requestId },
-    data: { status: 'warn', errorMessage: message, updatedAt: new Date() },
-  });
+  const message = linkRefusedMessage(result.linkRefused, { manual, leftBehind: result.linkLeftBehind });
+  if (!(await updateRequestUnlessStopped(requestId, { status: manual ? 'failed' : 'warn', errorMessage: message }))) {
+    logger.info('Request was cancelled or deleted during the import; left as it is');
+    return { success: false, message, requestId };
+  }
   const request = await prisma.request.findUnique({
     where: { id: requestId },
     include: { audiobook: true, user: { select: { plexUsername: true } } },

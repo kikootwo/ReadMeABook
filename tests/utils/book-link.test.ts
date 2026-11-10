@@ -15,6 +15,8 @@ type RealLink = () => Promise<void>;
 const fsState = vi.hoisted(() => ({
   linkHook: null as null | ((source: string, target: string, real: RealLink) => Promise<void>),
   devOverride: null as null | { path: string; dev: bigint },
+  // Paths lstat reports as a symbolic link (file symlinks need admin rights on Windows)
+  fakeSymlinks: new Set<string>(),
 }));
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -32,7 +34,22 @@ vi.mock('fs/promises', async (importOriginal) => {
     }
     return result;
   }) as typeof actual.stat;
-  return { ...actual, default: { ...actual, link, stat }, link, stat };
+  const lstat = (async (p: unknown, options?: unknown) => {
+    const result = await (actual.lstat as (...a: unknown[]) => Promise<object>)(p, options);
+    if (!fsState.fakeSymlinks.has(nodePath.resolve(String(p)))) return result;
+    return Object.assign(Object.create(Object.getPrototypeOf(result)), result, { isSymbolicLink: () => true, isFile: () => false });
+  }) as typeof actual.lstat;
+  return { ...actual, default: { ...actual, link, stat, lstat }, link, stat, lstat };
+});
+
+const placeState = vi.hoisted(() => ({ hook: null as null | ((source: string, real: () => Promise<unknown>) => Promise<unknown>) }));
+vi.mock('@/lib/utils/organize-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils/organize-copy')>();
+  const placeFile = (async (source: string, target: string, options: Parameters<typeof actual.placeFile>[2]) => {
+    const real = () => actual.placeFile(source, target, options);
+    return placeState.hook ? placeState.hook(source, real) : real();
+  }) as typeof actual.placeFile;
+  return { ...actual, placeFile };
 });
 
 const rootsState = vi.hoisted(() => ({ roots: null as null | { mediaDir: string; downloadRoots: string[]; otherRoots: string[] }, fail: false }));
@@ -44,7 +61,7 @@ vi.mock('@/lib/processors/organize-cleanup-guard', () => ({
 }));
 
 import { linkInto } from '@/lib/utils/link-file';
-import { linkBook, OUTSIDE_SOURCE, SYMLINK_SOURCE } from '@/lib/utils/book-link';
+import { linkBook } from '@/lib/utils/book-link';
 
 const errno = (code: string) => Object.assign(new Error(`${code}: injected`), { code });
 const identity = (p: string) => {
@@ -69,6 +86,8 @@ beforeEach(() => {
   rootsState.fail = false;
   fsState.linkHook = null;
   fsState.devOverride = null;
+  fsState.fakeSymlinks.clear();
+  placeState.hook = null;
 });
 
 afterEach(() => {
@@ -112,10 +131,10 @@ describe('linkInto', () => {
     expect(outcome).toMatchObject({ kind: 'refused', refusal: { code } });
   });
 
-  it.each(['EACCES', 'ENOENT', 'EIO'])('%s is a per-file failure, as a failed copy would be', async (code) => {
+  it.each(['EACCES', 'ENOENT', 'EIO'])('%s is refused too: the book then copies or stops as a whole', async (code) => {
     fsState.linkHook = async () => { throw errno(code); };
     const source = download('a.m4b');
-    expect((await linkInto(source, path.join(book, 'a.m4b'), identity(source))).kind).toBe('failed');
+    expect(await linkInto(source, path.join(book, 'a.m4b'), identity(source))).toMatchObject({ kind: 'refused', refusal: { code } });
   });
 
   it('a link that reports another inode (CIFS noserverino, mergerfs copy) is removed by name and refused', async () => {
@@ -227,34 +246,101 @@ describe('linkBook', () => {
     expect(await run([{ source, target: path.join(book, '01.mp3') }])).toMatchObject({ kind: 'cannot', refusal: { code: 'IN_LIBRARY' } });
   });
 
-  it('refuses a source outside the download folders per file, never linking it', async () => {
+  const noLinkAttempted = () => { fsState.linkHook = async () => { throw new Error('link must not be attempted'); }; };
+
+  it('a last file outside the download folders refuses the book before any link is made', async () => {
     const stray = path.join(base, 'stray.mp3');
     fs.writeFileSync(stray, 'stray');
     const [good] = bookFiles('01.mp3');
+    noLinkAttempted();
     const outcome = await run([good, { source: stray, target: path.join(book, 'stray.mp3') }]);
-    expect(outcome.kind).toBe('placed');
-    expect(outcome.refused).toEqual([{ file: { source: stray, target: path.join(book, 'stray.mp3') }, reason: OUTSIDE_SOURCE }]);
-    expect(fs.existsSync(path.join(book, 'stray.mp3'))).toBe(false);
+    expect(outcome).toMatchObject({ kind: 'cannot', refusal: { code: 'OUTSIDE', words: 'the files are not in a download folder' } });
+    expect(fs.readdirSync(book)).toEqual([]);
   });
 
-  it('refuses a source whose folder is a link leading out of the download folders', async () => {
+  it('a source whose folder is a link leading out of the download folders refuses the book', async () => {
     const outside = path.join(base, 'secret');
     fs.mkdirSync(outside);
     fs.writeFileSync(path.join(outside, 'x.mp3'), 'secret');
     fs.symlinkSync(outside, path.join(downloads, 'Torrent', 'escape'), 'junction');
     const source = path.join(downloads, 'Torrent', 'escape', 'x.mp3');
-    const outcome = await run([{ source, target: path.join(book, 'x.mp3') }]);
-    expect(outcome.refused.map((r) => r.reason)).toEqual([OUTSIDE_SOURCE]);
+    expect(await run([{ source, target: path.join(book, 'x.mp3') }])).toMatchObject({ kind: 'cannot', refusal: { code: 'OUTSIDE' } });
     expect(fs.existsSync(path.join(book, 'x.mp3'))).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')('refuses a symlinked download file per file', async () => {
+  it('a third file that is a symbolic link refuses the book; the first two are never linked', async () => {
+    const files = bookFiles('01.mp3', '02.mp3', '03.mp3');
+    fsState.fakeSymlinks.add(path.resolve(files[2].source));
+    noLinkAttempted();
+    expect(await run(files)).toMatchObject({ kind: 'cannot', refusal: { code: 'SYMLINK' } });
+    expect(fs.readdirSync(book)).toEqual([]);
+    for (const f of files) expect(nlink(f.source)).toBe(1);
+  });
+
+  it.each([['symlink first', 0], ['symlink second', 1]])('every file is vetted whatever the order (%s), even when the devices differ', async (_label, at) => {
+    const files = bookFiles('01.mp3', '02.mp3');
+    fsState.fakeSymlinks.add(path.resolve(files[at as number].source));
+    fsState.devOverride = { path: path.resolve(book), dev: BigInt(424242) };
+    expect(await run(files)).toMatchObject({ kind: 'cannot', refusal: { code: 'SYMLINK' } });
+  });
+
+  it('a source that is not a regular file refuses the book', async () => {
+    const dir = path.join(downloads, 'Torrent', 'folder.mp3');
+    fs.mkdirSync(dir);
+    const [good] = bookFiles('01.mp3');
+    noLinkAttempted();
+    expect(await run([good, { source: dir, target: path.join(book, 'folder.mp3') }])).toMatchObject({ kind: 'cannot', refusal: { code: 'NOT_REGULAR' } });
+  });
+
+  it.skipIf(process.platform === 'win32')('a real symlinked download file refuses the book', async () => {
     const real = download('real.mp3');
     const source = path.join(downloads, 'Torrent', 'link.mp3');
     fs.symlinkSync(real, source);
-    const outcome = await run([{ source, target: path.join(book, 'link.mp3') }]);
-    expect(outcome.refused.map((r) => r.reason)).toEqual([SYMLINK_SOURCE]);
+    expect(await run([{ source, target: path.join(book, 'link.mp3') }])).toMatchObject({ kind: 'cannot', refusal: { code: 'SYMLINK' } });
     expect(fs.existsSync(path.join(book, 'link.mp3'))).toBe(false);
+  });
+
+  it('a plain error on file 3 of 5 removes the first two links and stops the pass', async () => {
+    const files = bookFiles('01.mp3', '02.mp3', '03.mp3', '04.mp3', '05.mp3');
+    const tried: string[] = [];
+    fsState.linkHook = async (source, _target, real) => {
+      tried.push(path.basename(source));
+      if (source.endsWith('03.mp3')) throw errno('EACCES');
+      return real();
+    };
+    expect(await run(files)).toMatchObject({ kind: 'cannot', refusal: { code: 'EACCES', words: 'permission denied' }, leftBehind: [] });
+    expect(tried).toEqual(['01.mp3', '02.mp3', '03.mp3']);
+    expect(fs.readdirSync(book)).toEqual([]);
+    for (const f of files) expect(nlink(f.source)).toBe(1);
+  });
+
+  it('a throw from placeFile after its link was made removes every link of this run, that one too', async () => {
+    const files = bookFiles('01.mp3', '02.mp3', '03.mp3');
+    placeState.hook = async (source, real) => {
+      const placed = await real();
+      if (source.endsWith('03.mp3')) throw new Error('boom');
+      return placed;
+    };
+    expect(await run(files)).toMatchObject({ kind: 'cannot', refusal: { code: 'ERROR' }, leftBehind: [] });
+    expect(fs.readdirSync(book)).toEqual([]);
+    for (const f of files) expect(nlink(f.source)).toBe(1);
+  });
+
+  it('a name that cannot be removed again is reported in leftBehind and left as it is', async () => {
+    const files = bookFiles('01.mp3', '02.mp3');
+    fsState.linkHook = async (source, _target, real) => {
+      await real();
+      // A verification that fails and a name that can't be removed: a folder now stands at 02.mp3
+      if (source.endsWith('02.mp3')) {
+        fs.rmSync(files[1].target);
+        fs.mkdirSync(files[1].target);
+        fs.writeFileSync(path.join(files[1].target, 'keep'), 'x');
+      }
+    };
+    const outcome = await run(files);
+    expect(outcome).toMatchObject({ kind: 'cannot', refusal: { code: 'VERIFY' }, leftBehind: ['02.mp3'] });
+    expect(fs.existsSync(files[0].target)).toBe(false);
+    expect(fs.existsSync(path.join(files[1].target, 'keep'))).toBe(true);
   });
 
   it('an interrupted copy in the way is a book-level refusal (the copy repairs it)', async () => {

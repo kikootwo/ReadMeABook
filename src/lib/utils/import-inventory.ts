@@ -110,8 +110,10 @@ export interface ImportEvidence {
   inventory: ImportInventory;
   /** Placed files whose permissions could not be set (never affects what is verified). */
   permissionWarnings?: string[];
-  /** Why the book was copied although File placement asked for a hard link (shown on the request). */
+  /** Why the book was copied although File placement asked for a hard link, and any link left behind (shown on the request). */
   linkFallbackReason?: string;
+  /** metadata.opf could not be written (error code, shown on the request). */
+  opfError?: string;
 }
 
 export function verifiedSourceKeys(evidence: ImportEvidence): Set<string> {

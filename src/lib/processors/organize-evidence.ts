@@ -61,7 +61,10 @@ export function audioEvidence(result: OrganizationResult): ImportEvidence {
     coverRecord: result.coverRecord,
     inventory: result.inventory ?? MISSING_INVENTORY,
     permissionWarnings: result.permissionWarnings,
-    linkFallbackReason: result.linkFallback ? describeRefusal(result.linkFallback) : undefined,
+    linkFallbackReason: result.linkFallback
+      ? describeRefusal(result.linkFallback) + (result.linkLeftBehind ? `; could not remove ${result.linkLeftBehind.join(', ')}` : '')
+      : undefined,
+    opfError: result.opfError,
   };
 }
 
@@ -103,7 +106,8 @@ export function importStatusMessage(evidence: ImportEvidence, context: ImportSta
 /** Placement, tagging and kept-download message, without the permissions note. */
 function outcomeMessage(evidence: ImportEvidence, context: ImportStatusContext): string | null {
   const linkFallback = evidence.linkFallbackReason ? `copied, not hard-linked (${evidence.linkFallbackReason})` : null;
-  const parts = [linkFallback, placementStatusMessage(evidence), tagsMessage(evidence)].filter((p): p is string => p !== null);
+  const opf = evidence.opfError ? `metadata.opf could not be written (${evidence.opfError})` : null;
+  const parts = [linkFallback, opf, placementStatusMessage(evidence), tagsMessage(evidence)].filter((p): p is string => p !== null);
   if (parts.length > 0) {
     return parts.join('; ');
   }

@@ -32,6 +32,13 @@ export const METADATA_MODE_LABELS: Record<MetadataMode, string> = {
 export const LINK_NEEDS_OPF_OR_NONE = 'Hard links need Metadata set to OPF file or None.';
 export const LINK_NEEDS_MERGE_OFF = 'Turn off chapter merge to use hard links.';
 
+/** The Paths page's one line under disabled hard-link options: only what is missing. */
+export function linkBlockedReason(tagging: boolean, merge: boolean): string | null {
+  if (tagging && merge) return 'Hard links need Metadata set to OPF file or None, and chapter merge off.';
+  if (tagging) return LINK_NEEDS_OPF_OR_NONE;
+  return merge ? LINK_NEEDS_MERGE_OFF : null;
+}
+
 /** Stored value → placement; absent, unknown or unreadable is today's copy. */
 export function parseFilePlacement(value: unknown): FilePlacement {
   return typeof value === 'string' && (FILE_PLACEMENTS as readonly string[]).includes(value) ? (value as FilePlacement) : 'copy';
