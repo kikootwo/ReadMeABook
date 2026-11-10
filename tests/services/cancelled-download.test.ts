@@ -283,7 +283,7 @@ describe('holds', () => {
     expect(c.deleteDownload).not.toHaveBeenCalled();
   });
 
-  it('a cancelled sibling never holds it, and its row is recorded removed too', async () => {
+  it('a cancelled sibling never holds a partial torrent, and its row is recorded removed too', async () => {
     db({ siblings: [sibling('cancelled')] });
     const c = client();
     expect((await cancelStep(row())).outcome).toBe('removed');
