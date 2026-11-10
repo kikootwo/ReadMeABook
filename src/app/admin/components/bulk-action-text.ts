@@ -3,7 +3,7 @@
  * Documentation: documentation/admin-features/bulk-request-actions.md
  *
  * Every string the bulk action bar shows: buttons, confirms, progress and results.
- * The cancel confirm's first lines come from cancel-confirm-text.ts (its one-line wording switch).
+ * The cancel confirm's first lines come from cancel-confirm-text.ts, with the single cancel's texts.
  */
 
 import { bulkCancelConfirmLines } from '@/lib/utils/cancel-confirm-text';
@@ -66,8 +66,10 @@ export function confirmText(action: BulkAction, rows: BulkRow[]): ConfirmText {
   return { ...base, lines, variant: 'danger' };
 }
 
-/** Cancel outcomes that leave the download in the client. */
-const DOWNLOAD_STAYS = ['kept', 'kept_seeding', 'kept_unlimited', 'kept_shared', 'kept_not_owned', 'kept_finished', 'retry_later', 'not_removed'];
+/** Cancel outcomes (the server's `download` answer) that leave the download in the client. */
+const DOWNLOAD_STAYS = ['kept', 'kept_seeding', 'kept_unlimited', 'kept_shared', 'kept_not_owned', 'kept_finished', 'not_removed'];
+/** Not removed yet: the seeding cleanup tries again. */
+const DOWNLOAD_RETRY = 'retry_later';
 
 export interface ResultText {
   lines: string[];
@@ -97,6 +99,8 @@ export function resultText(summary: BulkSummary, { stillSelected = true }: { sti
   if (summary.action === 'cancel') {
     const stays = done.filter((o) => o.download && DOWNLOAD_STAYS.includes(o.download)).length;
     if (stays > 0) lines.push(`${stays} ${plural(stays, 'download stays', 'downloads stay')} in the download client.`);
+    const later = done.filter((o) => o.download === DOWNLOAD_RETRY).length;
+    if (later > 0) lines.push(`${later} ${plural(later, 'download is', 'downloads are')} not removed yet; RMAB tries again on its next seeding cleanup.`);
   }
   const all = [...failed, ...skipped].map((o) => `${o.title}: ${o.reason ?? 'unknown'}`);
   return {

@@ -63,7 +63,7 @@ describe('confirmText', () => {
     const c = confirmText('cancel', [...many(40, 'awaiting_search'), ...many(15, 'awaiting_approval'), ...many(2, 'downloading'), ...many(43, 'failed')]);
     expect(c).toMatchObject({ title: 'Cancel 57 requests?', confirmLabel: 'Cancel 57', cancelLabel: 'Keep them', variant: 'danger' });
     expect(c.lines).toEqual([
-      'They stay in the list as Cancelled. Nothing in your library is touched.',
+      'Downloads stop and what they fetched is removed, unless another request uses it. Nothing in your library is touched.',
       '15 waiting for approval are withdrawn.',
       "43 others can't be cancelled and are skipped.",
     ]);
@@ -110,16 +110,34 @@ describe('resultText', () => {
     expect(t.lines).toEqual(['Stopped: denied 1, 1 not started.']);
   });
 
-  it('cancel: skipped, then the downloads that stay in the client', () => {
+  it('cancel: removed downloads and requests with none add no line', () => {
     const t = resultText(summary({
       action: 'cancel',
-      total: 4,
-      outcomes: [item('a', 'done', undefined, 'removed'), item('b', 'done', undefined, 'kept_seeding'), item('c', 'done', undefined, 'retry_later'), item('d', 'done', undefined, 'none')],
-      preSkipped: [item('e', 'skipped', 'not cancellable now')],
+      total: 3,
+      outcomes: [item('a', 'done', undefined, 'removed'), item('b', 'done', undefined, 'none'), item('c', 'done')],
+      preSkipped: [item('d', 'skipped', 'not cancellable now')],
     }));
-    expect(t.lines).toEqual(['Cancelled 4.', '1 skipped.', '2 downloads stay in the download client.']);
-    const one = resultText(summary({ action: 'cancel', total: 1, outcomes: [item('a', 'done', undefined, 'kept_seeding')] }));
-    expect(one.lines).toEqual(['Cancelled 1.', '1 download stays in the download client.']);
+    expect(t.lines).toEqual(['Cancelled 3.', '1 skipped.']);
+  });
+
+  it('cancel: the downloads the server kept, and the ones it removes later, each on their own line', () => {
+    const t = resultText(summary({
+      action: 'cancel',
+      total: 6,
+      outcomes: [
+        item('a', 'done', undefined, 'removed'), item('b', 'done', undefined, 'kept_seeding'), item('c', 'done', undefined, 'not_removed'),
+        item('d', 'done', undefined, 'retry_later'), item('e', 'done', undefined, 'retry_later'), item('f', 'done', undefined, 'none'),
+      ],
+    }));
+    expect(t.lines).toEqual([
+      'Cancelled 6.',
+      '2 downloads stay in the download client.',
+      '2 downloads are not removed yet; RMAB tries again on its next seeding cleanup.',
+    ]);
+    const kept = resultText(summary({ action: 'cancel', total: 1, outcomes: [item('a', 'done', undefined, 'kept')] }));
+    expect(kept.lines).toEqual(['Cancelled 1.', '1 download stays in the download client.']);
+    const later = resultText(summary({ action: 'cancel', total: 1, outcomes: [item('a', 'done', undefined, 'retry_later')] }));
+    expect(later.lines).toEqual(['Cancelled 1.', '1 download is not removed yet; RMAB tries again on its next seeding cleanup.']);
   });
 
   it('details stop at 50', () => {

@@ -46,13 +46,12 @@ Checkboxes on the admin Request Management table. Each action is the existing si
 |---|---|---|
 | Approve (primary) | Approve N requests? / Approve N, Back | "RMAB starts on each one now: a search, or the release its user picked. Unreleased ones wait for release day." |
 | Deny (danger) | Deny N requests? / Deny N, Back | "They're marked Denied." |
-| Cancel (danger) | Cancel N requests? / Cancel N, Keep them | `bulkCancelConfirmLines()`: "They stay in the list as Cancelled. Nothing in your library is touched." "M waiting for approval are withdrawn." |
+| Cancel (danger) | Cancel N requests? / Cancel N, Keep them | `bulkCancelConfirmLines()`: "Downloads stop and what they fetched is removed, unless another request uses it. Nothing in your library is touched." (one: "Its download stops and what it fetched is removed, ...") "M waiting for approval are withdrawn." |
 | Delete (danger) | Delete N requests? / Delete N, Back | "Their downloads go too, unless still seeding or shared. Nothing in your library is touched: M books already in it are skipped." (no skips: ends at "touched.") `deleteComesBackLine()`: "A watched author or series, or a synced shelf, requests them again unless you remove it first or cancel instead." |
 
 - Not-eligible count: "M others aren't waiting for approval and are skipped." (approve, deny), "M others can't be cancelled and are skipped." (cancel).
 - Singular forms throughout ("Delete 1 request?", "Keep it", "1 book already in it is skipped.").
-- `BULK_CANCEL_TEXT` (`'list'` | `'single'`): one line switches the cancel's first sentence to "Downloads stop and what they fetched is removed, unless another request uses it."
-- Result: "Deleted 97." then, as they apply, "M in your library skipped." (every skip in the library; else "M skipped."), "M failed.", "M downloads stay in the download client." (cancel: `kept*`, `retry_later`, `not_removed`). A stopped run: "Stopped: denied 6, 94 not started (still selected)." Reasons per request are in Details.
+- Result: "Deleted 97." then, as they apply, "M in your library skipped." (every skip in the library; else "M skipped."), "M failed." Cancel only, from each request's `download` answer: "M downloads stay in the download client." (`kept*`, `not_removed`), "M downloads are not removed yet; RMAB tries again on its next seeding cleanup." (`retry_later`); `removed` and `none` add no line. A stopped run: "Stopped: denied 6, 94 not started (still selected)." Reasons per request are in Details.
 
 ## Delete
 - Never removes a book in the library or being imported: rule and refusal in [request-deletion.md](request-deletion.md#bulk-delete-212) (`deleteTouchesLibrary`, inside `deleteRequest`, decided on its own load).

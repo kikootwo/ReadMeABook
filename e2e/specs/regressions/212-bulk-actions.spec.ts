@@ -183,8 +183,8 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     await settled(DIR, 'cancel-confirm-1280-light');
     const text = await dialog(page).innerText();
     c.save('cancel-confirm.txt', `${text}\n`);
-    c.check('cancel confirm: the list line, the withdrawn, the skipped count and the buttons',
-      text.includes('They stay in the list as Cancelled. Nothing in your library is touched.') && text.includes(`${expected.approve} waiting for approval are withdrawn.`)
+    c.check('cancel confirm: the single cancel\'s line, the withdrawn, the skipped count and the buttons',
+      text.includes('Downloads stop and what they fetched is removed, unless another request uses it. Nothing in your library is touched.') && text.includes(`${expected.approve} waiting for approval are withdrawn.`)
         && text.includes(`${100 - expected.cancel} others can't be cancelled and are skipped.`) && await dialog(page).getByRole('button', { name: 'Keep them' }).isVisible(), 'control');
     await dialog(page).getByRole('button', { name: `Cancel ${expected.cancel}`, exact: true }).click();
     await expect(statusLine(page)).toHaveText(/^Cancelled \d+\./, { timeout: 180_000 });

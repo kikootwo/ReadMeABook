@@ -29,19 +29,10 @@ export interface BulkCancelCounts {
   awaitingApproval: number;
 }
 
-/**
- * The bulk cancel confirm's first sentence: 'list' (the requests stay in the list as
- * Cancelled) or 'single' (their downloads stop and what they fetched is removed).
- */
-export const BULK_CANCEL_TEXT: 'list' | 'single' = 'list';
-
-/** The bulk cancel confirm's body, one line each. */
-export function bulkCancelConfirmLines(counts: BulkCancelCounts, variant: 'list' | 'single' = BULK_CANCEL_TEXT): string[] {
-  const one = counts.total === 1;
-  const first = variant === 'single'
-    ? (one ? 'Its download stops and what it fetched is removed' : 'Downloads stop and what they fetched is removed') + ', unless another request uses it.'
-    : one ? 'It stays in the list as Cancelled.' : 'They stay in the list as Cancelled.';
-  const lines = [`${first} Nothing in your library is touched.`];
+/** The bulk cancel confirm's body, one line each. Its first sentence says what the single cancel does. */
+export function bulkCancelConfirmLines(counts: BulkCancelCounts): string[] {
+  const first = counts.total === 1 ? 'Its download stops and what it fetched is removed' : 'Downloads stop and what they fetched is removed';
+  const lines = [`${first}, unless another request uses it. Nothing in your library is touched.`];
   const waiting = counts.awaitingApproval;
   if (waiting > 0) lines.push(`${waiting} waiting for approval ${waiting === 1 ? 'is' : 'are'} withdrawn.`);
   return lines;

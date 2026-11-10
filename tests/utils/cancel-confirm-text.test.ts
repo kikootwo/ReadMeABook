@@ -8,7 +8,6 @@ import {
   CANCEL_CONFIRM_AUDIOBOOK,
   CANCEL_CONFIRM_EBOOK,
   CANCEL_CONFIRM_NO_DOWNLOAD,
-  BULK_CANCEL_TEXT,
   bulkCancelConfirmLines,
   cancelConfirmText,
 } from '@/lib/utils/cancel-confirm-text';
@@ -34,26 +33,21 @@ describe('cancelConfirmText', () => {
   });
 });
 
-describe('bulkCancelConfirmLines (the bulk cancel confirm, one switch for its wording)', () => {
-  it("uses the 'list' sentence today", () => {
-    expect(BULK_CANCEL_TEXT).toBe('list');
+describe('bulkCancelConfirmLines (the bulk cancel confirm)', () => {
+  it('says what the single cancel does: the downloads stop and what they fetched is removed', () => {
     expect(bulkCancelConfirmLines({ total: 57, awaitingApproval: 15 })).toEqual([
-      'They stay in the list as Cancelled. Nothing in your library is touched.',
+      'Downloads stop and what they fetched is removed, unless another request uses it. Nothing in your library is touched.',
       '15 waiting for approval are withdrawn.',
     ]);
-    expect(bulkCancelConfirmLines({ total: 1, awaitingApproval: 1 })).toEqual([
-      'It stays in the list as Cancelled. Nothing in your library is touched.',
-      '1 waiting for approval is withdrawn.',
-    ]);
-    expect(bulkCancelConfirmLines({ total: 3, awaitingApproval: 0 })).toEqual(['They stay in the list as Cancelled. Nothing in your library is touched.']);
-  });
-
-  it("'single' says the downloads stop and what they fetched is removed", () => {
-    expect(bulkCancelConfirmLines({ total: 40, awaitingApproval: 0 }, 'single')).toEqual([
+    expect(bulkCancelConfirmLines({ total: 3, awaitingApproval: 0 })).toEqual([
       'Downloads stop and what they fetched is removed, unless another request uses it. Nothing in your library is touched.',
     ]);
-    expect(bulkCancelConfirmLines({ total: 1, awaitingApproval: 0 }, 'single')).toEqual([
+  });
+
+  it('one request: the singular forms', () => {
+    expect(bulkCancelConfirmLines({ total: 1, awaitingApproval: 1 })).toEqual([
       'Its download stops and what it fetched is removed, unless another request uses it. Nothing in your library is touched.',
+      '1 waiting for approval is withdrawn.',
     ]);
   });
 });
