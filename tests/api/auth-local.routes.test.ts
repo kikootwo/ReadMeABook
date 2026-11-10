@@ -122,7 +122,7 @@ describe('Local auth routes', () => {
 
     // Another address is still allowed
     const other = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': '203.0.113.20' });
-    expect((await POST(other as any)).status).toBe(200);
+    expect((await POST(other as unknown as Parameters<typeof POST>[0])).status).toBe(200);
   });
 
   it('counts sign-ups by the address the proxy appended, whatever comes before it', async () => {
@@ -132,11 +132,11 @@ describe('Local auth routes', () => {
     const prefixes = ['made-up', '198.51.100.1', '10.0.0.1, 192.0.2.44', 'unknown', '[::1]'];
     for (const prefix of prefixes) {
       const request = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': `${prefix}, 203.0.113.9` });
-      expect((await POST(request as any)).status).toBe(400);
+      expect((await POST(request as unknown as Parameters<typeof POST>[0])).status).toBe(400);
     }
 
     const sixth = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': 'another, 203.0.113.9' });
-    expect((await POST(sixth as any)).status).toBe(429);
+    expect((await POST(sixth as unknown as Parameters<typeof POST>[0])).status).toBe(429);
   });
 
   describe('request size limit (64 KB)', () => {

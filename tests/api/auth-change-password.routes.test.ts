@@ -187,18 +187,18 @@ describe('Change password route', () => {
   });
 
   describe('attempt limit (10 per 15 minutes per user)', () => {
+    type Handler = (req: { user: { id: string } }) => unknown;
     const asUser = (id: string) =>
-      requireAuthMock.mockImplementation((_req: any, handler: any) => handler({ user: { id } }));
+      requireAuthMock.mockImplementation((_req: unknown, handler: Handler) => handler({ user: { id } }));
     const attempt = async (currentPassword: string) => {
       const { POST } = await import('@/app/api/auth/change-password/route');
-      const response = await POST(
-        makeRequest({ currentPassword, newPassword: 'newpass123', confirmPassword: 'newpass123' }) as any
-      );
+      const request = makeRequest({ currentPassword, newPassword: 'newpass123', confirmPassword: 'newpass123' });
+      const response = await POST(request as unknown as Parameters<typeof POST>[0]);
       return { status: response.status, body: await response.json(), retryAfter: response.headers.get('retry-after') };
     };
 
     beforeEach(() => {
-      prismaMock.user.findUnique.mockImplementation(async ({ where }: any) => ({
+      prismaMock.user.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({
         id: where.id,
         authProvider: 'local',
         authToken: 'enc-hash',
