@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { loadLinkedRows, withLibraryDisplay } from '@/lib/services/library/library-display';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.Admin.Requests.Recent');
 
@@ -75,7 +76,8 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ requests: formatted });
+    // A stored torrentUrl can be an indexer link; it goes out without the indexer key
+    return NextResponse.json({ requests: await stripProwlarrKeyFromResults(formatted) });
       } catch (error) {
         logger.error('Failed to fetch recent requests', { error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(

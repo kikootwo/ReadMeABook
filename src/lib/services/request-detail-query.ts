@@ -2,11 +2,11 @@
  * Component: Request Detail Query Shapes (GET /api/requests/[id])
  * Documentation: documentation/backend/services/api-tokens.md
  *
- * Non-admin callers (owners, API tokens) get an explicit field list that leaves out
- * internal job/download data: Job.payload/result/stackTrace,
- * DownloadHistory.magnetLink/torrentUrl/downloadPath, Audiobook.filePath and
- * Request.selectedTorrent. Request.placedEbookFiles and Request.approvalBypassedBy are
- * left out for every caller.
+ * Every caller gets the job summary (JOB_SUMMARY_SELECT: no Job.payload/result/stackTrace) and
+ * the selected download row without DownloadHistory.magnetLink/torrentUrl/downloadPath.
+ * Non-admin callers (owners, API tokens) get an explicit field list that also leaves out
+ * Audiobook.filePath and Request.selectedTorrent. Request.placedEbookFiles and
+ * Request.approvalBypassedBy are left out for every caller.
  * Both shapes go through withRequestLibraryDisplay: a followed audiobook request (#325a) shows
  * the linked library item's title, author, narrator and cover, and `audiobook.libraryAsin` is the
  * effective value (null when the overlay does not apply).
@@ -17,12 +17,26 @@ import { loadLinkedRows, withLibraryDisplay, type DisplayAudiobook, type Display
 
 // Newest first: a request that moved on after a client failure keeps earlier selected rows (#332)
 const LATEST_SELECTED_DOWNLOAD = { where: { selected: true }, orderBy: { createdAt: 'desc' }, take: 1 } as const;
-const RECENT_JOBS = { orderBy: { createdAt: 'desc' }, take: 5 } as const;
+const JOB_SUMMARY_SELECT = {
+  id: true,
+  requestId: true,
+  type: true,
+  status: true,
+  priority: true,
+  attempts: true,
+  maxAttempts: true,
+  errorMessage: true,
+  startedAt: true,
+  completedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+const RECENT_JOBS = { orderBy: { createdAt: 'desc' }, take: 5, select: JOB_SUMMARY_SELECT } as const;
 
 export const ADMIN_REQUEST_DETAIL_INCLUDE = {
   audiobook: { omit: { libraryAsin: false } }, // read by withRequestLibraryDisplay (#325a)
   user: { select: { id: true, plexUsername: true } },
-  downloadHistory: LATEST_SELECTED_DOWNLOAD,
+  downloadHistory: { ...LATEST_SELECTED_DOWNLOAD, omit: { magnetLink: true, torrentUrl: true, downloadPath: true } },
   jobs: RECENT_JOBS,
 } satisfies Prisma.RequestInclude;
 
@@ -101,23 +115,7 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
       createdAt: true,
     },
   },
-  jobs: {
-    ...RECENT_JOBS,
-    select: {
-      id: true,
-      requestId: true,
-      type: true,
-      status: true,
-      priority: true,
-      attempts: true,
-      maxAttempts: true,
-      errorMessage: true,
-      startedAt: true,
-      completedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  },
+  jobs: RECENT_JOBS,
 } satisfies Prisma.RequestSelect;
 
 /**
