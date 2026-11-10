@@ -4,7 +4,8 @@
  *
  * Pre-rank filter applied by every automatic search path (audiobook, ebook, RSS)
  * to remove releases already on a request's blocklist. Matches case-insensitive
- * on release name and exact on hash (when both sides have one).
+ * on release name, and on hash when both sides have one (a torrent hash's hex and
+ * base32 forms, in either letter case, match each other).
  *
  * Interactive admin search does NOT call this — admins see all results and the
  * UI surfaces a blocked badge instead.
@@ -12,6 +13,7 @@
 
 import { getBlocklistForRequest } from '@/lib/services/blocklist.service';
 import { normalizeReleaseKey } from '@/lib/utils/release-key';
+import { torrentHashForms } from '@/lib/integrations/torrent-ids';
 
 export interface FilterableResult {
   title: string;
@@ -28,7 +30,8 @@ export interface FilterBlockedResultsOutput<T> {
  *
  * Match rules:
  * - Name: case-insensitive exact via [[normalize-release-key]].
- * - Hash: exact, only when both the result and a blocklist row have one.
+ * - Hash: only when both the result and a blocklist row have one; every form of a
+ *   torrent hash (`torrentHashForms`), so the same torrent from another indexer is caught.
  *
  * Returns the original array unchanged when there are no results or no
  * blocklist rows — both are common hot-path cases, so we short-circuit.
@@ -48,12 +51,12 @@ export async function filterBlockedResults<T extends FilterableResult>(
 
   const keys = new Set(blocklist.map(b => b.releaseKey));
   const hashes = new Set(
-    blocklist.filter(b => b.releaseHash).map(b => b.releaseHash as string)
+    blocklist.filter(b => b.releaseHash).flatMap(b => torrentHashForms(b.releaseHash as string))
   );
 
   const kept = results.filter(r => {
     if (keys.has(normalizeReleaseKey(r.title))) return false;
-    if (r.infoHash && hashes.has(r.infoHash)) return false;
+    if (r.infoHash && torrentHashForms(r.infoHash).some(form => hashes.has(form))) return false;
     return true;
   });
 

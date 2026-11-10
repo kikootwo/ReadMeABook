@@ -62,6 +62,17 @@ describe('POST /api/auth/token/login', () => {
     expect(payload.user.email).toBe('test@example.com');
   });
 
+  it('counts attempts by the address the proxy appended, whatever comes before it', async () => {
+    prismaMock.user.findFirst.mockResolvedValue(null);
+    const { POST } = await import('@/app/api/auth/token/login/route');
+
+    await POST(makeRequest({ token: 't' }, 'made-up, 203.0.113.7') as any);
+    await POST(makeRequest({ token: 't' }, '198.51.100.9, 203.0.113.7') as any);
+    await POST(makeRequest({ token: 't' }, '203.0.113.7:51234') as any);
+
+    expect(checkTokenLoginRateLimitMock.mock.calls).toEqual([['4:203.0.113.7'], ['4:203.0.113.7'], ['4:203.0.113.7']]);
+  });
+
   describe('account status', () => {
     const userRow = (registrationStatus: string | null) => ({
       id: 'u1',

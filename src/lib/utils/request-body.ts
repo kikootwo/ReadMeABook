@@ -6,6 +6,7 @@
  * - Content-Length over the limit: 413 before any byte is read
  * - No or smaller Content-Length: the byte count is checked while reading; reading stops at the limit
  * - Within the limit: parsed exactly like `request.json()` (same result, same SyntaxError)
+ * - `requireJsonContentType`: 415 before reading unless Content-Type is application/json
  */
 
 import { NextResponse } from 'next/server';
@@ -32,6 +33,13 @@ export interface ReadJsonBodyOptions<T> {
   maxBytes?: number;
   /** Returned when the body is missing or not valid JSON (instead of throwing). Over-limit bodies still get a 413. */
   fallback?: NoInfer<T>;
+  /** Answer 415 unless the request's Content-Type is application/json (checked before reading). */
+  requireJsonContentType?: boolean;
+}
+
+/** True for `application/json`, with or without parameters such as `; charset=utf-8` */
+export function isJsonContentType(value: string | null | undefined): boolean {
+  return (value ?? '').split(';')[0].trim().toLowerCase() === 'application/json';
 }
 
 /** A limit as shown to the client, e.g. "64 KB" or "1 MB". */
@@ -107,6 +115,16 @@ export async function readJsonBody<T = any>(
 ): Promise<JsonBodyResult<T>> {
   const maxBytes = options.maxBytes ?? JSON_BODY_LIMIT_BYTES;
   const hasFallback = 'fallback' in options;
+
+  if (options.requireJsonContentType && !isJsonContentType(request.headers?.get?.('content-type'))) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'UnsupportedMediaType', message: 'Content-Type must be application/json' },
+        { status: 415 }
+      ),
+    };
+  }
 
   const parse = async (read: () => Promise<T>): Promise<JsonBodyResult<T>> => {
     if (!hasFallback) return { ok: true, data: await read() };

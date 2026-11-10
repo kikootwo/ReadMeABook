@@ -132,6 +132,33 @@ describe('processDownloadTorrent', () => {
     );
   });
 
+  it('forwards an automatic grab\'s chain count to the monitor, also after a grab-time fallthrough (#332)', async () => {
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      addDownload: vi.fn()
+        .mockRejectedValueOnce(new DownloadSourceError('Grab failed: source returned HTTP 503', 503, 'https://prowlarr/1/download/busy'))
+        .mockResolvedValueOnce({ id: 'hash-2', alreadyInClient: false }),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({ id: 'client-1', type: 'qbittorrent', enabled: true });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-2' });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    await processDownloadTorrent({
+      ...torrentPayload,
+      torrent: { ...torrentPayload.torrent, downloadUrl: 'https://prowlarr/1/download/busy' },
+      alternateTorrents: [{ ...torrentPayload.torrent, title: 'Book - Author - Next', guid: 'guid-next' }],
+      clientFailures: 1,
+    });
+
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledTimes(1);
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith(
+      'req-1', 'dh-2', 'hash-2', 'qbittorrent', 3, undefined, undefined, undefined, undefined, { clientFailures: 1 }
+    );
+  });
+
   // #423: provenance comes from the client's own add result
   it.each([
     [false, true],

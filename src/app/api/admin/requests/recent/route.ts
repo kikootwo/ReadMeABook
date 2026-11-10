@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
           select: {
             torrentUrl: true,
           },
+          orderBy: { createdAt: 'desc' }, // the newest selected row (#332)
           take: 1,
         },
       },

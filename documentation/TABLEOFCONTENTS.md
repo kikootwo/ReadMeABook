@@ -13,6 +13,7 @@
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 - **Credential recovery (lost CONFIG_ENCRYPTION_KEY, locked-out admin)** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
+- **Sign-in and sign-up attempt limits, known-browser cookie, client address key, rate-limit namespaces** → [backend/services/auth.md](backend/services/auth.md#local-admin-authentication), [deployment/unified.md](deployment/unified.md#security-notes)
 
 ## Configuration & Setup
 - **First-time setup wizard** → [setup-wizard.md](setup-wizard.md)
@@ -142,6 +143,7 @@
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+- **Reported issues: Replace (who the replacement request belongs to, #571)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#reported-issue-replace)
 - **Shared torrent rule (who keeps a torrent several requests use, and until when)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#shared-torrent-holds)
 - **Request cancel (stops the download, cancelled-download cleanup pass, token cancel route)** → [admin-features/request-cancel.md](admin-features/request-cancel.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
@@ -202,6 +204,7 @@
 **"Why does the same bad release keep getting re-downloaded?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (it shouldn't anymore — auto-blocked on permanent failure)
 **"Why didn't shelf sync / a watch re-request my failed or cancelled book?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md#automatic-re-requests-409) (cancelled: never; a failure that blocked nothing: 1, 3, 7, 14, then every 30 days; pressing Request retries at once)
 **"I deleted a book from the library; why is its request failed / why wasn't it re-downloaded?"** → [backend/services/scheduler.md](backend/services/scheduler.md) (plex_library_scan: files gone → `failed` "Removed from library", request it again by hand; never re-requested automatically, #214)
+**"Why did RMAB grab a different release after a failed download?" / "Why wasn't a failed release blocked?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md#next-release-after-a-client-failure-332) (automatic grabs try the next-ranked release, at most 3 in a row; full disk, permissions and missing-data failures are never blocked)
 **"How do I unblock a release?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (admin → /admin/blocklist → Unblock, or chip on the request row)
 **"How does the admin book info modal work?"** → [admin-features/request-approval.md](admin-features/request-approval.md#ui-features), [frontend/components.md](frontend/components.md#component-apis)
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)

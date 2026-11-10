@@ -166,6 +166,18 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 3. Route to correct service (qBittorrent, Transmission, or SABnzbd)
 4. Create download history record
 
+### Client-Reported `failed` (#332)
+| Client | Maps to `failed` | `errorMessage` |
+|---|---|---|
+| qBittorrent | `error`, `missingFiles` | fixed text: "qBittorrent reported an error" / "qBittorrent reports the files are missing (missingFiles)" (the Web API gives no reason) |
+| Transmission | `error === 3` (local error) only | `errorString` |
+| Deluge | state `Error` | `message` |
+| SABnzbd | history status containing "failed" | `failMessage` |
+| NZBGet | history `FAILURE/*`, `DELETED/*`, unknown prefix | raw status first, then Par/Unpack/Delete codes |
+- The monitor hands it to `client-failure.ts`: automatic grabs move on to the next-ranked release (at most 3 in a row); storage/setup failures (`isReleaseFault()` false: full disk or quota, permissions, missing data, unmounted path or dropped share, too many open files, NZBGet `DELETED/MANUAL`/`FAILURE/MOVE`, qBittorrent `missingFiles`) are never blocked. Rule: [release-blocklist.md](../admin-features/release-blocklist.md#next-release-after-a-client-failure-332)
+- Requesters and notifications see the client's name and a short reason; `errorMessage` (raw client text, can hold server paths) goes only to the job log and the blocklist row's admin-only `reasonDetail`
+- Each failed attempt stays in the client (errored torrent, failed history entry); request delete and cancel act on the newest selected download only
+
 ### Torrent Ownership (#423)
 **Files:** `src/lib/utils/torrent-ownership.ts` (rule), `src/lib/integrations/torrent-probe.ts` (strict probe parsers)
 - RMAB removes or changes only torrents it added. `addDownload()` → `AddDownloadResult { id, alreadyInClient }`; `download-torrent.processor.ts` writes `DownloadHistory.addedByRmab = (alreadyInClient === false)` (fails closed: only an explicit "newly added" is RMAB's; `added_by_rmab`, nullable, see [database.md](../backend/database.md))

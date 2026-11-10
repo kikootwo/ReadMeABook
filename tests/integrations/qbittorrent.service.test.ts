@@ -190,6 +190,29 @@ describe('QBittorrentService', () => {
     });
   });
 
+  describe('errorMessage for the failed states (#332)', () => {
+    it.each([
+      ['missingFiles', 'qBittorrent reports the files are missing (missingFiles)'],
+      ['error', 'qBittorrent reported an error'],
+      ['downloading', undefined],
+    ])('%s -> %s', async (state, errorMessage) => {
+      const service = new QBittorrentService('http://qb', 'user', 'pass');
+      (service as any).cookie = 'SID=failed';
+      clientMock.get.mockResolvedValueOnce({
+        data: [{
+          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 0.4,
+          dlspeed: 0, upspeed: 0, downloaded: 400, uploaded: 0,
+          eta: 0, state, category: 'readmeabook', tags: '',
+          save_path: '/downloads', completion_on: 0, added_on: 1699000000,
+        }],
+      });
+
+      const info = await service.getDownload('abc123');
+
+      expect(info!.errorMessage).toBe(errorMessage);
+    });
+  });
+
   describe('mapStateToDownloadStatus - forced and new states via getDownload', () => {
     it('maps forcedUP to seeding status (triggers completion in monitor)', async () => {
       const service = new QBittorrentService('http://qb', 'user', 'pass');

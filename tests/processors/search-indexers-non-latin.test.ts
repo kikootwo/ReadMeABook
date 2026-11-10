@@ -87,6 +87,7 @@ describe('processSearchIndexers with a Cyrillic request', () => {
       expect.objectContaining({ id: 'a1', title: audiobook.title }),
       expect.objectContaining({ guid: 'right' }),
       [],
+      { clientFailures: 0 },
     );
   });
 });

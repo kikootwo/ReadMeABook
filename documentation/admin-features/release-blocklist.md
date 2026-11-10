@@ -7,7 +7,7 @@ Releases that fail to download permanently OR fail to organize after retries are
 
 ## Auto-Block Triggers
 - **Organize failure** — final `warn` transition in `organize-files.processor.ts` (after `max_import_retries`). Source: `organize_fail`.
-- **Download failure** — `progressState === 'failed'` in `monitor-download.processor.ts` (client-reported permanent failure). Source: `download_fail`. **NOT** block-worthy: connection-failure exhaustion, download client unreachable, auth failure.
+- **Download failure** — `progressState === 'failed'` in `monitor-download.processor.ts` (client-reported permanent failure), handled in `client-failure.ts` ([Next release after a client failure](#next-release-after-a-client-failure-332)). Source: `download_fail`. **NOT** block-worthy: connection-failure exhaustion, download client unreachable, auth failure, no client configured, a download removed by hand, and client failures that are not the release's fault (full disk, permissions, missing data, unmounted paths; list below).
 - Transient retry paths do NOT block — only terminal failures do.
 
 ## Search Filter Scope (filters BEFORE ranking)
@@ -17,7 +17,7 @@ All three automatic search paths apply the per-request filter:
 - `monitor-rss-feeds.processor.ts` (RSS auto-grab)
 - **Interactive search is NOT filtered.** Admin sees all results; blocked entries get an "Already blocked" badge in the modal.
 
-Match: case-insensitive on normalized release name OR exact on `releaseHash` (`torrentHash` for torrents, `nzbId` for NZBs).
+Match: case-insensitive on normalized release name OR on `releaseHash` (`torrentHash` for torrents, `nzbId` for NZBs). `filter-blocked-results.ts` compares every form of a torrent hash (`torrentHashForms`: hex/base32, either case), so the same torrent from another indexer is caught (#332); the RSS path keeps an exact compare.
 
 ## Data Model
 **Table:** `blocked_releases` ([backend/database.md](../backend/database.md))
@@ -58,10 +58,46 @@ Delete behavior:
 - **Visibility:** the request stays `failed`/`warn` with its `errorMessage`. Logs: skips and due decisions at debug (`AutoReRequest`, with the due date); each automatic re-request that is actually created logs one info line (`RequestCreator`: book, retry number or "a release was blocked", next wait if it fails again, new request id). A run that stops at `being_processed`, a missing user or a lost race logs nothing at info.
 - **Known limits:** after an in-place retry, `createdAt` predates that retry, so a pre-retry block counts as new (one extra immediate re-request, no loop). A sync landing between the failure write and the block write sees no block and waits (delay to the next sync only). A later write to the failed row (admin search-terms edit) restarts the wait.
 
+## Next release after a client failure (#332)
+**File:** `src/lib/processors/client-failure.ts` `handleClientReportedFailure()`, called from the monitor's `failed` branch. No setting, no schema change.
+
+| Client reports `failed` | Result |
+|---|---|
+| Automatic grab, release fault, failure 1 or 2 in a row, block written | request `searching` (progress 0); history `failed`; block; automatic search queued with `clientFailures` = n; `request_error` "Download failed in <Client>[ (<reason>)]. Trying another release (attempt n+1 of 3)." |
+| Automatic grab, 3rd failure in a row | `failed` "3 releases in a row failed in the download client; last: …"; block; `request_error` (this is also the chain's closing notification) |
+| Automatic grab, block not written (DB error, no release name) | `failed` as before; no next search |
+| Hand-picked grab (interactive, approve with a pick, request-with-torrent, admin retry-download, reported-issue replace) or ebook grab | `failed` "Download failed in <Client>[ (<reason>)]"; block; `request_error`; never moves on. Includes retry-download's resumed monitoring of the same download after an earlier chain failure of it |
+| Not the release's fault (any grab) | `failed` naming the cause; **no block**; no next search |
+| Not the request's newest selected download (an older monitor) | its own history row `failed` + block; request untouched, no search, no notification |
+| An earlier run of the same failure already got past its request write (`already_handled`) | its own history row `failed` + block (idempotent); request untouched, no search, no notification |
+| Next search finds nothing usable, every indexer search answered | `failed` "Download failed; no other release found: <reason>" + one `request_error` |
+| Next search throws (Prowlarr unreachable, no indexers), on Bull's last attempt | `failed` with the error (as before) + one `request_error` "Download failed: the search for another release did not finish" |
+| Next grab fails for good (`download_torrent`), on Bull's last attempt | `failed` (as before) + one `request_error` "Download failed: the next release could not be added to the download client" |
+| Next search finds nothing usable, an indexer search failed (#522) | `awaiting_search` as usual, **no closing notification** (the chain ends; the scheduled re-search starts again at 0) |
+
+- **Requester text:** the request's `errorMessage`, the history row's `downloadError` and every `request_error` carry the client's display name and a short reason (`requesterFailureReason()`): storage/setup → `disk full`, `no permission`, `files missing`, `storage unavailable`, `too many open files`, `files not moved`, `deleted in the client`; release fault → `par2`, `missing articles`, `unpack`, `password`, `missing files`, `torrent error`, or none. The client's own text (can hold server paths) goes only to the job log and the blocklist row's admin-only `reasonDetail`. Main's message was "Download failed in <clientType>" (lowercase type, no reason); it now uses the display name, for every grab.
+- **Not the release's fault** (`isReleaseFault()`, case-insensitive client text): `no space left`, `disk is full`, `disk full`, `not enough space`, `unpack: space` (NZBGet), `disk quota exceeded`, `EDQUOT`, `permission denied`, `access is denied`, `read-only file system`, `operation not permitted`, `EPERM`, `missingfiles` (qBittorrent), `no data found` (Transmission), `missing or invalid torrent data` (Deluge), `no such file or directory`, `cannot find the path`, `cannot find the file`, `input/output error`, `transport endpoint is not connected`, `stale file handle`, `network path was not found`, `network name is no longer available`, `too many open files`, `failed moving`; NZBGet `DELETED/MANUAL`, `FAILURE/MOVE`. Codes (`EPERM`, `EDQUOT`) match as whole words. These were blocked before #332. Transmission appends the path to its text, so a folder named with one of the phrases reads as a storage failure (fails, no block: fail-safe).
+- **Counter:** `clientFailures` in the `search_indexers` → `download_torrent` → `monitor_download` payloads. `search_indexers` always passes `?? 0`, so every search-made grab is automatic; absent on a download/monitor job = hand-picked. Any user/admin action queues jobs without it (reset). Cap `MAX_CLIENT_FAILURES` = 3.
+- **Notifications per chain:** one `request_error` per failed release; the 3rd failure's is the closing one. At most 3 failure notifications from client failures per chain (failure 1, failure 2, then exactly one closing exit). A chain that ends `failed` sends exactly one closing notification at each exit above; an `awaiting_search` exit sends none. **Not counted** (as on main): each grab's `request_grabbed`, and a monitor error inside a chain (PATH 3, or a not-found that runs out of Bull's retries), which notifies on each attempt it fails.
+- **Order:** guarded request write (0 rows = cancelled/deleted: nothing else) → history `failed` → block → next search → notify. Errors after the request write are handled inside (never the monitor's generic failure path); a search that can't be queued ends the request `failed`.
+- **Second run** (Bull rerun after a kill or restart, stalled lock, second monitor chain), `failureAlreadyHandled()`: stops (`already_handled`) when
+  - automatic runs only: the next search was queued, i.e. a `jobs` row has `bullJobId` `next-release-<downloadHistoryId>`, or Bull keeps a job with that id in any state (`hasBullJob()`; covers a cut between `queue.add` and the `jobs`-row update). A hand-picked run skips this: retry-download can resume monitoring of a download whose earlier chain failure left that search behind, and that run fails the request;
+  - or the request is neither `downloading` nor `searching` (the next search ended, or the request failed). The guard is the request status: the download row is not read, since the monitor marks it `failed` before the handler runs. So a request PATH 3 already failed on an earlier attempt of the same monitor job (PATH 3 notified) gets the block on Bull's retry but no move-on and no second notification.
+- The move to `searching` is one `updateMany` matching only `downloading`/`searching`, so a search that ends between the check and the write wins. A run cut after the request write but before the queue call (request `searching`, nothing queued) queues the search on the rerun. The Bull `jobId` stays as a backstop: Bull ignores a second add while it keeps the job (last 100 completed, 200 failed).
+- **Not covered:**
+  - a cut between the history write and the notification of a chain-ending failure loses that notification (never sends two);
+  - two runs at the same moment (a stalled-lock rerun while the first still runs) can both pass the check before either queues: Bull drops the second add, so one search runs, but one extra "Trying another release" notification goes out;
+  - the closing notification of a next search that throws, or of a chain grab that fails, is queued before the throw; a hard kill after that and before Bull records the failure reruns the same last attempt (a stall rerun keeps `attemptsMade`), so it can go out twice, or once for a request whose rerun then succeeds.
+- **qBittorrent:** the Web API gives no error text, so every `error` state counts as the release's fault; a full disk on qBittorrent can block up to 3 good releases per in-flight request. `/admin/blocklist` "Clear all" undoes it.
+- **#409:** a chain that ends `failed` added a block, so shelf sync / watched lists replace the request at once (up to 3 grabs per sync until every candidate is blocked → `awaiting_search` "all blocked"). A not-the-release's-fault failure adds no block of its own, but an earlier attempt in the same chain may have, and then the replacement is immediate too.
+- **Cap restarts** after an `awaiting_search` exit: a request can see more than 3 client failures in total; the blocklist still bounds it.
+- **Left in the client:** earlier failed attempts (errored torrent and partial files, failed SAB/NZBGet history entry) stay. Request delete and cancel act on the newest selected download only; a cancel during the chain's search (newest row = the failed attempt) removes nothing.
+- **Display reads** of one selected row (`GET /api/requests/[id]`, `/api/admin/requests`, `/api/admin/requests/recent`) take the newest (`orderBy createdAt desc`), so a request that moved on shows its current release.
+
 ## Service API
 **File:** `src/lib/services/blocklist.service.ts`
 - `addAutoBlock(input)` — idempotent upsert; never throws; emits `JobEvent` (context `Blocklist.AutoBlock`).
-- `isReleaseBlocked(requestId, name, hash?)` — match-check used by search filters.
+- `isReleaseBlocked(requestId, name, hash?)` — single match-check (exact hash).
 - `getBlocklistForRequest(requestId)` — list, newest first; powers chip + interactive-search badge.
 - `removeBlock(id)` — single unblock.
 - `clearBlocklist(where)` — filter-scoped bulk delete, returns `{ count }`.

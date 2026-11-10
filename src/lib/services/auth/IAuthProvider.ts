@@ -1,6 +1,6 @@
 /**
  * Auth Provider Interface
- * Documentation: documentation/features/audiobookshelf-integration.md
+ * Documentation: documentation/backend/services/auth.md
  */
 
 export interface UserInfo {
@@ -41,6 +41,7 @@ export interface AuthResult {
   requiresProfileSelection?: boolean;  // For Plex Home
   profiles?: any[];  // Plex Home profiles
   isFirstLogin?: boolean;  // First user login (initial jobs will run)
+  retryAfterSeconds?: number;  // Set when a sign-in attempt limit refused the attempt (429)
 }
 
 export interface IAuthProvider {

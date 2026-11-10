@@ -93,7 +93,7 @@ describe('automatic audiobook search: failed indexer searches (#522)', () => {
     ]);
     expect(result.success).toBe(true);
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
-      'req-1', expect.anything(), expect.objectContaining({ title: 'Author - Book [M4B]' }), []
+      'req-1', expect.anything(), expect.objectContaining({ title: 'Author - Book [M4B]' }), [], { clientFailures: 0 }
     );
   });
 
