@@ -75,8 +75,11 @@ export function libraryCoverUrl(cachedPath: string | null | undefined): string |
   return filename ? `/api/cache/library/${filename}` : null;
 }
 
-/** The cover for a followed book: only a file fetched for its library ASIN (library-cover.ts names it), else none. */
-function followedCoverUrl(cachedPath: string | null | undefined, libraryAsin: string): string | null {
+/**
+ * The cover for a followed book: only a file fetched for its library ASIN (library-cover.ts names it), else none.
+ * Also used by the Library view (src/lib/library-view/enrich.ts) so its cards never disagree with request cards.
+ */
+export function followedCoverUrl(cachedPath: string | null | undefined, libraryAsin: string): string | null {
   return sameAsin(coverAsinOf(cachedPath), libraryAsin) ? libraryCoverUrl(cachedPath) : null;
 }
 

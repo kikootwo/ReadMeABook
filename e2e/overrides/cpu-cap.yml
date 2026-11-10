@@ -1,0 +1,7 @@
+# Component: E2E compose override "cpu-cap" (#177 Library perf spec): rmab limited to 2 CPUs
+# Documentation: documentation/testing/e2e-harness.md
+# Use: npm run e2e -- ... --overrides cpu-cap   (untainted runs only). Postgres and Redis run in the
+# same container, so the cap covers the database too (as on a small home server).
+services:
+  rmab:
+    cpus: 2

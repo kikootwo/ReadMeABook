@@ -13,7 +13,7 @@ import { InteractiveTorrentSearchModal } from '@/components/requests/Interactive
 import { AdjustSearchTermsModal } from './AdjustSearchTermsModal';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { CANCELLABLE_STATUSES, EBOOK_FETCHABLE_STATUSES, SEARCHABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
 
 export interface RequestActionsDropdownProps {
@@ -70,7 +70,7 @@ export function RequestActionsDropdown({
   const canViewDetails = !isEbook && !!request.asin && !!onViewDetails;
 
   // Determine available actions based on status
-  const canSearch = ['pending', 'failed', 'awaiting_search', 'awaiting_release'].includes(request.status);
+  const canSearch = (SEARCHABLE_STATUSES as readonly string[]).includes(request.status);
   const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'searching'].includes(request.status);
   const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
   const canCancel = (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
@@ -106,7 +106,7 @@ export function RequestActionsDropdown({
     ['downloading', 'processing', 'downloaded', 'available'].includes(request.status);
 
   // Ebook actions (Grab Ebook, Interactive Search Ebook) only for audiobook requests
-  const canFetchEbook = !isEbook && ebookSidecarEnabled && ['downloaded', 'available'].includes(request.status);
+  const canFetchEbook = !isEbook && ebookSidecarEnabled && (EBOOK_FETCHABLE_STATUSES as readonly string[]).includes(request.status);
 
   // Close dropdown when clicking outside
   useEffect(() => {
