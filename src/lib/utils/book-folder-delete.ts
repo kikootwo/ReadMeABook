@@ -7,7 +7,7 @@
  *  - the audio directly in it, and only when that listing still hashes to the
  *    import's filesHash (the set the guard's evidence check hashed); otherwise nothing
  *  - RMAB's partial copies older than 24 h (PARTIAL_FILE_PATTERN, regular files)
- *  - `cover.jpg` (a regular file) and the junk list (book-folder-junk.ts), only when
+ *  - `cover.jpg`, `metadata.opf` (regular files) and the junk list (book-folder-junk.ts), only when
  *    nothing else is left but those and ebooks recorded by active ebook requests
  * Subfolders are never entered (junk folders only through their limited walk).
  * The folder goes only when empty (non-recursive rmdir). Everything else stays and
@@ -94,7 +94,7 @@ export async function planBookFolderDelete(
       if (stat.isFile() && PARTIAL_FILE_PATTERN.test(entry.name)) {
         if (now - stat.mtimeMs > STALE_PARTIAL_MS) plan.partials.push(entry.name);
         else blocking.push({ name: entry.name, why: WRITING_WHY });
-      } else if (stat.isFile() && (entry.name === 'cover.jpg' || isJunkFileName(entry.name))) {
+      } else if (stat.isFile() && (entry.name === 'cover.jpg' || entry.name === 'metadata.opf' || isJunkFileName(entry.name))) {
         plan.coverAndJunk.files.push(entry.name);
       } else if (stat.isDirectory() && isJunkDirName(entry.name)) {
         const walked = await planJunkDir(full);

@@ -75,8 +75,8 @@ export function findVariablesInContent(content: string): string[] {
   return found;
 }
 
-/** Author list separators: the set deduplicateNames splits on (bulk-import-scanner.ts) */
-const AUTHOR_SEPARATORS = /[,;&]/;
+/** Author list separators: the set deduplicateNames splits on (bulk-import-scanner.ts); metadata.opf splits on it too */
+export const AUTHOR_SEPARATORS = /[,;&]/;
 
 /**
  * {primaryAuthor}: the first entry of the author list that is still non-empty

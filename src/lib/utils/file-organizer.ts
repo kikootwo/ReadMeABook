@@ -17,6 +17,10 @@ import { orderDiscImport } from './disc-layout-fs';
 import { probeStreamDurationMs } from './audio-duration';
 import { checkTaggedChapters, CHAPTER_TABLE_CHANGED } from './chapter-guard';
 import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
+import { FILE_PLACEMENT_LABELS, isLinkPlacement, type FilePlacement } from './library-placement';
+import type { LinkRefusal } from './link-file';
+import { missingFolders, runLinkPass, undoRefusedImport } from './organize-link-pass';
+import { writeOpfSidecar, type OpfOutcome } from './opf-sidecar';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -65,6 +69,12 @@ export interface OrganizationResult {
   inventory?: ImportInventory;
   /** Files placed whose permissions could not be set (logged once per job by the caller). */
   permissionWarnings?: string[];
+  /** Audio files this run hard-linked to the download. */
+  linkedCount?: number;
+  /** Hard link (copy if not possible): why the book was copied instead. */
+  linkFallback?: LinkRefusal;
+  /** Hard link only: why nothing was imported. */
+  linkRefused?: LinkRefusal;
 }
 
 export interface PlacementOptions {
@@ -76,6 +86,14 @@ export interface PlacementOptions {
   stopInPlaceDiscLayout?: boolean;
   /** Chapter merge progress (MergeOptions.onProgress), e.g. the request's merge progress reporter (#216). */
   onMergeProgress?: (percent: number) => void;
+  /**
+   * Audiobookshelf File placement (default copy). A hard-link placement links the audio to the
+   * download, and the downloaded file is never written: no tags, no merge, no chmod, whatever
+   * else is passed or stored.
+   */
+  filePlacement?: FilePlacement;
+  /** Write metadata.opf into the book folder, before the audio. */
+  writeOpf?: boolean;
 }
 
 export interface EbookOrganizationResult {
@@ -181,7 +199,10 @@ export class FileOrganizer {
 
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
-      const metadataTaggingEnabled = placement?.metadataTaggingEnabled ?? await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).then((c) => c?.value === 'true', async (error: unknown) => {
+      // A linked book is the download itself: never tagged, merged or chmod-ed, whatever is stored or passed
+      const linking = isLinkPlacement(placement?.filePlacement);
+      if (linking) await logger?.info(`File placement: ${FILE_PLACEMENT_LABELS[placement!.filePlacement!].toLowerCase()}; linked books are not tagged or merged`);
+      const metadataTaggingEnabled = linking ? false : placement?.metadataTaggingEnabled ?? await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).then((c) => c?.value === 'true', async (error: unknown) => {
         const skipped = `Metadata tagging skipped: could not read setting (${error instanceof Error ? error.message : 'Unknown error'})`;
         await logger?.warn(skipped); result.errors.push(skipped); return false;
       }); // read once: merge disk-space check + tagging pass
@@ -201,8 +222,8 @@ export class FileOrganizer {
       let mergedInputs: string[] = [];
       let mergeDurationVerified = false;
 
-      // Check for chapter merging if multiple files
-      if (audioFiles.length > 1) {
+      // Check for chapter merging if multiple files (never for a linked book: the merge output is a new file)
+      if (audioFiles.length > 1 && !linking) {
         await logger?.info(`Multiple audio files detected (${audioFiles.length} files) - checking chapter merge settings...`);
 
         try {
@@ -296,7 +317,7 @@ export class FileOrganizer {
           await logger?.warn(`Falling back to organizing ${audioFiles.length} files individually`);
           // Continue with original audioFiles array
         }
-      } else {
+      } else if (!linking) {
         await logger?.info(`Single audio file detected - no chapter merging needed`);
       }
 
@@ -380,60 +401,51 @@ export class FileOrganizer {
 
       await logger?.info(`Target path: ${targetPath}`);
 
-      // Create target directory
+      // Create target directory (the folders this run creates, for a refused import's cleanup)
+      const createdFolders = linking ? await missingFolders(targetPath) : [];
       await fs.mkdir(targetPath, { recursive: true, mode: this.dirMode });
 
-      // Determine if file renaming should be applied
-      const shouldRename = renameConfig?.enabled && renameConfig.template;
-      const isMultiFile = audioFiles.length > 1;
-      const duplicateBasenames = this.findDuplicateBasenames(audioFiles);
-      const usedTargetFilenames = new Set<string>();
+      const filenames = await this.planTargetFilenames(audioFiles, audiobook, renameConfig, logger);
+      const sourcePathOf = (audioFile: string) =>
+        path.isAbsolute(audioFile) ? audioFile : isFile ? downloadPath : path.join(downloadPath, audioFile);
+      const compareExistingFor = (target: string) =>
+        placement?.compareExisting === true || COERCION_CANDIDATE_EXTENSIONS.includes(path.extname(target).toLowerCase());
 
-      if (shouldRename) {
-        await logger?.info(`File renaming enabled with template: ${renameConfig.template}${isMultiFile ? ` (${audioFiles.length} files, indices will be appended)` : ''}`);
-      } else if (duplicateBasenames.size > 0) {
-        await logger?.info(`Detected ${duplicateBasenames.size} duplicate source filename(s); applying folder-aware naming to avoid collisions`);
+      // metadata.opf before any audio: once Audiobookshelf has scanned a book, its own metadata wins over a later OPF
+      let opf: OpfOutcome | null = null;
+      if (placement?.writeOpf) {
+        try {
+          opf = await writeOpfSidecar(targetPath, audiobook, this.fileMode);
+          await logger?.info(opf.outcome === 'written' ? 'Wrote metadata.opf' : 'metadata.opf already exists; kept');
+          if (opf.outcome === 'written' && opf.warning) (result.permissionWarnings ??= []).push(opf.warning);
+        } catch (error) {
+          await logger?.warn(`Could not write metadata.opf: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          result.errors.push('Failed to write metadata.opf');
+        }
+      }
+
+      // Link pass: the files the copy loop below still places (all of them in copy mode)
+      let copyIndices: Set<number> | null = null;
+      if (linking) {
+        const pass = await runLinkPass({
+          placement: placement!.filePlacement as 'hardlink' | 'hardlink_only',
+          sources: audioFiles.map(sourcePathOf), names: filenames, targetPath,
+          fileMode: this.fileMode, compareExisting: compareExistingFor, result, logger,
+        });
+        if (pass.kind === 'stop') {
+          await undoRefusedImport(createdFolders, opf, logger);
+          result.targetPath = targetPath;
+          return result;
+        }
+        copyIndices = new Set(pass.indices);
       }
 
       // Copy audio files (do NOT delete originals - needed for seeding)
       for (let i = 0; i < audioFiles.length; i++) {
+        if (copyIndices && !copyIndices.has(i)) continue;
         const audioFile = audioFiles[i];
-        // Handle merged files (absolute paths) vs original files (relative paths)
-        const isAbsolutePath = path.isAbsolute(audioFile);
-        const originalSourcePath = isAbsolutePath
-          ? audioFile // Merged file - use path directly
-          : isFile
-            ? downloadPath
-            : path.join(downloadPath, audioFile);
-
-        // Determine target filename (apply rename template if enabled)
-        let filename: string;
-        if (shouldRename) {
-          const ext = path.extname(audioFile);
-          const variables: TemplateVariables = {
-            author: audiobook.author,
-            title: audiobook.title,
-            narrator: audiobook.narrator,
-            asin: audiobook.asin,
-            year: audiobook.year,
-            series: audiobook.series,
-            seriesPart: audiobook.seriesPart,
-          };
-          filename = buildRenamedFilename(
-            renameConfig.template,
-            variables,
-            ext,
-            isMultiFile ? i + 1 : undefined,
-          );
-          filename = this.makeUniqueFilename(filename, usedTargetFilenames);
-        } else {
-          filename = this.buildSourceAwareFilename(
-            audioFile,
-            duplicateBasenames,
-            usedTargetFilenames
-          );
-        }
-
+        const originalSourcePath = sourcePathOf(audioFile);
+        const filename = filenames[i];
         const targetFilePath = path.join(targetPath, filename);
 
         // Tagged derivative (when tagging succeeded); the original stays untouched for seeding
@@ -454,9 +466,7 @@ export class FileOrganizer {
           fileMode: this.fileMode,
           // Coercion renames only this import's content, so a retry must know whether a same-size
           // .mp4/.m4a already there is ours (identical) rather than just present
-          compareExisting:
-            placement?.compareExisting === true ||
-            COERCION_CANDIDATE_EXTENSIONS.includes(path.extname(targetFilePath).toLowerCase()),
+          compareExisting: compareExistingFor(targetFilePath),
           probeDuration: probeStreamDurationMs,
         });
         if (chaptersChanged && placed.status === 'copied') {
@@ -596,6 +606,8 @@ export class FileOrganizer {
       } else {
         result.errors.push('No audio files were successfully copied to the target directory');
         await logger?.error(`Organization failed: no audio files copied despite ${audioFiles.length} file(s) found`);
+        // An OPF beside no audio would describe nothing (folders and cover stay as today)
+        if (opf) await undoRefusedImport([], opf, logger);
       }
 
       // DO NOT clean up download directory - files needed for seeding
@@ -724,6 +736,33 @@ export class FileOrganizer {
    */
   private sanitizePath(name: string): string {
     return capGraphemeUnits(this.cleanPathName(name), PATH_NAME_UNITS);
+  }
+
+  /** Library file name per audio file (rename template, else folder-aware source names), unique within the book. */
+  private async planTargetFilenames(
+    audioFiles: string[],
+    audiobook: AudiobookMetadata,
+    renameConfig: { enabled: boolean; template: string } | undefined,
+    logger: RMABLogger | null
+  ): Promise<string[]> {
+    const shouldRename = renameConfig?.enabled && renameConfig.template;
+    const isMultiFile = audioFiles.length > 1;
+    const duplicateBasenames = this.findDuplicateBasenames(audioFiles);
+    const used = new Set<string>();
+    if (shouldRename) {
+      await logger?.info(`File renaming enabled with template: ${renameConfig.template}${isMultiFile ? ` (${audioFiles.length} files, indices will be appended)` : ''}`);
+    } else if (duplicateBasenames.size > 0) {
+      await logger?.info(`Detected ${duplicateBasenames.size} duplicate source filename(s); applying folder-aware naming to avoid collisions`);
+    }
+    return audioFiles.map((audioFile, i) => {
+      if (!shouldRename) return this.buildSourceAwareFilename(audioFile, duplicateBasenames, used);
+      const variables: TemplateVariables = {
+        author: audiobook.author, title: audiobook.title, narrator: audiobook.narrator, asin: audiobook.asin,
+        year: audiobook.year, series: audiobook.series, seriesPart: audiobook.seriesPart,
+      };
+      const name = buildRenamedFilename(renameConfig.template, variables, path.extname(audioFile), isMultiFile ? i + 1 : undefined);
+      return this.makeUniqueFilename(name, used);
+    });
   }
 
   private findDuplicateBasenames(files: string[]): Set<string> {
