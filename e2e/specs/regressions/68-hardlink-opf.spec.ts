@@ -28,7 +28,8 @@ import {
 } from './68-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
-test.describe.configure({ mode: 'serial', timeout: 900_000 });
+// Ordered (one worker, in file order) but not serial: a failed leg doesn't hide the others' results
+test.describe.configure({ timeout: 900_000 });
 
 const AUTHORS = 'Test Author, Second Writer';
 const OFF = { metadataTaggingEnabled: false, chapterMergingEnabled: false };
@@ -118,7 +119,8 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
     await expect(page.getByRole('radio', { name: 'Hard link (copy if not possible)' })).toBeChecked();
     await expect(page.getByRole('radio', { name: 'Tags in the audio files' })).toBeChecked();
     await expect(section.getByRole('alert')).toHaveText('Needs Metadata: OPF file or None, and chapter merge off.');
-    await expect(page.getByText('Hard links need Metadata set to OPF file or None.').first()).toBeVisible();
+    // Nothing changed yet, so Save is simply off; the red line is the explanation
+    await expect(page.getByRole('button', { name: 'Save Settings' })).toBeDisabled();
     await elementShot(page, section, 'refusal-stored-conflict-tags');
     await page.getByRole('radio', { name: 'OPF file (metadata.opf)' }).check();
     await expect(page.getByText('Turn off chapter merge to use hard links.').first()).toBeVisible();
