@@ -127,6 +127,8 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
   // The config service caches a key for 60 s: wait it out after each switch, so the PUT and the
   // importer see the mode the page shows.
   const cacheTtl = () => new Promise((r) => setTimeout(r, 62_000));
+  // Hard link + OPF stored (as the 1280 view saved it; the 375 view started from Copy + Tags)
+  expect((await savePaths(rmab, { ...OFF, filePlacement: 'hardlink', metadataOpfEnabled: true })).status).toBe(200);
   const mode = psql(`select value from configuration where key = 'system.backend_mode'`);
   psql(`update configuration set value = 'plex' where key = 'system.backend_mode'`);
   await cacheTtl();

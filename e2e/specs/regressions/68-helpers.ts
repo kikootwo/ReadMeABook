@@ -177,10 +177,15 @@ export async function regionShot(page: Page, top: ReturnType<Page['locator']>, b
   await page.setViewportSize(size);
 }
 
+/** The whole page fits the viewport while shooting, so the sticky header never covers the element. */
 export async function elementShot(page: Page, selector: ReturnType<Page['locator']>, name: string) {
-  await selector.scrollIntoViewIfNeeded();
+  const size = page.viewportSize()!;
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  await page.setViewportSize({ width: size.width, height: Math.max(size.height, height) });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(300);
   await selector.screenshot({ path: evidencePath(SHOTS, 'shots', `${name}.jpg`), type: 'jpeg', quality: 85 });
+  await page.setViewportSize(size);
 }
 
 /** A made-up book row (offline RMAB can't fetch one by ASIN); returns its id. */
