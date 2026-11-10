@@ -82,6 +82,11 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await openLibrary(page);
   for (const title of [...Object.values(TITLES).flat()]) await expect(card(page, title), title).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Library' })).toBeVisible();
+  // Covers line up along a row even beside a two-line title (each cover starts at its card's top)
+  const coverDrift = await page.locator('[data-library-card]').evaluateAll((cards) =>
+    Math.max(...cards.map((c) => c.firstElementChild!.getBoundingClientRect().top - c.getBoundingClientRect().top))
+  );
+  expect(coverDrift, 'cover offset inside its card (px)').toBeLessThanOrEqual(1);
   await shot(page, 'grid-1280-light');
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot(page, 'grid-1280-dark');

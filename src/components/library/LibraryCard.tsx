@@ -24,13 +24,16 @@ export function LibraryCard({ item, squareCovers, showPill, onOpen }: LibraryCar
   const inLibrary = item.inLibrary || item.status === 'available';
   const progress = Math.max(0, Math.min(100, Math.round(item.progress ?? 0)));
 
+  // self-start: a button stretched to its grid row centres its content, which pushed covers down
+  // beside a card with a two-line title
+
   return (
     <button
       type="button"
       onClick={() => onOpen(item)}
       aria-label={cardAriaLabel(item)}
       data-library-card={item.id}
-      className="group block w-full text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 rounded-2xl"
+      className="group block self-start w-full text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 rounded-2xl"
     >
       <div className="relative">
         <BookCover coverUrl={item.coverUrl} squareCovers={squareCovers} tone={tone} dotHidesOnHover={false}>
