@@ -17,7 +17,10 @@ export const MERGE_PROGRESS_WRITE_INTERVAL_MS = 10_000;
 export interface MergeProgressReporter {
   /** A merge percent (0-100). 100 is written at once and closes the reporter. */
   report(percent: number): void;
-  /** Writes 100 if a lower value was written, closes the reporter and waits for the last write. */
+  /**
+   * Writes 100 if a lower value was written, closes the reporter and waits for the last write.
+   * A final 100 that failed is issued once more.
+   */
   settle(): Promise<void>;
 }
 
@@ -28,7 +31,8 @@ type Logger = Pick<RMABLogger, 'warn'>;
  * a changed percent is written at most once per MERGE_PROGRESS_WRITE_INTERVAL_MS
  * (the newest value is written when the interval ends). Writes run one at a time,
  * only while the request is `processing` and not deleted, and a write error is
- * logged and dropped. Once closed (100 or settle) every later call does nothing.
+ * logged and dropped (settle issues a failed final 100 once more). Once closed
+ * (100 or settle) every later call does nothing.
  */
 export function createMergeProgressReporter(
   requestId: string,
@@ -41,22 +45,29 @@ export function createMergeProgressReporter(
   let pending: number | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let chain: Promise<void> = Promise.resolve();
+  let finalWriteFailed = false;
 
-  const write = async (percent: number): Promise<void> => {
+  /** Resolves true once saved; a write error is logged and resolves false. */
+  const write = async (percent: number): Promise<boolean> => {
     try {
       await prisma.request.updateMany({
         where: { id: requestId, status: 'processing', deletedAt: null },
         data: { progress: percent, updatedAt: new Date() },
       });
+      return true;
     } catch (error) {
       logger?.warn(`Could not save merge progress (${percent}%): ${error instanceof Error ? error.message : String(error)}`);
+      return false;
     }
   };
 
   const enqueue = (percent: number): void => {
     lastWritten = percent;
     lastWriteAt = now();
-    chain = chain.then(() => write(percent));
+    chain = chain.then(async () => {
+      const saved = await write(percent);
+      if (percent === 100) finalWriteFailed = !saved;
+    });
   };
 
   const clearPending = (): void => {
@@ -105,6 +116,10 @@ export function createMergeProgressReporter(
     async settle(): Promise<void> {
       if (!closed) close(lastWritten !== null);
       await chain;
+      if (finalWriteFailed) {
+        finalWriteFailed = false; // once: a second failure is logged and left to the next status write
+        await write(100);
+      }
     },
   };
 }

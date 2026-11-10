@@ -228,7 +228,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     const tagDetails = await tagDetailsPending;
 
     // Organize files (pass template, logger, and rename config to file organizer). The merge's
-    // progress is saved on the request; settle() has it back at 100 before anything follows
+    // progress is saved on the request; settle() waits for the final 100 before anything follows
+    // (a failed 100 is issued once more; if that fails too, the percent shows until the request leaves processing)
     const mergeProgress = createMergeProgressReporter(requestId, logger);
     const result = await organizer.organize(
       downloadPath,

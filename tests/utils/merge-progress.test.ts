@@ -159,6 +159,35 @@ describe('merge progress reporter', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('connection lost'));
   });
 
+  it('settle issues the final 100 once more when it failed, so the bar never outlives ffmpeg', async () => {
+    const c = clock();
+    const warn = vi.fn();
+    updateMany.mockResolvedValueOnce({ count: 1 }).mockRejectedValueOnce(new Error('pool timeout'));
+    const reporter = createMergeProgressReporter('req-1', { warn }, c.now);
+
+    reporter.report(37);
+    reporter.report(100); // rejected
+    await reporter.settle();
+
+    expect(written()).toEqual([37, 100, 100]);
+    expect(updateMany.mock.calls[2][0].where).toEqual({ id: 'req-1', status: 'processing', deletedAt: null });
+  });
+
+  it('the 100 settle writes itself is issued again too, but only once', async () => {
+    const c = clock();
+    updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockRejectedValueOnce(new Error('pool timeout'))
+      .mockRejectedValueOnce(new Error('pool timeout'));
+    const reporter = createMergeProgressReporter('req-1', { warn: vi.fn() }, c.now);
+
+    reporter.report(37);
+    await expect(reporter.settle()).resolves.toBeUndefined(); // 100 rejected, retried, rejected again
+    await reporter.settle();
+
+    expect(written()).toEqual([37, 100, 100]);
+  });
+
   it('clamps and floors what it is given', async () => {
     const c = clock();
     const reporter = createMergeProgressReporter('req-1', undefined, c.now);

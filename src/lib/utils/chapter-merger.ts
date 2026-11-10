@@ -578,16 +578,13 @@ async function executeFFmpegWithProgress(
 
         const progressPercent = Math.min(100, Math.round((currentTimeMs / expectedDuration) * 100));
 
-        // Request progress: 99 at most while ffmpeg runs (100 means it has exited)
+        // Request progress: 99 at most while ffmpeg runs (100 means it has exited). notifyProgress
+        // swallows a throw, which here (a stderr listener) would otherwise end the process
         if (onProgress && expectedDuration > 0) {
           const reported = Math.min(99, Math.floor((currentTimeMs / expectedDuration) * 100));
           if (reported !== lastReportedPercent) {
             lastReportedPercent = reported;
-            try {
-              onProgress(reported);
-            } catch {
-              // A throw here would be uncaught (stderr listener) and end the process
-            }
+            notifyProgress(onProgress, reported);
           }
         }
 

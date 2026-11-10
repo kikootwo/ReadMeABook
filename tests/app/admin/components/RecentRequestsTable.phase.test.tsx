@@ -10,7 +10,7 @@
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const useSWRMock = vi.hoisted(() => vi.fn());
 
@@ -61,11 +61,17 @@ const USERS = { data: { users: [] }, error: null, isLoading: false };
 const NONE = { data: null, error: null, isLoading: false };
 
 describe('RecentRequestsTable: processing phase line (#216)', () => {
-  it('shows the merge percent or "Organizing files" under a processing badge, nothing elsewhere', async () => {
+  let RecentRequestsTable: typeof import('@/app/admin/components/RecentRequestsTable').RecentRequestsTable;
+
+  // The table's module graph is large: load it outside the test's own timeout (slow under load)
+  beforeAll(async () => {
+    ({ RecentRequestsTable } = await import('@/app/admin/components/RecentRequestsTable'));
+  }, 120_000);
+
+  it('shows the merge percent or "Organizing files" under a processing badge, nothing elsewhere', () => {
     useSWRMock.mockImplementation((url: string) =>
       url.includes('/api/admin/requests') ? REQUESTS : url === '/api/admin/users' ? USERS : NONE
     );
-    const { RecentRequestsTable } = await import('@/app/admin/components/RecentRequestsTable');
     render(<RecentRequestsTable />);
 
     const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;

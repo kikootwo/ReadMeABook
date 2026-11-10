@@ -6,6 +6,14 @@
  * (requestPhase in request-statuses.ts). Every write that sets status
  * 'processing' must also set progress 100, or the request reads
  * "Merging chapters N%" with a leftover value. Checked statically on src/.
+ *
+ * What it finds: an object literal whose `status` property (quoted key too) has a
+ * 'processing' string literal anywhere in its value (`ok ? 'processing' : ...`
+ * included), outside any `where` (a property or variable of that name: a read).
+ * What it does not find: a status from a variable or shorthand (`{ status }`), an
+ * assignment (`data.status = ...`), a spread that overrides `progress`, raw SQL,
+ * and writes of `progress` alone (the download processors filter those to
+ * `downloading`, tests/processors/*.late-progress.test.ts).
  */
 
 import fs from 'fs';
@@ -32,38 +40,59 @@ function unwrap(node: ts.Expression): ts.Expression {
   return current;
 }
 
+function nameOf(name: ts.PropertyName | ts.BindingName): string | null {
+  return ts.isIdentifier(name) || ts.isStringLiteralLike(name) ? name.text : null;
+}
+
 function property(literal: ts.ObjectLiteralExpression, name: string): ts.PropertyAssignment | undefined {
   return literal.properties.find(
-    (p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText() === name
+    (p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && nameOf(p.name) === name
   );
 }
 
-/** Object literals that set `status: 'processing'`, outside a `where` filter (a filter reads, it does not write). */
-function processingWrites(): { site: string; progress: string | null }[] {
-  const sites: { site: string; progress: string | null }[] = [];
-  for (const file of sourceFiles(SRC)) {
-    const text = fs.readFileSync(file, 'utf8');
-    if (!/status\s*:\s*['"`]processing['"`]/.test(text)) continue; // parse only the candidates
-    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-    const visit = (node: ts.Node): void => {
-      if (ts.isObjectLiteralExpression(node)) {
-        const status = property(node, 'status');
-        const value = status && unwrap(status.initializer);
-        const isWhere = ts.isPropertyAssignment(node.parent) && node.parent.name.getText() === 'where';
-        if (value && ts.isStringLiteralLike(value) && value.text === 'processing' && !isWhere) {
-          const { line } = source.getLineAndCharacterOfPosition(node.getStart());
-          const progress = property(node, 'progress');
-          sites.push({
-            site: `${path.relative(SRC, file).replace(/\\/g, '/')}:${line + 1}`,
-            progress: progress ? unwrap(progress.initializer).getText() : null,
-          });
-        }
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
+/** A 'processing' string literal anywhere in the expression. */
+function mentionsProcessing(node: ts.Node): boolean {
+  return (ts.isStringLiteralLike(node) && node.text === 'processing') || !!ts.forEachChild(node, (child) => mentionsProcessing(child) || undefined);
+}
+
+/** Inside a `where` property or a variable named `where` (a filter reads, it does not write). */
+function inWhere(node: ts.Node): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if ((ts.isPropertyAssignment(current) || ts.isVariableDeclaration(current)) && nameOf(current.name) === 'where') return true;
   }
+  return false;
+}
+
+type Site = { site: string; progress: string | null };
+
+/** Object literals in one file that can set status 'processing' (see the header). */
+function processingWritesIn(file: string, text: string): Site[] {
+  const sites: Site[] = [];
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const visit = (node: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const status = property(node, 'status');
+      if (status && mentionsProcessing(status.initializer) && !inWhere(node)) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart());
+        const progress = property(node, 'progress');
+        sites.push({
+          site: `${file}:${line + 1}`,
+          progress: progress ? unwrap(progress.initializer).getText() : null,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return sites;
+}
+
+function processingWrites(): Site[] {
+  return sourceFiles(SRC).flatMap((file) => {
+    const text = fs.readFileSync(file, 'utf8');
+    if (!/['"`]processing['"`]/.test(text)) return []; // parse only the candidates
+    return processingWritesIn(path.relative(SRC, file).replace(/\\/g, '/'), text);
+  });
 }
 
 describe('processing progress contract', () => {
@@ -72,6 +101,25 @@ describe('processing progress contract', () => {
     // 9 writers today: direct download, bulk import x3, manual import x2, the retry route, organize x2
     expect(sites.length).toBeGreaterThanOrEqual(9);
     expect(sites.filter((s) => s.progress !== '100')).toEqual([]);
+  });
+
+  const progressOf = (code: string) => processingWritesIn('sample.ts', code).map((s) => s.progress);
+
+  it.each([
+    ['a nested where filter', "prisma.request.count({ where: { OR: [{ status: 'processing' }] } })"],
+    ['a relation filter', "prisma.user.findMany({ where: { requests: { some: { status: 'processing' } } } })"],
+    ['a filter kept in a variable', "const where = { status: 'processing' };"],
+  ])('skips a read: %s', (_shape, code) => {
+    expect(progressOf(code)).toEqual([]);
+  });
+
+  it.each([
+    ['a plain write', "prisma.request.update({ where: { id }, data: { status: 'processing' } })", [null]],
+    ['a ternary status', "prisma.request.update({ where: { id }, data: { status: ok ? 'processing' : 'failed', progress: 0 } })", ['0']],
+    ['a quoted key', "prisma.request.update({ where: { id }, data: { 'status': 'processing' } })", [null]],
+    ['a write that keeps the contract', "prisma.request.update({ where: { id }, data: { status: 'processing' as const, progress: 100 } })", ['100']],
+  ])('finds a write: %s', (_shape, code, expected) => {
+    expect(progressOf(code)).toEqual(expected);
   });
 });
 

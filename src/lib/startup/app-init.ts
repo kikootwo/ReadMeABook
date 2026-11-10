@@ -23,6 +23,8 @@ export type AppInitOutcome = 'initialized' | 'already-initialized' | 'not-ready'
 interface InitState {
   done: boolean;
   inFlight?: Promise<AppInitOutcome>;
+  /** The merge progress reset ran (once per process: on a retried init a merge may be running). */
+  mergeResetDone?: boolean;
 }
 
 function state(): InitState {
@@ -84,8 +86,10 @@ async function redisReady(): Promise<boolean> {
   }
 }
 
-/** A chapter merge cut by the restart left its request below 100: reset it (non-fatal). */
+/** A chapter merge cut by the restart left its request below 100: reset it (non-fatal, once per process). */
 async function resetMergeProgressAfterRestart(): Promise<void> {
+  if (state().mergeResetDone) return;
+  state().mergeResetDone = true;
   try {
     const count = await resetInterruptedMergeProgress();
     if (count > 0) logger.info(`Reset merge progress on ${count} processing request(s) cut by the restart`);

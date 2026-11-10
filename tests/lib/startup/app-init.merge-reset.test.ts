@@ -44,6 +44,18 @@ describe('runAppInitOnce: merge progress reset', () => {
     expect(order).toEqual(['credentials', 'reset', 'scheduler']);
   });
 
+  it('runs once per process: a retried init (the scheduler failed to start) does not reset again', async () => {
+    resetMock.mockImplementation(async () => { order.push('reset'); return 0; });
+    startMock.mockImplementationOnce(async () => { throw new Error('redis gone'); });
+    const { runAppInitOnce } = await freshInit();
+
+    await expect(runAppInitOnce()).resolves.toBe('failed');
+    await expect(runAppInitOnce()).resolves.toBe('initialized'); // a merge may be running by now
+
+    expect(resetMock).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['credentials', 'reset', 'credentials', 'scheduler']);
+  });
+
   it('a failed reset never stops the init', async () => {
     resetMock.mockRejectedValue(new Error('db busy'));
     const { runAppInitOnce } = await freshInit();

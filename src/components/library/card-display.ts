@@ -137,12 +137,20 @@ export function cardLabel(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'prog
   return sentenceCase(statusLabel(item.status, item.progress ?? undefined));
 }
 
+/**
+ * The label with its percent: "Downloading 42%". A merge puts the percent first ("14% Merging
+ * chapters"), since a small card truncates the end of the pill and the line (#216).
+ */
+function withPercent(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>, pct: string, separator: string): string {
+  return item.status === 'processing' ? `${pct}${separator}${cardLabel(item)}` : `${cardLabel(item)}${separator}${pct}`;
+}
+
 /** The cover pill for books not in the library; null for library books. */
 export function cardPill(item: LibraryItem, now?: Date): string | null {
   if (item.inLibrary || item.status === 'available') return null;
   if (item.status === 'awaiting_release') return releaseLabel(item.releaseDate, now) ?? cardLabel(item);
   const pct = percent(item);
-  return pct ? `${cardLabel(item)} ${pct}` : cardLabel(item);
+  return pct ? withPercent(item, pct, ' ') : cardLabel(item);
 }
 
 /** The line under the author: duration (else year) in the library, else the status. */
@@ -151,7 +159,7 @@ export function cardMeta(item: LibraryItem): string {
     return formatDuration(item.durationMinutes) ?? (item.year ? String(item.year) : '');
   }
   const pct = percent(item);
-  return pct ? `${cardLabel(item)} · ${pct}` : cardLabel(item);
+  return pct ? withPercent(item, pct, ' · ') : cardLabel(item);
 }
 
 export function cardAriaLabel(item: LibraryItem): string {

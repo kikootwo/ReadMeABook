@@ -91,10 +91,11 @@ describe('card display', () => {
 
   it('processing says what it is doing: a percent and the bar only while chapters merge (#216)', () => {
     const merging = item({ status: 'processing', statusGroup: 'on_the_way', progress: 42 });
-    expect(cardPill(merging)).toBe('Merging chapters 42%');
-    expect(cardMeta(merging)).toBe('Merging chapters · 42%');
+    // The percent comes first: a small card truncates the end of the pill and the line (#216)
+    expect(cardPill(merging)).toBe('42% Merging chapters');
+    expect(cardMeta(merging)).toBe('42% · Merging chapters');
     expect(showsProgress(merging)).toBe(true);
-    expect(cardMeta(item({ status: 'processing', statusGroup: 'on_the_way', progress: 0 }))).toBe('Merging chapters · 0%');
+    expect(cardMeta(item({ status: 'processing', statusGroup: 'on_the_way', progress: 0 }))).toBe('0% · Merging chapters');
 
     for (const progress of [100, null]) {
       const organizing = item({ status: 'processing', statusGroup: 'on_the_way', progress });
