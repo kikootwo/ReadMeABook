@@ -114,6 +114,19 @@ describe('LibraryDetail: what each viewer sees', () => {
     expect(container.ownerDocument.querySelector('.bg-blue-400.rounded-full')).toBeNull();
   });
 
+  it('caches the history under a key of its own, never useRequest’s /api/requests/<id>', async () => {
+    const cache = new Map<string, unknown>();
+    render(
+      <SWRConfig value={{ provider: () => cache as never, dedupingInterval: 0 }}>
+        <ToastProvider>
+          <LibraryDetail item={gated()} viewer={ADMIN_VIEWER} user={null} live={false} onClose={vi.fn()} onChanged={vi.fn()} />
+        </ToastProvider>
+      </SWRConfig>
+    );
+    await screen.findByText('Found on IndexerOne');
+    expect([...cache.keys()].some((k) => k === '/api/requests/request-1')).toBe(false);
+  });
+
   it('job statuses read as words', async () => {
     renderDetail(gated());
     expect(await screen.findByText(/^Done/)).toBeInTheDocument();

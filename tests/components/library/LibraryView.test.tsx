@@ -183,6 +183,16 @@ describe('LibraryView grid, chips and query', () => {
     expect(await screen.findByText('Requested by alice')).toBeInTheDocument();
   });
 
+  it('the Group control keeps its label at every width; a cut-off rail label can be read from its title', async () => {
+    pages[BASE] = response([item()]);
+    renderView();
+    await screen.findByRole('button', { name: /Dune by/ });
+    const label = within(screen.getByRole('group', { name: 'Group by' })).getByText('Group');
+    expect(label.className).not.toMatch(/(^|\s)hidden(\s|$)/); // "None | Author" alone reads like "no filter"
+    const rail = screen.getByRole('complementary', { name: 'Filters' });
+    expect(within(rail).getByText('Requested in ReadMeABook')).toHaveAttribute('title', 'Requested in ReadMeABook');
+  });
+
   it('the rail and the sheet list the same facets', async () => {
     pages[BASE] = response([item()], {
       facets: { ...response([]).facets, requestedBy: [{ userId: 'u1', username: 'alice', count: 1 }, { userId: 'u2', username: 'bob', count: 2, deleted: true }] },
