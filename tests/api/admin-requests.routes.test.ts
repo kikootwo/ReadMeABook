@@ -46,6 +46,10 @@ vi.mock('@/lib/integrations/prowlarr-connection', () => ({
   }),
 }));
 
+/** A DELETE /api/admin/requests/:id request; the route reads only its query (keepLibrary). */
+const deleteCall = (query = '') =>
+  ({ nextUrl: new URL(`http://localhost/api/admin/requests/req-1${query}`) }) as unknown as NextRequest;
+
 /** A GET /api/admin/requests request; the route only reads its url. */
 const listRequest = (query: string) =>
   ({ url: `http://localhost/api/admin/requests${query}` }) as unknown as NextRequest;
@@ -295,7 +299,7 @@ describe('Admin requests routes', () => {
     });
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const response = await DELETE(deleteCall(), { params: Promise.resolve({ id: 'req-1' }) });
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
@@ -314,7 +318,7 @@ describe('Admin requests routes', () => {
     });
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const response = await DELETE(deleteCall(), { params: Promise.resolve({ id: 'req-1' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -334,7 +338,7 @@ describe('Admin requests routes', () => {
     });
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as never, { params: Promise.resolve({ id: 'req-1' }) });
+    const response = await DELETE(deleteCall(), { params: Promise.resolve({ id: 'req-1' }) });
     const payload = await response.json();
 
     expect(payload.message).toBe('Request deleted; the book folder stays because it still holds: Book.epub (ebook of another request)');
@@ -346,7 +350,7 @@ describe('Admin requests routes', () => {
     authRequest.user = null;
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-2' }) });
+    const response = await DELETE(deleteCall(), { params: Promise.resolve({ id: 'req-2' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(401);
@@ -361,7 +365,7 @@ describe('Admin requests routes', () => {
     });
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-3' }) });
+    const response = await DELETE(deleteCall(), { params: Promise.resolve({ id: 'req-3' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(404);
@@ -376,7 +380,7 @@ describe('Admin requests routes', () => {
     });
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-4' }) });
+    const response = await DELETE(deleteCall(), { params: Promise.resolve({ id: 'req-4' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(500);

@@ -10,6 +10,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { Prisma } from '@/generated/prisma';
 import { loadLinkedRows, withLibraryDisplay } from '@/lib/services/library/library-display';
 import { getConfigService } from '@/lib/services/config.service';
+import { BEING_IMPORTED_WHERE, deleteTouchesLibrary } from '@/lib/utils/delete-touches-library';
 
 const logger = RMABLogger.create('API.Admin.Requests');
 
@@ -144,6 +145,10 @@ export async function GET(request: NextRequest) {
                 audibleAsin: true,
                 absItemId: true,
                 libraryAsin: true,
+                // Read only for the derived inLibrary flag, never returned
+                filePath: true,
+                plexGuid: true,
+                requests: { where: BEING_IMPORTED_WHERE, select: { id: true }, take: 1 },
               },
             },
             user: {
@@ -198,6 +203,8 @@ export async function GET(request: NextRequest) {
             downloadAttempts: request.downloadAttempts,
             customSearchTerms: request.customSearchTerms || null,
             blockedCount: request._count?.blockedReleases ?? 0,
+            // Bulk delete leaves these alone (#212); derived, so stored paths never leave the server
+            inLibrary: deleteTouchesLibrary(request, (request.audiobook.requests?.length ?? 0) > 0),
           };
         });
 

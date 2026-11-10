@@ -146,6 +146,7 @@
 - **Reported issues: Replace (who the replacement request belongs to, #571)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#reported-issue-replace)
 - **Shared torrent rule (who keeps a torrent several requests use, and until when)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#shared-torrent-holds)
 - **Request cancel (stops the download, cancelled-download cleanup pass, token cancel route)** → [admin-features/request-cancel.md](admin-features/request-cancel.md)
+- **Bulk request actions (select requests in the admin table; approve, deny, cancel, delete one at a time; in-library skip)** → [admin-features/bulk-request-actions.md](admin-features/bulk-request-actions.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 
@@ -197,6 +198,7 @@
 **"Local admin can't log in / 'Invalid username or password' with correct credentials"** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
 **"How do I recover from a lost CONFIG_ENCRYPTION_KEY?"** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
 **"How do I delete requests?"** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+**"Can I delete or cancel many requests at once?" / "Why did deleted requests come back?"** → [admin-features/bulk-request-actions.md](admin-features/bulk-request-actions.md) (page selection, skip rule, shelves and watches re-request deleted ones)
 **"Does cancelling a request stop its download?" / "Can an API token cancel a request?"** → [admin-features/request-cancel.md](admin-features/request-cancel.md) (partial removed, finished seeds first, cleanup pass for post-upgrade cancels; `POST /api/requests/:id/cancel`), [backend/services/api-tokens.md](backend/services/api-tokens.md)
 **"How do I approve/deny user requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How do I enable auto-approve for requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)

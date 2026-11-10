@@ -286,6 +286,8 @@ Update user (includes autoApproveRequests field)
 ## UI Features
 
 ### Admin Dashboard (/admin)
+**Bulk approve and deny (#212):** the Request Management table's bar calls `POST /api/admin/requests/:id/approve` once per selected `awaiting_approval` request, one at a time (no admin pick; same responses, notifications and logs). [bulk-request-actions.md](bulk-request-actions.md)
+
 **Requests Awaiting Approval Section:**
 - Shows only when pending approval requests exist
 - Grid layout with book cards (3 columns on desktop)

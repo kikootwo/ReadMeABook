@@ -15,6 +15,10 @@ import { authenticatedFetcher, fetchWithAuth } from '@/lib/utils/api';
 import { useToast } from '@/components/ui/Toast';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { BlockedReleasesChip } from './BlockedReleasesChip';
+import { BulkActionBar } from './BulkActionBar';
+import { SelectPageCheckbox, SelectRowCheckbox } from './SelectionCheckbox';
+import { useRequestSelection } from './useRequestSelection';
+import { useBulkRun } from './useBulkRun';
 
 interface RecentRequest {
   requestId: string;
@@ -34,6 +38,7 @@ interface RecentRequest {
   downloadAttempts?: number;
   customSearchTerms?: string | null;
   blockedCount?: number;
+  inLibrary?: boolean; // bulk delete leaves these alone (#212)
 }
 
 interface User {
@@ -217,9 +222,13 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   // Build API URL with current local filters
   const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${encodeURIComponent(status)}&type=${encodeURIComponent(type)}&userId=${encodeURIComponent(userId)}&sortBy=${encodeURIComponent(sortBy)}&sortOrder=${encodeURIComponent(sortOrder)}`;
 
+  // Bulk actions (#212): a new list URL clears the selection; auto-refresh pauses while anything is selected or running
+  const selection = useRequestSelection(apiUrl);
+  const bulkRun = useBulkRun();
+
   // Fetch requests with SWR
   const { data, error, isLoading } = useSWR<RequestsResponse>(apiUrl, authenticatedFetcher, {
-    refreshInterval: 10000,
+    refreshInterval: selection.count > 0 || bulkRun.running ? 0 : 10000,
     keepPreviousData: true, // Keep showing old data while fetching new data to prevent layout shifts
   });
 
@@ -553,6 +562,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const endIndex = Math.min(page * pageSize, total);
 
   return (
+    <>
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       {/* Filter Bar */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
@@ -657,6 +667,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
             <table className="w-full">
               <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
                 <tr>
+                  <th className="w-10 px-3 py-3">
+                    <SelectPageCheckbox pageIds={requests.map((r) => r.requestId)} selection={selection} disabled={bulkRun.running} />
+                  </th>
                   <th
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     onClick={() => handleSort('title')}
@@ -711,8 +724,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                 {requests.map((request) => (
                   <tr
                     key={request.requestId}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors"
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors ${selection.ids.has(request.requestId) ? 'bg-blue-50/70 dark:bg-blue-900/20' : ''}`}
                   >
+                    <td className="w-10 px-3 py-4">
+                      <SelectRowCheckbox id={request.requestId} title={request.displayTitle ?? request.title} selection={selection} disabled={bulkRun.running} />
+                    </td>
                     <td className="px-6 py-4">
                       <div>
                         <div className="flex items-center gap-2">
@@ -800,7 +816,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         onSearchTermsUpdated={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
                         annasArchiveBaseUrl={annasArchiveBaseUrl}
-                        isLoading={isDeleting || isFetchingEbook}
+                        isLoading={isDeleting || isFetchingEbook || bulkRun.running}
                       />
                     </td>
                   </tr>
@@ -961,5 +977,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
         />
       )}
     </div>
+    <BulkActionBar rows={requests} selection={selection} run={bulkRun} listKey={apiUrl} />
+    </>
   );
 }

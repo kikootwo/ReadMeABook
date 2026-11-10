@@ -32,6 +32,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Filtering: by status, by type, by user, text search (title/author: the requested ones, or in Audiobookshelf mode the linked library item's for a followed `available` audiobook request, #325a)
 - Rows: `title`/`author`/`asin` are the requested ones (every row action, both interactive search modals and Adjust Search Terms use them); `displayTitle`/`displayAuthor` are the shown ones (the library's edition for a followed request, else the same); `libraryAsin` is the effective library ASIN or null. The table shows `displayTitle ?? title`. The title sort stays on the requested title.
 - `type`: allowlist (`VALID_TYPES`); `all`, missing or any other value = no type filter (never reaches Prisma)
+- `inLibrary` (boolean, #212): the book is in the library or being imported (`deleteTouchesLibrary`); bulk delete skips these. Derived; `filePath`/`plexGuid`/`placedEbookFiles` are read, never returned
 
 **GET /api/admin/requests/recent** (Legacy)
 - Request ID, title, user, status, created/completed dates
@@ -100,10 +101,11 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - **URL State:** Filters/sort/page stored in URL query params (shareable, bookmarkable); defaults left out (`status`/`type` = all, page 1, pageSize 25); back/forward restores them; changing a filter resets to page 1
 - **API URL:** every string filter (`search`, `status`, `type`, `userId`, `sortBy`, `sortOrder`) is `encodeURIComponent`-encoded, so a crafted page URL cannot add API params
 - **Actions:** Delete, cancel, manual search, fetch ebook (via dropdown)
+- **Bulk actions (#212):** a checkbox column (page-only header select) and a bar fixed at the bottom: Approve, Deny, Cancel, Delete on the selected rows, one request at a time through the single routes; auto-refresh pauses while anything is selected. → [admin-features/bulk-request-actions.md](admin-features/bulk-request-actions.md)
 
 ## Features
 
-- Auto-refresh every 10 seconds (SWR)
+- Auto-refresh every 10 seconds (SWR); the requests table pauses it while rows are selected or a bulk run is going
 - Back to Home button in header
 - Admin role required
 - Real-time progress updates
