@@ -32,7 +32,7 @@ vi.mock('@/lib/utils/logger', async () => {
 });
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => ({ get: vi.fn() }) }));
 
-const ACCOUNT_TEXT = 'Too many sign-in attempts for this account.';
+const KNOWN_ACCOUNT_TEXT = 'Too many sign-in attempts for this account. Try again in 15 minutes.';
 
 let admin: AccountRow;
 
@@ -77,11 +77,12 @@ describe('sign-in limits: known-browser room, JSON-only bodies, busy answer', ()
     const known = await signIn(route, 'admin', RIGHT_PASSWORD, { cookie });
     expect(known.status).toBe(200);
 
-    // With the account at its limit as well, it gets the account answer, not a busy one
+    // With the account at its limit as well, it gets the plain account answer: not a busy one,
+    // and not the advice to use a known browser
     for (let i = 0; i < 10; i += 1) await signIn(route, 'admin', WRONG_PASSWORD, { ip: `198.51.100.${i + 1}` });
     const refused = await signIn(route, 'admin', RIGHT_PASSWORD, { cookie });
     expect(refused.status).toBe(429);
-    expect(String(refused.body.error)).toContain(ACCOUNT_TEXT);
+    expect(refused.body).toEqual({ error: KNOWN_ACCOUNT_TEXT });
   });
 
   it('gives one account at most 4 known-browser entries, however many browsers it has', async () => {
@@ -101,15 +102,70 @@ describe('sign-in limits: known-browser room, JSON-only bodies, busy answer', ()
     expect(SLOTS_PER_ACCOUNT).toBe(4);
   });
 
-  it('gives an account fresh known-browser entries after its password changes', async () => {
+  it('keeps one account at 4 known-browser entries however many times its password changes', async () => {
     const { knownBrowserBucket } = await import('@/lib/services/auth/known-browser');
-    const before = knownBrowserBucket(await cookieIssuedAgo(admin, 1), admin);
-    admin.authToken = `enc:hash-${admin.id}-changed`;
-    const after = knownBrowserBucket(await cookieIssuedAgo(admin, 1), admin);
+    const { _getBucketCount } = await limiter();
+    const buckets = new Set<string | null>();
 
-    expect(before).not.toBeNull();
-    expect(after).not.toBeNull();
-    expect(after).not.toBe(before);
+    for (let change = 0; change < 12; change += 1) {
+      admin.authToken = `enc:hash-${admin.id}-v${change}`;
+      for (let i = 0; i < 8; i += 1) {
+        const cookie = await cookieIssuedAgo(admin, i + 1);
+        buckets.add(knownBrowserBucket(cookie, admin));
+        expect((await signIn('local', 'admin', RIGHT_PASSWORD, { cookie })).status).toBe(200);
+      }
+      expect(_getBucketCount('signin-known-browser')).toBeLessThanOrEqual(4);
+    }
+    expect(buckets.has(null)).toBe(false);
+    expect(buckets.size).toBeLessThanOrEqual(4);
+  });
+
+  it("keeps a slot's count through a password change; old cookies end", async () => {
+    const { knownBrowserBucket } = await import('@/lib/services/auth/known-browser');
+    const { _getBucketUsage } = await limiter();
+    const before = await cookieIssuedAgo(admin, 1);
+    const slot = knownBrowserBucket(before, admin)!;
+    for (let i = 0; i < 3; i += 1) {
+      expect((await signIn('local', 'admin', WRONG_PASSWORD, { cookie: before })).status).toBe(401);
+    }
+
+    admin.authToken = `enc:hash-${admin.id}-changed`;
+    expect(knownBrowserBucket(before, admin)).toBeNull();
+    const sameSlot = await (async () => {
+      for (let age = 1; age < 200; age += 1) {
+        const cookie = await cookieIssuedAgo(admin, age);
+        if (knownBrowserBucket(cookie, admin) === slot) return cookie;
+      }
+      throw new Error('no cookie in the same slot');
+    })();
+
+    expect((await signIn('local', 'admin', WRONG_PASSWORD, { cookie: sameSlot })).status).toBe(401);
+    expect(_getBucketUsage('signin-known-browser', slot)).toBe(4);
+  });
+
+  it.each(SIGN_IN_ROUTES)('%s: a known browser whose slot is at its limit is counted like any other browser', async (route) => {
+    const { knownBrowserBucket } = await import('@/lib/services/auth/known-browser');
+    const { _getBucketUsage } = await limiter();
+    const cookie = await cookieIssuedAgo(admin, 60);
+    const accountKey = (await import('crypto')).createHash('sha256').update('admin').digest('hex').slice(0, 32);
+    for (let i = 0; i < 10; i += 1) {
+      expect((await signIn(route, 'admin', WRONG_PASSWORD, { cookie })).status).toBe(401);
+    }
+    expect(_getBucketUsage('signin-known-browser', knownBrowserBucket(cookie, admin)!)).toBe(10);
+    expect(_getBucketUsage('signin-account', accountKey)).toBe(0);
+
+    // A slot at its limit pauses no browser of the account while the account has room
+    expect((await signIn(route, 'admin', RIGHT_PASSWORD, { cookie })).status).toBe(200);
+    expect((await signIn(route, 'admin', WRONG_PASSWORD, { cookie })).status).toBe(401);
+    expect(_getBucketUsage('signin-account', accountKey)).toBe(1);
+
+    // Never both limits skipped: the account limit then applies, with the plain answer
+    for (let i = 0; i < 9; i += 1) await signIn(route, 'admin', WRONG_PASSWORD, { cookie, ip: `198.51.100.${i + 1}` });
+    const refused = await signIn(route, 'admin', RIGHT_PASSWORD, { cookie });
+    expect(refused.status).toBe(429);
+    expect(refused.body).toEqual({ error: KNOWN_ACCOUNT_TEXT });
+    const unknown = await signIn(route, 'admin', RIGHT_PASSWORD, { ip: '203.0.113.99' });
+    expect(String(unknown.body.error)).toContain("or sign in from a browser you've used with this account before");
   });
 
   describe.each(SIGN_IN_ROUTES)('%s route: JSON bodies only', (route) => {
@@ -118,7 +174,14 @@ describe('sign-in limits: known-browser room, JSON-only bodies, busy answer', ()
       const POST = await loadRoute(route);
       const headers: Record<string, string> = { 'x-forwarded-for': '203.0.113.7' };
       if (contentType) headers['content-type'] = contentType;
-      return POST(new NextRequest(`http://localhost${path}`, { method: 'POST', body, headers }));
+      // A string body gets a text/plain type of its own; bytes get none
+      const request = new NextRequest(`http://localhost${path}`, {
+        method: 'POST',
+        body: contentType ? body : new TextEncoder().encode(body),
+        headers,
+      });
+      expect(request.headers.get('content-type')).toBe(contentType);
+      return POST(request);
     };
     const json = JSON.stringify({ username: 'admin', password: RIGHT_PASSWORD });
 

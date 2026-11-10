@@ -3,17 +3,18 @@
  * Documentation: documentation/backend/services/auth.md
  *
  * A browser that has passed an account's password check gets a signed, httpOnly cookie.
- * Its later sign-in attempts for that account are counted under their own limit instead
- * of the account and address limits. The cookie carries no session and no access.
+ * Its later sign-in attempts for that account are counted under a known-browser limit
+ * instead of the account and address limits. The cookie carries no session and no access.
  *
  * Value: v1.<userId>.<issuedAtSeconds>.<mac>, mac = base64url HMAC-SHA256 over the user id,
  * the issue time and a hash of the account's stored password hash, keyed by a purpose key
  * derived from the access-token secret. A password change, a deleted account or a new
  * secret ends every cookie for that account.
  *
- * Counts: one account has at most SLOTS_PER_ACCOUNT known-browser buckets. A cookie's
- * slot comes from its MAC, so a fifth browser shares a slot (and its count) with one of
- * the others; no cookie is ended to make room.
+ * Counts: one account has at most SLOTS_PER_ACCOUNT known-browser buckets, keyed on the
+ * user id and slot, so password changes add none. A cookie's slot comes from its MAC, so
+ * browsers of one account may share a slot (and its count); no cookie is ended to make room.
+ * A slot's count stays through a password change until its window ends.
  */
 
 import crypto from 'crypto';
@@ -78,12 +79,12 @@ export function knownBrowserBucket(
   const expected = computeMac(userId, issuedAt, account.authToken);
   if (!crypto.timingSafeEqual(presented, expected)) return null;
 
-  // Slot from the recomputed MAC (encoding variants of one cookie share it); the password
-  // binding gives the account fresh buckets after a password change
+  // Slot from the recomputed MAC (encoding variants of one cookie share it). The bucket is
+  // keyed on the user id and slot only, so a password change gives the account no new buckets
   const slot = expected[0] % SLOTS_PER_ACCOUNT;
   return crypto
     .createHash('sha256')
-    .update(`${userId}|${passwordBinding(account.authToken)}|${slot}`)
+    .update(`${userId}|${slot}`)
     .digest('hex')
     .slice(0, BUCKET_ID_CHARS);
 }

@@ -5,8 +5,10 @@
  * Shared by POST /api/auth/admin/login and POST /api/auth/local/login. Each password
  * check is reserved first, in one synchronous step, and refunded when the password is
  * right:
- * - a browser holding a valid known-browser cookie for the account: its own bucket only
- *   (when that table has no room, it is counted like any other browser);
+ * - a browser holding a valid known-browser cookie for the account: one of the account's
+ *   known-browser buckets, which it may share with other browsers of the account (when
+ *   that bucket is at its limit or its table has no room, it is counted like any other
+ *   browser);
  * - any other browser: the account bucket and the client address bucket, all or none.
  * Unknown names are counted like real ones and get a password check against a fixed
  * dummy hash, so both answer the same way.
@@ -52,26 +54,25 @@ export function loggedUsername(username: unknown): string {
   return String(username).slice(0, LOGGED_USERNAME_CHARS);
 }
 
-function refusalText(refusal: RateLimitRefusal): string {
+/** `knownBrowser`: the browser holds a valid cookie for the account and was counted like any other */
+function refusalText(refusal: RateLimitRefusal, knownBrowser: boolean): string {
   const wait = formatRetryAfter(refusal.retryAfterSeconds);
   if (refusal.reason === 'full') {
     return `Sign-in is busy. Try again in ${wait}.`;
   }
-  if (refusal.namespace === 'signin-known-browser') {
-    return `Too many sign-in attempts from this browser. Try again in ${wait}.`;
-  }
   if (refusal.namespace === 'signin-address') {
     return `Too many sign-in attempts from your network. Try again in ${wait}.`;
+  }
+  if (knownBrowser) {
+    return `Too many sign-in attempts for this account. Try again in ${wait}.`;
   }
   return `Too many sign-in attempts for this account. Try again in ${wait}, or sign in from a browser you've used with this account before.`;
 }
 
-function logRefusal(refusal: RateLimitRefusal, username: string, account: SignInAccount | null): void {
+function logRefusal(refusal: RateLimitRefusal, username: string): void {
   if (!refusal.firstRefusal) return;
   const minutes = Math.max(1, Math.ceil(refusal.retryAfterSeconds / 60));
-  if (refusal.namespace === 'signin-known-browser') {
-    logger.warn('Sign-in attempts paused for a known browser', { userId: account?.id, minutes });
-  } else if (refusal.namespace === 'signin-address') {
+  if (refusal.namespace === 'signin-address') {
     logger.warn('Sign-in attempts paused for an address', { address: refusal.key, minutes });
   } else {
     logger.warn('Sign-in attempts paused for an account', { username: loggedUsername(username), minutes });
@@ -89,8 +90,9 @@ export function createSignInGuard(request: NextRequest): SignInGuard {
       account = found;
       const browser = knownBrowserBucket(readKnownBrowserCookie(request), found);
       let result = browser ? reserve([{ namespace: 'signin-known-browser', key: browser }]) : null;
-      // No browser cookie, or no room for its bucket: the account and address limits apply
-      if (!result || (!result.ok && result.refusal.reason === 'full')) {
+      // No browser cookie, or its bucket is at its limit or has no room: the account and
+      // address limits apply, exactly as for a browser without the cookie
+      if (!result || !result.ok) {
         result = reserve([
           {
             namespace: 'signin-account',
@@ -100,8 +102,9 @@ export function createSignInGuard(request: NextRequest): SignInGuard {
         ]);
       }
       if (!result.ok) {
-        logRefusal(result.refusal, normalizedUsername, found);
-        return { ok: false, error: refusalText(result.refusal), retryAfterSeconds: result.refusal.retryAfterSeconds };
+        logRefusal(result.refusal, normalizedUsername);
+        const error = refusalText(result.refusal, browser !== null);
+        return { ok: false, error, retryAfterSeconds: result.refusal.retryAfterSeconds };
       }
       reservations = result.reservations;
       return { ok: true };

@@ -33,7 +33,6 @@ vi.mock('@/lib/utils/logger', async () => {
 });
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => ({ get: vi.fn() }) }));
 
-const BROWSER_TEXT = 'Too many sign-in attempts from this browser. Try again in 15 minutes.';
 const NINETY_DAYS = 90 * 24 * 60 * 60;
 
 let admin: AccountRow;
@@ -161,19 +160,12 @@ describe('known-browser cookie', () => {
     expect((await signIn('local', 'admin', RIGHT_PASSWORD, { cookie: sessionToken })).status).toBe(429);
   });
 
-  it.each(SIGN_IN_ROUTES)('%s: a known browser has its own limit and leaves the account count alone', async (route) => {
+  it.each(SIGN_IN_ROUTES)('%s: a known browser is counted in its known-browser slot and leaves the account count alone', async (route) => {
     const cookie = await knownCookie(route);
     for (let i = 0; i < 10; i += 1) {
       expect((await signIn(route, 'admin', WRONG_PASSWORD, { cookie })).status).toBe(401);
     }
-
-    const refused = await signIn(route, 'admin', RIGHT_PASSWORD, { cookie });
-    expect(refused.status).toBe(429);
-    expect(refused.body).toEqual({ error: BROWSER_TEXT });
-    expect(loggerMock.warn).toHaveBeenCalledWith('Sign-in attempts paused for a known browser', {
-      userId: admin.id,
-      minutes: 15,
-    });
+    expect(loggerMock.warn).not.toHaveBeenCalled();
 
     // Its attempts were never charged to the account: an unknown browser is still checked
     const comparesBefore = bcryptMock.compare.mock.calls.length;
