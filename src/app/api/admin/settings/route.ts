@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { REQUESTER_TAG_SETTING_KEY } from '@/lib/constants/requester-tags';
 import { loadRequesterTagWarnings } from '@/lib/services/audiobookshelf/requester-tag-users';
+import { FILE_PLACEMENT_KEY, LINK_FALLBACK_KEY, METADATA_OPF_KEY, parseFilePlacement, parseLinkFallbackNote } from '@/lib/utils/library-placement';
 
 const logger = RMABLogger.create('API.Admin.Settings');
 
@@ -147,6 +148,9 @@ export async function GET(request: NextRequest) {
         fileRenameTemplate: configMap.get('file_rename_template') || '{title}',
         fileChmod: configMap.get('file_chmod') || '664',
         dirChmod: configMap.get('dir_chmod') || '775',
+        filePlacement: parseFilePlacement(configMap.get(FILE_PLACEMENT_KEY)),
+        metadataOpfEnabled: configMap.get(METADATA_OPF_KEY) === 'true',
+        linkFallbackLast: parseLinkFallbackNote(configMap.get(LINK_FALLBACK_KEY)),
       },
       ebook: {
         // New granular source toggles (with migration from legacy ebook_sidecar_enabled)

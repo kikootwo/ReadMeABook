@@ -29,6 +29,7 @@ import { addAutoBlock } from '../services/blocklist.service';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createMergeProgressReporter } from '../utils/merge-progress';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
+import { readImportLibrarySettings, recordLinkOutcome, refuseLinkedImport } from './organize-library-placement';
 import { applyPostImportCategory } from './post-import-category';
 import { triggerScanAfterImport } from './post-import-scan';
 import { preferredEbookFile } from '../utils/import-inventory';
@@ -195,10 +196,12 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
     // One read of the tagging switch: the tag details lookup and the organizer both use it
-    const metadataTaggingEnabled = await readMetadataTaggingEnabled(logger);
+    // Placement and metadata (Audiobookshelf: copy or hard link; tags, metadata.opf or none)
+    const library = await readImportLibrarySettings(await readMetadataTaggingEnabled(logger), logger);
+    const metadataTaggingEnabled = library.tagging;
     // Started now, awaited just before organize(): the setup below does not wait on Audible.
     // The no-op handler keeps a rejection from going unhandled if that setup throws first.
-    const tagDetailsPending = resolveTagDetails(audiobook.description, loadAudibleDetails, metadataTaggingEnabled, logger);
+    const tagDetailsPending = resolveTagDetails(audiobook.description, loadAudibleDetails, metadataTaggingEnabled || library.opf, logger);
     tagDetailsPending.catch(() => undefined);
 
     // Get file organizer (reads media_dir from database config)
@@ -253,14 +256,21 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         metadataTaggingEnabled,
         stopInPlaceDiscLayout: !downloadHistoryId && typeof cleanupSource === 'boolean',
         onMergeProgress: (percent) => mergeProgress.report(percent),
+        filePlacement: library.placement,
+        writeOpf: library.opf,
       }
     ).finally(() => mergeProgress.settle());
 
+    // Hard link only refused the book: a client download waits in `warn` for Retry (manual imports fail below)
+    if (result.linkRefused && (downloadHistoryId || typeof cleanupSource !== 'boolean')) {
+      return await refuseLinkedImport(requestId, result.linkRefused, logger);
+    }
     if (!result.success) {
       throw new Error(`File organization failed: ${result.errors.join(', ')}`);
     }
 
     logger.info(`Successfully moved ${result.filesMovedCount} files to ${result.targetPath}`);
+    await recordLinkOutcome(result, audiobook.title, logger);
 
     const coercionConfig = await prisma.configuration.findUnique({
       where: { key: 'plex_format_coercion_enabled' },

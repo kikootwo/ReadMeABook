@@ -9,8 +9,40 @@ import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { FILE_PLACEMENT_KEY, METADATA_OPF_KEY, isFilePlacement, isLinkPlacement, parseFilePlacement, placementConflict } from '@/lib/utils/library-placement';
 
 const logger = RMABLogger.create('API.Admin.Settings.Paths');
+
+/**
+ * Why this save is refused, or null. filePlacement and metadataOpfEnabled: validated when
+ * present, unchanged when absent. Tagging and merge keep their own semantics (absent means
+ * true and false, as they are then saved), so the check sees what will be stored.
+ */
+async function checkLibraryPlacement(body: {
+  filePlacement: unknown;
+  metadataOpfEnabled: unknown;
+  metadataTaggingEnabled: unknown;
+  chapterMergingEnabled: unknown;
+}): Promise<string | null> {
+  if (body.filePlacement !== undefined && !isFilePlacement(body.filePlacement)) {
+    return 'File placement must be copy, hardlink or hardlink_only';
+  }
+  if (body.metadataOpfEnabled !== undefined && typeof body.metadataOpfEnabled !== 'boolean') {
+    return 'metadataOpfEnabled must be true or false';
+  }
+  const stored = body.filePlacement === undefined
+    ? (await prisma.configuration.findUnique({ where: { key: FILE_PLACEMENT_KEY } }))?.value
+    : body.filePlacement;
+  const placement = parseFilePlacement(stored);
+  if (!isLinkPlacement(placement)) return null;
+  return placementConflict({
+    backendMode: await getConfigService().getBackendMode(),
+    placement,
+    // As stored below (String(value ?? default)) and read back (=== 'true')
+    tagging: String(body.metadataTaggingEnabled ?? true) === 'true',
+    merge: String(body.chapterMergingEnabled ?? false) === 'true',
+  });
+}
 
 export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -18,7 +50,7 @@ export async function PUT(request: NextRequest) {
       try {
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
-        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, plexFormatCoercionEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = bodyResult.data;
+        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, plexFormatCoercionEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod, filePlacement, metadataOpfEnabled } = bodyResult.data;
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -48,6 +80,12 @@ export async function PUT(request: NextRequest) {
             { error: 'Directory permissions must be 3-4 octal digits (0-7), e.g. 775' },
             { status: 400 }
           );
+        }
+
+        // File placement and metadata.opf (Audiobookshelf): checked on the state this save leaves
+        const placementError = await checkLibraryPlacement({ filePlacement, metadataOpfEnabled, metadataTaggingEnabled, chapterMergingEnabled });
+        if (placementError) {
+          return NextResponse.json({ error: placementError }, { status: 400 });
         }
 
         // Update configuration
@@ -182,6 +220,22 @@ export async function PUT(request: NextRequest) {
           });
         }
 
+        // Absent means unchanged for these two keys (older clients don't send them)
+        if (filePlacement !== undefined) {
+          await prisma.configuration.upsert({
+            where: { key: FILE_PLACEMENT_KEY },
+            update: { value: filePlacement },
+            create: { key: FILE_PLACEMENT_KEY, value: filePlacement, category: 'automation', description: 'Audiobookshelf: copy audiobooks into the library or hard-link them to the download' },
+          });
+        }
+        if (metadataOpfEnabled !== undefined) {
+          await prisma.configuration.upsert({
+            where: { key: METADATA_OPF_KEY },
+            update: { value: String(metadataOpfEnabled) },
+            create: { key: METADATA_OPF_KEY, value: String(metadataOpfEnabled), category: 'automation', description: 'Audiobookshelf: write metadata.opf into each book folder' },
+          });
+        }
+
         logger.info('Paths settings updated');
 
         // Clear config cache for all updated keys so services get fresh values
@@ -197,6 +251,8 @@ export async function PUT(request: NextRequest) {
         configService.clearCache('file_rename_template');
         configService.clearCache('file_chmod');
         configService.clearCache('dir_chmod');
+        configService.clearCache(FILE_PLACEMENT_KEY);
+        configService.clearCache(METADATA_OPF_KEY);
 
         // Invalidate all download client singletons to force reload of download_dir
         const { invalidateDownloadClientManager } = await import('@/lib/services/download-client-manager.service');
