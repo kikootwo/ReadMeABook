@@ -29,6 +29,7 @@ import {
 } from './lib/runner.mjs';
 import { fetchAndLoad } from './lib/fetch-image.mjs';
 import { startExecBridge } from './lib/exec-bridge.mjs';
+import { stopFlow } from './lib/stop-flow.mjs';
 
 const RELEASE_REPO = 'ghcr.io/kikootwo/readmeabook';
 const UNIT_TIMEOUT_MS = 30 * 60_000;
@@ -216,6 +217,7 @@ async function stackOrPreview(opts) {
       ctx.summary.execBridge = `on (127.0.0.1:${ctx.bridge.port})`;
     } else ctx.summary.execBridge = 'off (tainted)';
     if (opts['upgrade-from']) status = await upgradeFlow(ctx, image);
+    else if (opts['stop-specs']) status = await stopFlow(ctx, image, { up, playwright, saveLogs });
     else {
       const specs = opts.command === 'preview' ? ['preview-seed.spec.ts'] : opts.specs.split(',').map((s) => s.trim()).filter(Boolean);
       // --isolate-specs: one fresh stack (down -v, up) per spec filter, same images, one runner phase each.
