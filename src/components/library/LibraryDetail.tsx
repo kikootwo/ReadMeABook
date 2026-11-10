@@ -10,12 +10,12 @@
 
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import { BookCover } from '@/components/audiobooks/BookCover';
 import { StatusBadge } from '@/components/requests/StatusBadge';
 import { useLibraryRequestDetail, withRequestStatus } from '@/lib/hooks/useLibraryRequestDetail';
 import type { LibraryItem, LibraryResponse } from '@/lib/library-view/types';
-import { LibraryDialog } from './LibraryDialog';
+import { LibraryDialog, useChildDialog } from './LibraryDialog';
 import { LibraryActions } from './LibraryActions';
 import { LibraryHistory, formatDateTime } from './LibraryHistory';
 import { SOURCE_LABELS, TONE_BADGE, coverTone, formatDuration, sizeLabel } from './card-display';
@@ -52,7 +52,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function LibraryDetail({ item: listed, viewer, user, live, offPage = false, onClose, onChanged }: LibraryDetailProps) {
-  const [childOpen, setChildOpen] = useState(false);
+  const { childOpen, onChildOpenChange } = useChildDialog(!!listed && !!viewer);
   const gatedRequestId = listed?.canSeeRequestDetails && listed.request ? listed.request.id : null;
   // Off the pages and out of live, nothing else follows the book: the request's own fetch does
   const detail = useLibraryRequestDetail(gatedRequestId, live, !!listed && offPage && !live);
@@ -148,7 +148,7 @@ export function LibraryDetail({ item: listed, viewer, user, live, offPage = fals
               actions={actions}
               customSearchTerms={detail.loaded || detail.error ? detail.history?.customSearchTerms ?? null : undefined}
               onChanged={changed}
-              onChildOpenChange={setChildOpen}
+              onChildOpenChange={onChildOpenChange}
             />
           </Section>
         )}

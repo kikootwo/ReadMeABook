@@ -4,13 +4,14 @@
  *
  * z-[45]: above the sticky header (z-40), below toasts (z-50) and the stacked Interactive search
  * modal (z-[60]). While `childOpen` is set, a child dialog owns the keyboard: Esc and the Tab trap
- * pause. The scroll lock holds while the child is open and is set again when it closes (its
- * cleanup clears it).
+ * pause. The scroll lock holds while the child is open. The child clears it in its own effect
+ * cleanup when it closes; useChildDialog sets it again inside the close report itself (same commit),
+ * so the page behind is never unlocked between the two.
  */
 
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 interface LibraryDialogProps {
@@ -22,6 +23,27 @@ interface LibraryDialogProps {
   variant?: 'center' | 'side';
   childOpen?: boolean;
   children: React.ReactNode;
+}
+
+/**
+ * Open state of a child dialog (Interactive search) opened from inside an open LibraryDialog. The
+ * child reports from an effect, which runs in the same commit as its own cleanup (that clears the
+ * body lock), so the open-to-closed report sets the lock again at once. An effect in the dialog
+ * would wait for the next commit and leave the page unlocked in between. `active`: the dialog is
+ * open; closing it forgets the last report, so a fresh mount (it reports closed) never locks.
+ */
+export function useChildDialog(active: boolean): { childOpen: boolean; onChildOpenChange: (open: boolean) => void } {
+  const [childOpen, setChildOpen] = useState(false);
+  const reportedOpen = useRef(false);
+  useEffect(() => {
+    if (!active) reportedOpen.current = false;
+  }, [active]);
+  const onChildOpenChange = useCallback((open: boolean) => {
+    if (reportedOpen.current && !open) document.body.style.overflow = 'hidden';
+    reportedOpen.current = open;
+    setChildOpen(open);
+  }, []);
+  return { childOpen: active && childOpen, onChildOpenChange };
 }
 
 const FOCUSABLE =
@@ -61,13 +83,6 @@ export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', c
       document.body.style.overflow = previous;
     };
   }, [open]);
-
-  // A child's cleanup clears the lock when it closes: set it again.
-  const childWasOpen = useRef(false);
-  useEffect(() => {
-    if (open && !childOpen && childWasOpen.current) document.body.style.overflow = 'hidden';
-    childWasOpen.current = childOpen;
-  }, [open, childOpen]);
 
   // Esc and the Tab trap (paused while a child dialog is open).
   useEffect(() => {

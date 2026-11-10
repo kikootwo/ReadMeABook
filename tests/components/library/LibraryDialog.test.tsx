@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { LibraryDialog } from '@/components/library/LibraryDialog';
+import { LibraryDialog, useChildDialog } from '@/components/library/LibraryDialog';
 
 /** A stand-in for InteractiveTorrentSearchModal: portaled outside, clears the scroll lock on close. */
 function Child({ onClose }: { onClose: () => void }) {
@@ -32,13 +32,38 @@ function Child({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Harness({ onClose = vi.fn() }: { onClose?: () => void }) {
-  const [open, setOpen] = useState(false);
+/**
+ * Like LibraryActions: owns the child's open state and reports it from an effect, one commit after
+ * the child mounts (and in the same commit as its cleanup). `seen` records the body lock right
+ * after each report.
+ */
+function Actions({ onChildOpenChange, seen }: { onChildOpenChange: (open: boolean) => void; seen: string[] }) {
   const [child, setChild] = useState(false);
+  React.useEffect(() => {
+    onChildOpenChange(child);
+    seen.push(document.body.style.overflow);
+  }, [child, onChildOpenChange, seen]);
+  return (
+    <>
+      <button type="button" onClick={() => setChild(true)}>
+        open child
+      </button>
+      {child && <Child onClose={() => setChild(false)} />}
+    </>
+  );
+}
+
+function Harness({ onClose = vi.fn(), seen = [] }: { onClose?: () => void; seen?: string[] }) {
+  const [open, setOpen] = useState(false);
+  const { childOpen, onChildOpenChange } = useChildDialog(open);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}>
         opener
+      </button>
+      {/* The page closing the dialog by itself (LibraryDetail renders nothing without an item) */}
+      <button type="button" onClick={() => setOpen(false)}>
+        force close
       </button>
       <LibraryDialog
         open={open}
@@ -47,15 +72,12 @@ function Harness({ onClose = vi.fn() }: { onClose?: () => void }) {
           setOpen(false);
         }}
         labelledBy="t"
-        childOpen={child}
+        childOpen={childOpen}
       >
         <h2 id="t">Title</h2>
         <button type="button">first</button>
-        <button type="button" onClick={() => setChild(true)}>
-          open child
-        </button>
+        {open && <Actions onChildOpenChange={onChildOpenChange} seen={seen} />}
         <button type="button">last</button>
-        {child && <Child onClose={() => setChild(false)} />}
       </LibraryDialog>
     </>
   );
@@ -108,6 +130,34 @@ describe('LibraryDialog', () => {
     expect(document.body.style.overflow).toBe('hidden'); // the child's cleanup cleared it; set again
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.body.style.overflow).toBe('');
+  });
+
+  it('the lock is back in the same commit the child closes in (no later render needed)', async () => {
+    const user = userEvent.setup();
+    const seen: string[] = [];
+    render(<Harness seen={seen} />);
+    await user.click(screen.getByText('opener'));
+    await user.click(screen.getByText('open child'));
+    await user.click(screen.getByText('close child'));
+    expect(seen.at(-1)).toBe('hidden'); // read right after the close report, before any re-render
+    await user.keyboard('{Escape}');
+    expect(document.body.style.overflow).toBe('');
+  });
+
+  it('the dialog closed while its child is open: unlocked, and a reopen is not left locked on close', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByText('opener'));
+    await user.click(screen.getByText('open child'));
+    fireEvent.click(screen.getByRole('dialog', { name: 'Title' }).parentElement!); // paused: no close
+    expect(screen.getByRole('dialog', { name: 'Title' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('force close'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+    await user.click(screen.getByText('opener')); // the fresh child reports closed: no lock of its own
+    expect(document.body.style.overflow).toBe('hidden');
+    await user.keyboard('{Escape}');
     expect(document.body.style.overflow).toBe('');
   });
 
