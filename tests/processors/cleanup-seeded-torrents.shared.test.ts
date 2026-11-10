@@ -4,12 +4,12 @@
  *
  * The seeding cleanup removes a shared torrent only when every request using it would let it go:
  * each other active request is finished (an audiobook also imported by RMAB since it took the torrent)
- * and its own indexer's seeding requirement is met.
- * `findMany` answers the page query and the shared-torrent query from fixture requests.
+ * and its own indexer's seeding requirement is met. Deleted and cancelled requests: holds.test.ts.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
+import { HASH, SLOW, UNCONFIGURED, sharedTorrentFixtures } from '../helpers/shared-torrent-fixtures';
 
 const prismaMock = createPrismaMock();
 const configMock = vi.hoisted(() => ({ get: vi.fn() }));
@@ -21,110 +21,10 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => downloadClientManagerMock,
 }));
 
-const HASH = 'abcdef0123456789abcdef0123456789abcdef01';
-// 40 minutes seeded: IndexerA (30 min) is met, Slow (600 min) is not, Unconfigured seeds forever
-const INDEXERS = [
-  { id: 1, name: 'IndexerA', protocol: 'torrent', seedingTimeMinutes: 30, ratioLimit: 0 },
-  { id: 2, name: 'Slow', protocol: 'torrent', seedingTimeMinutes: 600, ratioLimit: 0 },
-];
-
-interface Fixture {
-  id: string;
-  type: string;
-  status: string;
-  deletedAt: Date | null;
-  audiobook: { status: string; filePath: string | null; completedAt: Date | null } | null;
-  downloadHistory: Record<string, unknown>[];
-}
-
-let requests: Fixture[] = [];
-
-/** The parts of the two findMany calls (page, shared-torrent) the fixtures answer */
-interface FindManyArgs {
-  where?: {
-    AND?: { id?: { gt?: string } }[];
-    id?: { not?: string };
-    downloadHistory?: { some?: { torrentHash?: { in?: string[] } } };
-  };
-}
-interface UpdateArgs { where: { id: string }; data?: { downloadStatus?: string } }
-interface UpdateManyArgs { where: { id: { in: string[] } }; data?: { downloadStatus?: string } }
-
-function req(id: string, fields: Partial<Fixture> = {}, row: Record<string, unknown> = {}): Fixture {
-  return {
-    id,
-    type: 'audiobook',
-    status: 'available',
-    deletedAt: null,
-    // RMAB's organize completed the book after the row took the torrent
-    audiobook: { status: 'completed', filePath: `/library/${id}`, completedAt: new Date('2026-10-01T13:00:00Z') },
-    downloadHistory: [{
-      id: `dh-${id}`,
-      selected: true,
-      downloadStatus: 'completed',
-      indexerName: 'IndexerA',
-      indexerId: 1,
-      torrentHash: HASH,
-      downloadClientId: HASH,
-      downloadClient: 'qbittorrent',
-      addedByRmab: true,
-      createdAt: new Date('2026-10-01T12:00:00Z'),
-      ...row,
-    }],
-    ...fields,
-  };
-}
-
-function setup(fixtures: Fixture[]) {
-  requests = fixtures;
-  configMock.get.mockResolvedValue(JSON.stringify(INDEXERS));
-  const client = {
-    clientType: 'qbittorrent',
-    protocol: 'torrent',
-    probeDownload: vi.fn(async () => (client.deleteDownload.mock.calls.length
-      ? { found: false }
-      : { found: true, info: { id: HASH, name: 'Series Pack', status: 'seeding', progress: 1, seedingTime: 60 * 40, ratio: 0 } })),
-    deleteDownload: vi.fn().mockResolvedValue(undefined),
-  };
-  downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
-  return client;
-}
-
-/** Download rows the run marked 'removed' (one by one or in one updateMany) */
-function rowsMarkedRemoved(): string[] {
-  const one = (prismaMock.downloadHistory.update.mock.calls as [UpdateArgs][])
-    .filter(([args]) => args.data?.downloadStatus === 'removed')
-    .map(([args]) => args.where.id);
-  const many = (prismaMock.downloadHistory.updateMany.mock.calls as [UpdateManyArgs][])
-    .filter(([args]) => args.data?.downloadStatus === 'removed')
-    .flatMap(([args]) => args.where.id.in);
-  return [...new Set([...one, ...many])].sort();
-}
-
-async function run() {
-  const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
-  return processCleanupSeededTorrents({ jobId: 'job-283' });
-}
+const { req, setup, rowsMarkedRemoved, run } = sharedTorrentFixtures(prismaMock, configMock, downloadClientManagerMock);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requests = [];
-  prismaMock.request.findMany.mockImplementation(async (args: FindManyArgs) => {
-    const where = args?.where ?? {};
-    // The cancelled-download pass (its own tests) finds no candidates here
-    if (where.AND?.some((c) => (c as { status?: string }).status === 'cancelled')) return [];
-    if (where.AND) {
-      // The page query: one page, every fixture with a completed selected row, in the order given
-      return where.AND.some((c) => c.id?.gt) ? [] : requests
-        .filter((r) => r.downloadHistory.some((h) => h.selected && h.downloadStatus === 'completed'));
-    }
-    // The shared-torrent query: other non-deleted requests whose selected row is this torrent
-    const forms = where.downloadHistory?.some?.torrentHash?.in ?? [];
-    return requests
-      .filter((r) => r.id !== where.id?.not && r.deletedAt === null)
-      .filter((r) => r.downloadHistory.some((h) => h.selected && forms.includes(h.torrentHash as string)))
-      .map((r) => ({ ...r, downloadHistory: r.downloadHistory.filter((h) => forms.includes(h.torrentHash as string)) }));
-  });
 });
 
 describe('cleanup of a torrent shared by several requests (#283)', () => {
@@ -177,8 +77,8 @@ describe('cleanup of a torrent shared by several requests (#283)', () => {
   });
 
   it.each([
-    ['its own indexer asks for longer seeding', { indexerName: 'Slow', indexerId: 2 }],
-    ['its own indexer is not configured (seeds forever)', { indexerName: 'Unconfigured', indexerId: 9 }],
+    ['its own indexer asks for longer seeding', SLOW],
+    ['its own indexer is not configured (seeds forever)', UNCONFIGURED],
     ['it was recorded for another download client', { downloadClient: 'transmission' }],
   ])('keeps it when a finished request still needs it: %s', async (_label, row) => {
     const client = setup([req('req-a'), req('req-b', {}, row)]);
@@ -229,14 +129,23 @@ describe('cleanup of a torrent shared by several requests (#283)', () => {
     expect(result.errors).toBe(0);
   });
 
-  it('still ignores soft-deleted requests: the active owner removes it and the soft-deleted one is hard-deleted', async () => {
+  it('a soft-deleted request whose own rule is met lets go: the active owner removes it, marks its row, and it is hard-deleted', async () => {
     const client = setup([req('req-a'), req('req-b', { deletedAt: new Date() })]);
 
     const result = await run();
 
     expect(client.deleteDownload).toHaveBeenCalledTimes(1);
     expect(prismaMock.request.delete).toHaveBeenCalledWith({ where: { id: 'req-b' } });
-    expect(rowsMarkedRemoved()).toEqual(['dh-req-a']);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-a', 'dh-req-b']);
     expect(result.errors).toBe(0);
+  });
+
+  it('marks only rows recorded for the configured client type', async () => {
+    const client = setup([req('req-a'), req('req-b', { status: 'cancelled' }, { downloadClient: 'transmission' })]);
+
+    await run();
+
+    expect(client.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-a']);
   });
 });

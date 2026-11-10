@@ -35,11 +35,10 @@ Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLo
 | Partial: `downloading`/`queued`/`paused` otherwise | holds, then `deleteDownload(id, true)`, row `removed`. Any seeding rule (Q4: a partial earns no seed time) |
 
 **Holds** (any hit = `kept_shared`):
-- Other non-deleted request with a selected row on the hash (`otherActiveRequestsSharingTorrent`); `cancelled` siblings never hold, nor one whose rows on the hash are all `removed`. Partial: any holds. Finished: `siblingKeepsTorrent` (finished, imported since, own rule met by the same answer).
-- Finished only: soft-deleted request with a non-`removed` selected row on the hash (`softDeletedHoldersOfTorrent`) holds until its own indexer rule is met by the same answer (other client type: holds). Never holds a partial.
+- Other requests on the hash, active and (finished torrent only) soft-deleted: `torrentHolds()`, the table in [request-deletion.md](request-deletion.md#shared-torrent-holds) (#545). Partial: any active request with a live row holds; deleted and cancelled ones never. Finished: active per `siblingKeepsTorrent` (finished, imported since, own rule met by the same answer); a deleted or cancelled request holds only through a row that owns the torrent, until its own rule is met (cancelled + unlimited: forever).
 - Same book + type, another request `searching`/`downloading` with no selected row (`sameBookGrabInProgress`).
 - Re-read right before the delete: request still `cancelled`, not deleted, row still selected and not `removed`.
-- After a delete: other requests' selected rows for the hash are marked `removed` too.
+- After a delete: other requests' selected rows for the hash recorded for this client type are marked `removed` too (`markOtherRowsRemoved`).
 
 ## Usenet (cancel time only, `cancelled-download-usenet.ts`)
 - Only `addedByRmab === true` (null/false: `kept_not_owned`).
@@ -69,10 +68,9 @@ Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLo
 ## Known limits
 - Re-request hard-deletes the cancelled request and its rows (`request-rerequest.ts`): after that nothing tracks what the cancel left (kept, not lost).
 - Manual/bulk import recycles a cancelled request (`processing`). A row the cancel recorded `completed` then makes it a seeding-pass candidate for its old torrent once `available` (policy: removed when its rule is met).
-- Requests cancelled before `cancelledAt` existed (NULL) are never swept.
+- Requests cancelled before `cancelledAt` existed (NULL) are never swept. Since #545 they no longer keep another request's torrent past their own rule, but a torrent whose only owner is such a cancel stays (a request that only took it over can't remove it).
 - A newest selected row recorded `failed` counts as gone (`none` at cancel; `NOT_GONE` drops it from the pass): a failed partial torrent RMAB added stays in the client.
 - The pass handles only the newest selected row, but its candidate query matches a request with any selected live torrent row: a request whose newest row is gone and an older one is live costs one read every run, with no client call.
-- Soft-deleted-holder gap in request delete and the existing seeding pass: #545.
 
 ## Related
 [request-deletion.md](request-deletion.md), [backend/services/scheduler.md](../backend/services/scheduler.md), [backend/services/api-tokens.md](../backend/services/api-tokens.md), [phase3/download-clients.md](../phase3/download-clients.md#torrent-ownership-423), [backend/services/jobs.md](../backend/services/jobs.md)

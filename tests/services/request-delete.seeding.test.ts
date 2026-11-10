@@ -4,6 +4,7 @@
  *
  * Deleting a request applies the same seeding rule as the scheduled seeding
  * cleanup: seeding time AND ratio limit, 0 disables a criterion, both 0 = unlimited.
+ * Deleted and cancelled requests on the same torrent: request-delete.shared-holds.test.ts.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,6 +30,11 @@ vi.mock('@/lib/services/request-delete-files', () => ({
   deleteBackendItem: vi.fn(async () => undefined),
   deleteLibraryRecords: vi.fn(async () => undefined),
 }));
+
+/** Another request's row on the same torrent (RMAB added it; it took the torrent before this delete) */
+const SIBLING_ROW = {
+  id: 'dh-2', indexerId: 1, indexerName: 'Tracker', downloadClient: 'qbittorrent', createdAt: new Date(), downloadStatus: 'downloading', addedByRmab: true,
+};
 
 interface Scenario {
   seedingTimeMinutes: number;
@@ -149,7 +155,9 @@ describe('deleteRequest seeding rule', () => {
     ['incomplete', 'downloading'],
   ])('never removes a torrent (%s) that another active request still uses', async (_label, downloadStatus) => {
     prismaMock.request.findMany.mockImplementation(async (args: any) =>
-      args?.where?.downloadHistory?.some?.torrentHash?.in?.includes('hash-1') ? [{ id: 'req-2', status: 'downloaded' }] : []
+      args?.where?.deletedAt === null && args?.where?.downloadHistory?.some?.torrentHash?.in?.includes('hash-1')
+        ? [{ id: 'req-2', status: 'downloaded', type: 'audiobook', audiobook: null, downloadHistory: [SIBLING_ROW] }]
+        : []
     );
 
     const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2, downloadStatus,
@@ -164,22 +172,22 @@ describe('deleteRequest seeding rule', () => {
     }));
   });
 
-  it('keeps a torrent another request uses even when that request is finished and done seeding (#283)', async () => {
-    // The seeding cleanup may remove it then; deleting one request never does
-    prismaMock.request.findMany.mockImplementation(async (args: { where?: { downloadHistory?: { some?: { torrentHash?: { in?: string[] } } } } }) =>
-      args?.where?.downloadHistory?.some?.torrentHash?.in?.includes('hash-1')
-        ? [{
-          id: 'req-2', type: 'audiobook', status: 'available',
-          downloadHistory: [{ id: 'dh-2', indexerId: 1, indexerName: 'Tracker', downloadClient: 'qbittorrent' }],
-        }]
+  it.each([
+    ['removes', 'imported by RMAB since it took the torrent', new Date(Date.now() + 60_000), 1],
+    ['keeps', 'with no RMAB import since it took the torrent', null, 0],
+  ])('%s a torrent whose other request is finished and done seeding, %s (same rule as the seeding cleanup, #545)', async (_verb, _label, completedAt, removed) => {
+    const book = { status: 'completed', filePath: '/library/Book', completedAt };
+    prismaMock.request.findMany.mockImplementation(async (args: { where?: { deletedAt?: unknown; downloadHistory?: { some?: { torrentHash?: { in?: string[] } } } } }) =>
+      args?.where?.deletedAt === null && args?.where?.downloadHistory?.some?.torrentHash?.in?.includes('hash-1')
+        ? [{ id: 'req-2', type: 'audiobook', status: 'available', audiobook: book, downloadHistory: [{ ...SIBLING_ROW, downloadStatus: 'completed' }] }]
         : []
     );
 
     const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2 });
 
-    expect(client.deleteDownload).not.toHaveBeenCalled();
-    expect(result.torrentsKeptShared).toBe(1);
-    expect(result.torrentsRemoved).toBe(0);
+    expect(client.deleteDownload).toHaveBeenCalledTimes(removed);
+    expect(result.torrentsKeptShared).toBe(1 - removed);
+    expect(result.torrentsRemoved).toBe(removed);
   });
 
   it('keeps a torrent for unlimited seeding only when both criteria are 0', async () => {
