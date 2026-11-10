@@ -15,11 +15,12 @@ import { filterBlockedResults } from '../utils/filter-blocked-results';
 import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { isLastAttempt, notifyChainEndedFailed, notifyRequestError, type BullAttempt } from './client-failure';
-import { PAST_SEARCH_STATUSES } from '../constants/request-statuses';
+import { PAST_SEARCH_STATUSES, PICKED_DURING_SEARCH_STATUSES } from '../constants/request-statuses';
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
-const CANCELLED_DURING_SEARCH = 'Request cancelled or deleted during the search, not re-queued';
+/** This job's writes after the indexer queries keep a pick or download made meanwhile (#591) */
+const KEEP_PICK = { notIn: PICKED_DURING_SEARCH_STATUSES };
 
 /**
  * A search for the next release after a download-client failure (#332) that found nothing
@@ -36,11 +37,8 @@ async function failChainIfNothingLeft(
   if (!payload.clientFailures || searchStats.queriesFailed > 0) return null;
   const { requestId } = payload;
   const message = `Download failed; no other release found: ${reason}`;
+  if (!(await markRequestFailedUnlessStopped(requestId, message, KEEP_PICK))) return keptResult(requestId, 'not re-queued', logger);
   logger.warn(`${message} (request ${requestId})`);
-  if (!(await markRequestFailedUnlessStopped(requestId, message))) {
-    logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
-    return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
-  }
   await notifyRequestError(requestId, message, logger);
   return { success: false, message, requestId };
 }
@@ -49,6 +47,14 @@ async function failChainIfNothingLeft(
 async function movedOnStatus(requestId: string): Promise<string | null> {
   const row = await prisma.request.findUnique({ where: { id: requestId }, select: { status: true, deletedAt: true } });
   return !row || row.deletedAt || row.status === 'cancelled' ? null : row.status;
+}
+
+/** Job result when a KEEP_PICK write found the request cancelled, deleted or picked during the search */
+async function keptResult(requestId: string, outcome: string, logger: ReturnType<typeof RMABLogger.forJob>) {
+  const status = await movedOnStatus(requestId);
+  const message = `Request ${status ? `moved to ${status}` : 'cancelled or deleted'} during the search, ${outcome}`;
+  logger.info(`${message} (request ${requestId})`);
+  return { success: true, message, requestId };
 }
 
 /**
@@ -183,11 +189,10 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
-      // Unless a cancel or delete landed during the search: re-queueing it would
+      // Unless a cancel, delete or pick landed during the search: re-queueing it would
       // let the scheduled re-search jobs download the book anyway
-      if (!(await updateRequestUnlessStopped(requestId, { status: 'awaiting_search', errorMessage, lastSearchAt: new Date() }))) {
-        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
-        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      if (!(await updateRequestUnlessStopped(requestId, { status: 'awaiting_search', errorMessage, lastSearchAt: new Date() }, KEEP_PICK))) {
+        return keptResult(requestId, 'not re-queued', logger);
       }
 
       return {
@@ -298,9 +303,8 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
         status: 'awaiting_search',
         errorMessage: noMatchMessage,
         lastSearchAt: new Date(),
-      }))) {
-        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
-        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }, KEEP_PICK))) {
+        return keptResult(requestId, 'not re-queued', logger);
       }
 
       return {
@@ -352,13 +356,10 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
     logger.info(`========================================================`);
     logger.info(`Selected best result: ${bestResult.title} (final score: ${bestResult.finalScore.toFixed(1)})`);
 
-    // The pick goes ahead only while the request is still this search's `searching`: an
-    // Interactive Search pick (`downloading`, or `awaiting_approval`) or a cancel during the search wins (#591)
-    if (!(await updateRequestUnlessStopped(requestId, {}, { onlyIn: ['searching'] }))) {
-      const status = await movedOnStatus(requestId);
-      const message = `Request ${status ? `moved to ${status}` : 'was cancelled or deleted'} during the search, no download queued`;
-      logger.info(`${message} (request ${requestId})`);
-      return { success: true, message, requestId };
+    // An Interactive Search pick (`downloading`, or `awaiting_approval`) or a cancel during
+    // the search wins over this job's pick (#591); a route's `pending` reset does not
+    if (!(await updateRequestUnlessStopped(requestId, {}, KEEP_PICK))) {
+      return keptResult(requestId, 'no download queued', logger);
     }
 
     // Trigger download job with best result
@@ -384,10 +385,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload, atte
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    // Mark failed, unless a cancel or delete landed meanwhile
+    // Mark failed, unless a cancel, delete or pick landed meanwhile (#591)
     const marked = await markRequestFailedUnlessStopped(
       requestId,
-      error instanceof Error ? error.message : 'Unknown error during search'
+      error instanceof Error ? error.message : 'Unknown error during search',
+      KEEP_PICK
     );
     // The search for the next release (#332) ends its chain here once no retry follows
     if (marked && isLastAttempt(attempt)) {

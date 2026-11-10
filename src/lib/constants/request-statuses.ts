@@ -81,6 +81,13 @@ export const SEARCHABLE_STATUSES = [
  */
 export const PAST_SEARCH_STATUSES = ['downloading', 'processing', 'downloaded', 'available'] as const;
 
+/**
+ * Statuses a search's own writes after the indexer queries refuse (#591): a pick made during
+ * the search (`downloading`, or `awaiting_approval` for a pick that needs approval) or a
+ * download that finished meanwhile. Any other status (`pending` after Manual Search) is written.
+ */
+export const PICKED_DURING_SEARCH_STATUSES = [...PAST_SEARCH_STATUSES, 'awaiting_approval'] as const;
+
 /** Audiobook request statuses POST /api/requests/[id]/fetch-ebook accepts (admin). */
 export const EBOOK_FETCHABLE_STATUSES = ['downloaded', 'available'] as const;
 

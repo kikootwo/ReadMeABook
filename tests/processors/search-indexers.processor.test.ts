@@ -8,6 +8,8 @@ import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
 
 const prismaMock = createPrismaMock();
+// Writes after the indexer queries also keep a pick or download made during the search (#591)
+const KEEP_PICK_WHERE = { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval'] };
 const configMock = vi.hoisted(() => ({ get: vi.fn(), getAudibleRegion: vi.fn().mockResolvedValue('us') }));
 const jobQueueMock = createJobQueueMock();
 const prowlarrMock = vi.hoisted(() => ({ search: vi.fn(), searchWithVariations: vi.fn() }));
@@ -62,7 +64,7 @@ describe('processSearchIndexers', () => {
     expect(result.success).toBe(false);
     expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        where: { id: 'req-1', deletedAt: null, status: { not: 'cancelled' } },
+        where: { id: 'req-1', deletedAt: null, status: KEEP_PICK_WHERE },
         data: expect.objectContaining({ status: 'awaiting_search' }),
       })
     );
@@ -210,7 +212,7 @@ describe('processSearchIndexers', () => {
 
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'req-3', deletedAt: null, status: { not: 'cancelled' } },
+        where: { id: 'req-3', deletedAt: null, status: KEEP_PICK_WHERE },
         data: expect.objectContaining({ status: 'failed' }),
       })
     );
@@ -254,7 +256,7 @@ describe('processSearchIndexers', () => {
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
     expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: { id: 'req-r', deletedAt: null, status: { not: 'cancelled' } },
+      where: { id: 'req-r', deletedAt: null, status: KEEP_PICK_WHERE },
       data: expect.objectContaining({ status: 'failed' }),
     }));
     expect(prismaMock.request.update).not.toHaveBeenCalledWith(
@@ -285,7 +287,7 @@ describe('processSearchIndexers', () => {
         expect.objectContaining({ data: expect.objectContaining({ status: 'awaiting_search' }) })
       );
       expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-        where: { id, deletedAt: null, status: { not: 'cancelled' } },
+        where: { id, deletedAt: null, status: KEEP_PICK_WHERE },
         data: expect.objectContaining({ status: 'awaiting_search' }),
       }));
       expect(result).toMatchObject({ success: true, requestId: id });
@@ -490,7 +492,7 @@ describe('processSearchIndexers', () => {
     expect(result.message).toMatch(/No usable releases — 2 candidates tried, all blocked/);
     expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        where: { id: 'req-exhausted', deletedAt: null, status: { not: 'cancelled' } },
+        where: { id: 'req-exhausted', deletedAt: null, status: KEEP_PICK_WHERE },
         data: expect.objectContaining({
           status: 'awaiting_search',
           errorMessage: 'No usable releases — 2 candidates tried, all blocked',

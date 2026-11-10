@@ -12,6 +12,9 @@ import { prisma } from '../db';
 
 export type RequestStopReason = 'cancelled' | 'deleted' | 'missing';
 
+/** Extra status condition for one guarded write (#591): refuse these too, or write only from these */
+export type RequestStatusCondition = { notIn: readonly string[] } | { onlyIn: readonly string[] };
+
 /**
  * Why background work for this request must stop, or null to carry on.
  * A row that no longer exists (or no id at all) counts as stopped.
@@ -44,7 +47,7 @@ export async function getRequestStopReason(requestId: string | null | undefined)
 export async function updateRequestUnlessStopped(
   requestId: string | null | undefined,
   data: Prisma.RequestUpdateManyMutationInput,
-  condition?: { notIn: readonly string[] } | { onlyIn: readonly string[] }
+  condition?: RequestStatusCondition
 ): Promise<boolean> {
   if (!requestId) return false;
 
@@ -60,10 +63,11 @@ export async function updateRequestUnlessStopped(
   return count > 0;
 }
 
-/** Mark the request failed unless it was cancelled or deleted. */
+/** Mark the request failed unless it was cancelled or deleted (or `condition` refuses it). */
 export function markRequestFailedUnlessStopped(
   requestId: string | null | undefined,
-  errorMessage: string
+  errorMessage: string,
+  condition?: RequestStatusCondition
 ): Promise<boolean> {
-  return updateRequestUnlessStopped(requestId, { status: 'failed', errorMessage });
+  return updateRequestUnlessStopped(requestId, { status: 'failed', errorMessage }, condition);
 }

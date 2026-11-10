@@ -114,6 +114,72 @@ describe('processSearchIndexers on a request past searching (#591)', () => {
     }
   );
 
+  it.each(['pending', 'awaiting_search', 'failed'])(
+    'still queues the download when a route resets the request to %s after the claim (Manual Search, Retry)',
+    async (status) => {
+      row.status = 'failed';
+      prowlarrMock.searchWithVariations.mockImplementation(async () => {
+        row.status = status; // the route's own status write lands after the job's `searching` claim
+        return RESULTS;
+      });
+
+      const result = await runSearch();
+
+      expect(result.success).toBe(true);
+      expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each([
+    ['finds nothing', async () => []],
+    ['has every indexer query fail', async () => { throw new Error('indexer down'); }],
+  ])('keeps a pick made while the search %s: no awaiting_search write', async (_label, answer) => {
+    row.status = 'awaiting_search';
+    prowlarrMock.searchWithVariations.mockImplementation(async () => {
+      row.status = 'downloading';
+      return answer();
+    });
+
+    const result = await runSearch();
+
+    expect(result).toEqual(expect.objectContaining({ success: true, message: 'Request moved to downloading during the search, not re-queued' }));
+    expect(row.status).toBe('downloading');
+    expect(writes).toHaveLength(1); // only the `searching` claim
+    expectNothingQueued();
+  });
+
+  it('keeps a pick made while a next-release search finds nothing: no failed write, no notification', async () => {
+    row.status = 'searching';
+    prowlarrMock.searchWithVariations.mockImplementation(async () => {
+      row.status = 'awaiting_approval';
+      return [];
+    });
+    const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
+
+    const result = await processSearchIndexers({ ...payload, clientFailures: 1 });
+
+    expect(result.success).toBe(true);
+    expect(row.status).toBe('awaiting_approval');
+    expect(writes).toHaveLength(1);
+    expectNothingQueued();
+  });
+
+  it('keeps a pick made during a search that then errors on its last attempt: no failed write, no notification', async () => {
+    row.status = 'searching';
+    prowlarrMock.searchWithVariations.mockImplementation(async () => {
+      row.status = 'downloading';
+      return RESULTS;
+    });
+    configMock.getAudibleRegion.mockRejectedValue(new Error('config read failed'));
+    const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
+
+    await expect(processSearchIndexers({ ...payload, clientFailures: 1 }, { attemptsMade: 2, attempts: 3 })).rejects.toThrow('config read failed');
+
+    expect(row.status).toBe('downloading');
+    expect(writes).toHaveLength(1);
+    expectNothingQueued();
+  });
+
   it.each(['pending', 'awaiting_search', 'searching', 'failed', 'warn'])(
     'searches a %s request and queues its download as before',
     async (status) => {
