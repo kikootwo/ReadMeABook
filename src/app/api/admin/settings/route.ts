@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { REQUESTER_TAG_SETTING_KEY } from '@/lib/constants/requester-tags';
+import { loadRequesterTagWarnings } from '@/lib/services/audiobookshelf/requester-tag-users';
 
 const logger = RMABLogger.create('API.Admin.Settings');
 
@@ -60,6 +62,9 @@ export async function GET(request: NextRequest) {
         libraryId: configMap.get('audiobookshelf.library_id') || '',
         ebookLibraryId: configMap.get('audiobookshelf.ebook_library_id') || '',
         triggerScanAfterImport: configMap.get('audiobookshelf.trigger_scan_after_import') === 'true',
+        tagRequester: configMap.get(REQUESTER_TAG_SETTING_KEY) === 'true',
+        // Computed whether or not tagging is on, so the box shows as soon as it is ticked (#232)
+        requesterTagWarnings: await loadRequesterTagWarnings(logger),
       },
       oidc: {
         enabled: configMap.get('oidc.enabled') === 'true',
