@@ -15,11 +15,12 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 ## UI
 | Surface | Control | Shown when |
 |---|---|---|
-| Details modal (`AudiobookDetailsModal`) | `ExplicitCheckbox` row above the action buttons; value sent with Request / Interactive Search (`createRequest`, `requestWithTorrent` add `explicit: true` only when ticked) | ABS mode, signed in, can request, not denied, not an ebook request. Starts from the existing request's mark |
-| My Requests (`RequestCard`) | `RequestExplicitControl` in the action row; saves at once | ABS mode, audiobook, not denied |
+| Details modal (`AudiobookDetailsModal`) | `ExplicitCheckbox` row above the action buttons; value sent with Request / Interactive Search (`createRequest`, `requestWithTorrent` add `explicit: true` only when ticked). Interactive Search on an existing request advances it (select-torrent, no mark), so a new tick is saved first with the PUT when the pick is confirmed (`beforeSelect`); a failed save starts nothing and says so in the search modal | ABS mode, signed in, can request, not denied, not an ebook request. Starts from the request's mark when opened from My Requests or the admin table; Search, Home, Author and Series cards don't carry it (box starts unticked; a re-request keeps the mark anyway) |
+| My Requests (`RequestCard`) | `RequestExplicitControl` in the action row; saves at once, then reloads the list (`onChanged` → `useMyRequests().revalidate`, every loaded page) | ABS mode, audiobook, not denied |
 | Admin Recent Requests (`RecentRequestsTable`) | rose "Explicit" pill by the title; `ExplicitMenuItem` in the actions menu ("Mark explicit" / "Remove explicit mark") | ABS mode, audiobook; the menu item is hidden on an unmarked denied request |
 - **Non-admin tick asks first** (`ConfirmModal`, "Mark as explicit?"): "Audiobookshelf will hide this book from accounts that can't see explicit content (which may include yours), and only an admin can remove the mark."
-- **Non-admin, already marked:** checkbox disabled, with the visible line "Only an admin can remove this" (`aria-describedby`), readable at phone width. The details modal saves nothing until Request, so it locks the box only for a request already marked (`locked` prop); a fresh tick can be unticked before sending
+- **Non-admin, already marked:** checkbox disabled, with the visible line "Only an admin can remove this" (`aria-describedby`), readable at phone width. The details modal saves nothing until Request, so it locks the box only for a request already marked (`locked` prop); a fresh tick can be unticked before sending. An admin's locked box there reads "A re-request keeps the mark"
+- **Look:** the box is drawn by hand (`appearance-none`, rose fill and white tick when checked), so a locked mark keeps its rose tick in light and dark
 - A response `message` shows as a warning toast (10 s); an error as an error toast. My Requests is wrapped in `ToastProvider`
 - Backend mode comes from `GET /api/auth/providers` (`useBackendMode`, `src/lib/hooks/useExplicitMark.ts`)
 
@@ -28,12 +29,14 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 | Case | Result |
 |---|---|
 | bad body | 400 `ValidationError` |
-| not found / deleted | 404 |
+| not found / deleted, or no row updated (replaced or deleted since the read) | 404 |
 | not the requester, not admin | 403 |
 | ebook request | 400 `InvalidRequest` |
 | non-admin sends `false` | 403 "Only an admin can remove the explicit mark" |
-| `true`, ABS, `available`, book has `absItemId` | stores it, then writes at once (guard, then `{explicit:true}`). **A repeat mark retries the write.** Failure → `absUpdated: false`, message "Saved. Audiobookshelf wasn't updated: <reason>." |
-| admin `false`, ABS | stores it, writes nothing to ABS. Available → "Mark removed. Audiobookshelf still marks this book explicit; change it there." Plus, when other live requests of the book are marked: "N other request(s) for this book are still marked; remove that mark too, or ReadMeABook will mark the book explicit again." |
+| `true`, ABS, `available`, book has `absItemId` | stores it, then writes at once (guard, then `{explicit:true}`). Failure → `absUpdated: false` and a short message by viewer (full reason in the log): requester "Saved. Audiobookshelf wasn't updated; an admin needs to check it."; admin, guard "Saved. Audiobookshelf wasn't updated: its API user can't see explicit content."; admin, failed write "Saved. Audiobookshelf wasn't updated; the next library scan tries again." |
+| `true` again on a marked request | requester: plain 200, no ABS call (the scan repair is the retry). Admin: retries the write as above |
+| `true`, ABS, `available`, no `absItemId` yet | stored, no write, no message; the flag is written when a scan links the item (delivery step) |
+| admin `false`, ABS | stores it, writes nothing to ABS. Available → "Mark removed. If the book is marked explicit in Audiobookshelf, change it there." Plus, when other requests of the book that can still flag it (not cancelled, denied or deleted) are marked: "N other request(s) for this book are still marked; remove that mark too, or ReadMeABook marks the book explicit again once delivered." |
 | Plex | stores the value only |
 
 ## Write and Guard
@@ -43,7 +46,7 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 - **Once per scan:** the guard reads `/me` at most once per run; when no write needed it, it still runs once while any marked available request with an ABS item exists (one count query), so the warning shows even when nothing was written. It repeats every recently-added check (5 min) while that holds
 
 ## Per-run Step (`applyItemMarks`, `src/lib/services/audiobookshelf/requester-tags.ts`)
-- `runItemMarkStep` runs after every scan's matching in ABS mode, tagging on or off; with tagging off it reads only marked requests
+- `runItemMarkStep` runs after every scan's matching in ABS mode (recently-added check and full library scan), tagging on or off; with tagging off it reads only marked requests
 - An item's plan gets `explicit` when **any** available, not deleted audiobook request of it is marked. Tag eligibility rules (approval record, requester state, admin import) don't apply: the flag only restricts
 - Delivered books first, uncapped. **Repair:** a listed item whose listing has `explicit` false (or null, which maps to false) is written again; a listing without the field is left alone. Repair cap 25 items per run shared with tag repair; 3 failures in a row stop the run's writes
 - Counters: `markedExplicit`, `explicitHeldBack` (also in the backfill job result). Log: `Marked "<title>" (Audiobookshelf item <id>) explicit`
@@ -52,13 +55,14 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 ## Survival and Recovery
 - An ABS quick match keeps the flag (only truthy values copy; Audible `isAdult: false` is skipped). A rescan keeps it (ABS's own metadata.json holds `explicit: true`)
 - Lost only through a person's ABS edit/match dialog, overlapping writes, or a foreign `metadata.json` with `explicit: false`; the repair puts it back the next time the item is listed
-- **A failed write is retried** by a repeat mark (requester or admin ticks again, or an admin uses "Mark explicit") or by the next run that lists the item: the recently-added check lists only the 10 newest; **for an older book, run the full library scan** (`plex_library_scan`, from the admin Jobs page, or turn its schedule on: off by default; [scheduler.md](../backend/services/scheduler.md))
+- **A failed immediate write** leaves the request marked and available. It is applied by the next scan that lists the item with the flag off (the repair, within the 25-per-run cap; with the guard false it is held back with the run's warning until the API user can see explicit content), or by an admin removing and re-adding the mark (or an admin's repeat mark). The recently-added check (5 min) lists only the 10 newest items; an older book waits for the full library scan
+- **Full library scan** (`plex_library_scan`, every 6 h): its row is created disabled at startup and **setup completion turns it on** (`src/app/api/setup/complete/route.ts`); the scheduler picks up enabled rows when the app starts ([scheduler.md](../backend/services/scheduler.md))
 
 ## Edges
 - **Window:** between ABS's own scan of a new folder and RMAB's next recently-added check (up to 5 min, longer when that job is off) the item is visible unmarked
 - **Cross-user:** one marked request flags the whole item, so it hides the book from another requester of the same book whose ABS account can't see explicit content
 - **Requester's own access:** ABS "user" accounts can't see explicit content by default; marking can hide the book from the requester too (the confirm says so)
-- **Clearing:** clears RMAB's mark only; un-flag the book in ABS by hand. While another request of the book stays marked, the next run that lists the item flags it again (the clear message counts them)
+- **Clearing:** clears RMAB's mark only; un-flag the book in ABS by hand. While another request of the book that can still be delivered stays marked, the next run that lists the item flags it again (the clear message counts them)
 - **Separate ebook library:** with "Ebook Library" set, the ebook is its own ABS item that RMAB never matches; mark the ebook in Audiobookshelf. Without it, the flag covers the ebook file in the same item
 - **Deleted request:** never a candidate; RMAB removes no flag
 - **Downgrade:** below this version `db push` drops the column (marks lost; flags in ABS stay)
