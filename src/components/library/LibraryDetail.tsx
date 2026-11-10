@@ -52,7 +52,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function LibraryDetail({ item: listed, viewer, user, live, offPage = false, onClose, onChanged }: LibraryDetailProps) {
-  const { childOpen, onChildOpenChange } = useChildDialog(!!listed && !!viewer);
+  const { isChildOpen, onChildOpenChange } = useChildDialog(!!listed && !!viewer);
   const gatedRequestId = listed?.canSeeRequestDetails && listed.request ? listed.request.id : null;
   // Off the pages and out of live, nothing else follows the book: the request's own fetch does
   const detail = useLibraryRequestDetail(gatedRequestId, live, !!listed && offPage && !live);
@@ -75,7 +75,7 @@ export function LibraryDetail({ item: listed, viewer, user, live, offPage = fals
   const size = sizeLabel(request?.downloadSizeBytes);
 
   return (
-    <LibraryDialog open onClose={onClose} labelledBy="library-detail-title" childOpen={childOpen}>
+    <LibraryDialog open onClose={onClose} labelledBy="library-detail-title" isChildOpen={isChildOpen}>
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/60">
         <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Book details</span>
         <button

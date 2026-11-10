@@ -3,15 +3,15 @@
  * Documentation: documentation/features/library-view.md
  *
  * z-[45]: above the sticky header (z-40), below toasts (z-50) and the stacked Interactive search
- * modal (z-[60]). While `childOpen` is set, a child dialog owns the keyboard: Esc and the Tab trap
- * pause. The scroll lock holds while the child is open. The child clears it in its own effect
- * cleanup when it closes; useChildDialog sets it again inside the close report itself (same commit),
- * so the page behind is never unlocked between the two.
+ * modal (z-[60]). While `isChildOpen()` is true, a child dialog owns the keyboard: Esc, the Tab trap
+ * and the backdrop click pause. The scroll lock holds while the child is open. The child clears it
+ * in its own effect cleanup when it closes; useChildDialog sets it again inside the close report
+ * itself (same commit), so the page behind is never unlocked, or Esc ignored, between the two.
  */
 
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 interface LibraryDialogProps {
@@ -21,29 +21,29 @@ interface LibraryDialogProps {
   labelledBy: string;
   /** center: phone bottom sheet, centered card from sm. side: phone bottom sheet, right panel from sm. */
   variant?: 'center' | 'side';
-  childOpen?: boolean;
+  /** A child dialog is open (useChildDialog). Read at event time, so it needs no re-render. */
+  isChildOpen?: () => boolean;
   children: React.ReactNode;
 }
 
 /**
- * Open state of a child dialog (Interactive search) opened from inside an open LibraryDialog. The
- * child reports from an effect, which runs in the same commit as its own cleanup (that clears the
- * body lock), so the open-to-closed report sets the lock again at once. An effect in the dialog
- * would wait for the next commit and leave the page unlocked in between. `active`: the dialog is
- * open; closing it forgets the last report, so a fresh mount (it reports closed) never locks.
+ * Open state of a child dialog (Interactive search) opened from inside an open LibraryDialog, kept
+ * in a ref, not state. The child reports from an effect, which runs in the same commit as its own
+ * cleanup (that clears the body lock), so the open-to-closed report sets the lock again and frees
+ * Esc at once; state would wait for a later render and leave both wrong in between. `active`: the
+ * dialog is open; closing it forgets the last report, so a fresh mount (it reports closed) never locks.
  */
-export function useChildDialog(active: boolean): { childOpen: boolean; onChildOpenChange: (open: boolean) => void } {
-  const [childOpen, setChildOpen] = useState(false);
+export function useChildDialog(active: boolean): { isChildOpen: () => boolean; onChildOpenChange: (open: boolean) => void } {
   const reportedOpen = useRef(false);
   useEffect(() => {
     if (!active) reportedOpen.current = false;
   }, [active]);
+  const isChildOpen = useCallback(() => reportedOpen.current, []);
   const onChildOpenChange = useCallback((open: boolean) => {
     if (reportedOpen.current && !open) document.body.style.overflow = 'hidden';
     reportedOpen.current = open;
-    setChildOpen(open);
   }, []);
-  return { childOpen: active && childOpen, onChildOpenChange };
+  return { isChildOpen, onChildOpenChange };
 }
 
 const FOCUSABLE =
@@ -53,14 +53,15 @@ function focusables(panel: HTMLElement): HTMLElement[] {
   return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => !el.closest('[inert]'));
 }
 
-export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', childOpen = false, children }: LibraryDialogProps) {
+export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', isChildOpen, children }: LibraryDialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
-  const childOpenRef = useRef(childOpen);
+  const isChildOpenRef = useRef(isChildOpen);
   useEffect(() => {
     onCloseRef.current = onClose;
-    childOpenRef.current = childOpen;
-  }, [onClose, childOpen]);
+    isChildOpenRef.current = isChildOpen;
+  }, [onClose, isChildOpen]);
+  const childOpenNow = () => isChildOpenRef.current?.() ?? false;
 
   // Focus in on open, back to the opener on close.
   useEffect(() => {
@@ -74,7 +75,7 @@ export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', c
   }, [open]);
 
   // Scroll lock for as long as the dialog is open. A child dialog reports itself open one commit
-  // after it locked the body, so the lock never depends on childOpen (that cleanup would unlock it).
+  // after it locked the body, so the lock never depends on the child (that cleanup would unlock it).
   useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow;
@@ -88,7 +89,7 @@ export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', c
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (childOpenRef.current) return;
+      if (childOpenNow()) return;
       const panel = panelRef.current;
       if (!panel) return;
       if (e.key === 'Escape') {
@@ -130,7 +131,7 @@ export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', c
       }`}
       style={{ height: '100dvh' }}
       onClick={() => {
-        if (!childOpenRef.current) onCloseRef.current();
+        if (!childOpenNow()) onCloseRef.current();
       }}
     >
       <div

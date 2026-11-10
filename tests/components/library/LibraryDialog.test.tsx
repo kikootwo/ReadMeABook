@@ -35,14 +35,25 @@ function Child({ onClose }: { onClose: () => void }) {
 /**
  * Like LibraryActions: owns the child's open state and reports it from an effect, one commit after
  * the child mounts (and in the same commit as its cleanup). `seen` records the body lock right
- * after each report.
+ * after each report; `escAfterClose` presses Esc right after the close report, before any re-render.
  */
-function Actions({ onChildOpenChange, seen }: { onChildOpenChange: (open: boolean) => void; seen: string[] }) {
+function Actions({
+  onChildOpenChange,
+  seen,
+  escAfterClose,
+}: {
+  onChildOpenChange: (open: boolean) => void;
+  seen: string[];
+  escAfterClose: boolean;
+}) {
   const [child, setChild] = useState(false);
+  const wasOpen = React.useRef(false);
   React.useEffect(() => {
     onChildOpenChange(child);
     seen.push(document.body.style.overflow);
-  }, [child, onChildOpenChange, seen]);
+    if (escAfterClose && wasOpen.current && !child) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    wasOpen.current = child;
+  }, [child, onChildOpenChange, seen, escAfterClose]);
   return (
     <>
       <button type="button" onClick={() => setChild(true)}>
@@ -53,9 +64,17 @@ function Actions({ onChildOpenChange, seen }: { onChildOpenChange: (open: boolea
   );
 }
 
-function Harness({ onClose = vi.fn(), seen = [] }: { onClose?: () => void; seen?: string[] }) {
+function Harness({
+  onClose = vi.fn(),
+  seen = [],
+  escAfterClose = false,
+}: {
+  onClose?: () => void;
+  seen?: string[];
+  escAfterClose?: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const { childOpen, onChildOpenChange } = useChildDialog(open);
+  const { isChildOpen, onChildOpenChange } = useChildDialog(open);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}>
@@ -72,11 +91,11 @@ function Harness({ onClose = vi.fn(), seen = [] }: { onClose?: () => void; seen?
           setOpen(false);
         }}
         labelledBy="t"
-        childOpen={childOpen}
+        isChildOpen={isChildOpen}
       >
         <h2 id="t">Title</h2>
         <button type="button">first</button>
-        {open && <Actions onChildOpenChange={onChildOpenChange} seen={seen} />}
+        {open && <Actions onChildOpenChange={onChildOpenChange} seen={seen} escAfterClose={escAfterClose} />}
         <button type="button">last</button>
       </LibraryDialog>
     </>
@@ -142,6 +161,18 @@ describe('LibraryDialog', () => {
     await user.click(screen.getByText('close child'));
     expect(seen.at(-1)).toBe('hidden'); // read right after the close report, before any re-render
     await user.keyboard('{Escape}');
+    expect(document.body.style.overflow).toBe('');
+  });
+
+  it('Esc right after the child closes (before any re-render) closes the dialog', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<Harness onClose={onClose} escAfterClose />);
+    await user.click(screen.getByText('opener'));
+    await user.click(screen.getByText('open child'));
+    await user.click(screen.getByText('close child'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.body.style.overflow).toBe('');
   });
 
