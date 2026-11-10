@@ -11,7 +11,10 @@
  *      1280 light, 375 dark); stored `Books`, no ownedCategory; card suffix (shots); the grab sends no
  *      create/edit for it, adds category=Books autoTMM=false savepath=/downloads; `Books` still /other
  *   4  long not-owned name `audiobooks-readarr` on the card at 375 dark (no download)
- *   5  restore `readmeabook`; then the setup wizard's Download Client step with a custom category (shot)
+ *   5  restore `readmeabook`; then the setup wizard's Download Client step (staged: the page's step state is
+ *      set; setup is never completed) with the seeded `Books`: the note, then the wizard card's amber suffix (shots)
+ *   afterAll: the client back to `readmeabook` with no ownedCategory; `Books`, `audiobooks-readarr` and the
+ *      created `audiobooks-e2e` removed from fake qBittorrent, so a later spec on the stack starts clean
  */
 
 import { test, expect } from '@playwright/test';
@@ -21,6 +24,15 @@ import { QBIT, VIEWS, loadScenario, callsSince, lastSeq, grabAndImport, adminPag
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 test.describe.configure({ mode: 'serial' });
+
+// Serial mode skips the rest after a failure, so the clean-up runs here rather than in test 5
+test.afterAll(async () => {
+  try {
+    await putCategory(await Rmab.loginAdmin(), QBIT, 'readmeabook');
+  } finally {
+    for (const name of ['Books', 'audiobooks-readarr', 'audiobooks-e2e']) await fakeArr.removeCategory('qbit', name);
+  }
+});
 
 const DIR = '46';
 const shot = (name: string) => ({ path: evidencePath(DIR, `${name}.jpg`), type: 'jpeg' as const, quality: 80 });
@@ -168,7 +180,7 @@ test('4 a long existing name keeps its suffix on a phone', async ({ browser }) =
   expect(c.finish().map((f) => f.name)).toEqual([]);
 });
 
-test('5 restore, then the setup wizard step with a custom category', async ({ browser }) => {
+test('5 restore, then the setup wizard step with an existing category', async ({ browser }) => {
   const c = new CaseRun('5-wizard', DIR);
   const rmab = await Rmab.loginAdmin();
   const put = await putCategory(rmab, QBIT, 'readmeabook');
@@ -212,12 +224,16 @@ test('5 restore, then the setup wizard step with a custom category', async ({ br
     await page.getByPlaceholder('Password').fill(env('QBIT_PASS'));
     await page.getByRole('button', { name: 'Test Connection' }).click();
     await page.locator('datalist option[value="Books"]').waitFor({ state: 'attached', timeout: 30_000 });
-    await page.getByLabel('Category', { exact: true }).fill('audiobooks-new');
+    await page.getByLabel('Category', { exact: true }).fill('Books');
+    await expect(page.getByText(/^Already in qBittorrent\. ReadMeABook won't change it/)).toBeVisible();
     await page.screenshot(shot('wizard-modal-1280-light'));
     await page.getByRole('button', { name: 'Add Client' }).click();
-    await expect(page.getByText('Category: audiobooks-new')).toBeVisible();
+    await expect(page.getByText('Category: Books')).toBeVisible();
+    const suffix = page.getByText('(existing, left as is)');
+    await expect(suffix).toBeVisible();
+    c.check(`wizard card: Category: Books with the amber suffix (${await suffix.getAttribute('class')})`, /amber/.test((await suffix.getAttribute('class')) ?? ''), 'control');
+    await suffix.scrollIntoViewIfNeeded();
     await page.screenshot(shot('wizard-download-step-1280-light'));
-    c.check('wizard card shows the custom category', true, 'control');
     await ctx.close();
   } finally {
     psql(`update configuration set value = 'true' where key = 'setup_completed'`);

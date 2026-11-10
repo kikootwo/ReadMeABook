@@ -6,21 +6,24 @@
  *   1  custom new `AudioBooks-E2E` via the API: stored with ownedCategory; two grabs (phm, martian) send one
  *      set_config in total (SABnzbd's array category list read by name, names compared in any case); both import
  *   2  pre-existing `books` at `other-app` (artemis), its job folder already holding another app's file;
- *      PUT `Books`: stored `books`, no ownedCategory, no set_config for it; the job lands in /downloads/other-app;
- *      import with "remove after processing" on removes the imported files only: the other app's file and its
- *      folder stay; `books` still points at other-app
+ *      the SABnzbd modal after Test with `Books` typed: the note and the "Downloads to:" line (shots 1280 light,
+ *      375 dark; not saved); PUT `Books`: stored `books`, no ownedCategory, no set_config for it; the SABnzbd card
+ *      suffix (shot); the job lands in /downloads/other-app/<title>; import with "remove after processing" on
+ *      removes the imported files only: the other app's file and its folder stay; `books` still points at other-app
  *   3  restore `readmeabook`
  */
 
 import { test, expect } from '@playwright/test';
-import { fakeArr, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab } from '../../lib/harness';
+import { fakeArr, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab, evidencePath } from '../../lib/harness';
 import { q, asApp, exists, listing, setRemoveAfterProcessing, CaseRun } from './242-helpers';
-import { SAB, loadScenario, callsSince, lastSeq, grabAndImport, putCategory, has, type FakeNzb } from './46-helpers';
+import { SAB, VIEWS, loadScenario, callsSince, lastSeq, grabAndImport, putCategory, has, adminPage, clientCard, openDownloadSettings, editAndTest, type FakeNzb } from './46-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 test.describe.configure({ mode: 'serial' });
 
 const DIR = '46';
+const SAB_CARD = 'SABnzbd (fake)';
+const shot = (name: string) => ({ path: evidencePath(DIR, `${name}.jpg`), type: 'jpeg' as const, quality: 80 });
 const setConfigs = (calls: { query: Record<string, string> }[]) => calls.filter((r) => r.query.mode === 'set_config');
 
 test('1 custom new category on SABnzbd: one set_config for two grabs', async () => {
@@ -50,7 +53,7 @@ test('1 custom new category on SABnzbd: one set_config for two grabs', async () 
   expect(c.finish().map((f) => f.name)).toEqual([]);
 });
 
-test('2 pre-existing category: not re-pathed; cleanup keeps the other app files', async () => {
+test('2 pre-existing category: not re-pathed; cleanup keeps the other app files', async ({ browser }) => {
   test.setTimeout(480_000);
   const c = new CaseRun('usenet-2-existing-cleanup', DIR);
   const rmab = await Rmab.loginAdmin();
@@ -61,10 +64,34 @@ test('2 pre-existing category: not re-pathed; cleanup keeps the other app files'
   const foreign = `${jobDir}/other-app-notes.nfo`;
   asApp(`mkdir -p ${q(jobDir)} && printf 'not ReadMeABook\\n' > ${q(foreign)}`);
 
+  for (const view of [VIEWS.light, VIEWS.dark]) {
+    const { page, close } = await adminPage(browser, view);
+    await openDownloadSettings(page);
+    const input = await editAndTest(page, SAB_CARD, 'books');
+    await input.fill('Books');
+    const note = page.getByText("Already in SABnzbd. ReadMeABook won't change it; downloads use its folder and settings.");
+    const downloadsTo = page.getByText("Downloads to: SABnzbd's “books” folder (ReadMeABook must be able to read it)");
+    await expect(note).toBeVisible();
+    await expect(downloadsTo).toBeVisible();
+    c.check(`${view.tag}: SABnzbd note and "Downloads to:" line shown`, true, 'control');
+    await downloadsTo.scrollIntoViewIfNeeded(); // the line sits below the field and its note
+    await page.screenshot(shot(`modal-sab-existing-note-${view.tag}`));
+    await close();
+  }
+
   const since = await lastSeq();
   const put = await putCategory(rmab, SAB, 'Books');
   c.save('put.json', put);
   c.check(`stored books (the client's name), no ownedCategory (${put.stored?.category}/${put.stored?.ownedCategory})`, put.status === 200 && put.stored?.category === 'books' && put.stored?.ownedCategory === undefined, 'control');
+  {
+    const { page, close } = await adminPage(browser, VIEWS.light);
+    await openDownloadSettings(page);
+    const suffix = clientCard(page, SAB_CARD).getByText('(existing, left as is)');
+    await expect(suffix).toBeVisible();
+    await suffix.scrollIntoViewIfNeeded();
+    await page.screenshot(shot('card-sab-existing-1280-light'));
+    await close();
+  }
 
   await loadScenario('artemis', 'usenet', 'artemis-mp3');
   c.save('listing-before.txt', listing('/downloads/other-app'));
@@ -83,7 +110,7 @@ test('2 pre-existing category: not re-pathed; cleanup keeps the other app files'
   c.check(`${jobDir} kept (not empty)`, exists(jobDir), 'safety');
   const leftAudio = listing(jobDir).split('\n').filter((l) => /\.(mp3|m4b)\t/.test(l));
   c.check(`imported audio removed from ${jobDir} (${leftAudio.length} left)`, leftAudio.length === 0, 'control');
-  c.check('log: Category already existed in the client: removed', has(run.events, 'Category already existed in the client: removed'), 'log');
+  c.check("log: Category is not ReadMeABook's own: removed", has(run.events, "Category is not ReadMeABook's own: removed"), 'log');
   c.check(`log absent: Removed directory: ${jobDir}`, !has(run.events, `Removed directory: ${jobDir}`), 'safety');
   expect(c.finish().map((f) => f.name)).toEqual([]);
 });

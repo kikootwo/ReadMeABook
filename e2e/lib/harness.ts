@@ -211,6 +211,11 @@ export const fakeArr = {
     const res = await ctl('/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client, name, path: dir }) });
     return json<{ ok: boolean; category: { client: string; name: string; path: string } }>(res, `seed ${client} category ${name}`);
   },
+  /** Drop one category (seeded, or created by RMAB through the client API); true when it existed. */
+  async removeCategory(client: 'qbit' | 'sab', name: string) {
+    const res = await ctl('/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client, name, remove: true }) });
+    return json<{ ok: boolean; removed: boolean }>(res, `remove ${client} category ${name}`);
+  },
   async reset() {
     return json<{ ok: boolean }>(await ctl('/reset', { method: 'POST' }), 'fake-arr reset');
   },

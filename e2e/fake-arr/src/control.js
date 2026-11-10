@@ -28,6 +28,17 @@ function seedCategory(state, { client, name, path: dir = '' }) {
   return { client, name: key, path: String(dir) };
 }
 
+/** Drop one category (seeded or created through the client API), so a spec can leave the client as it found it. */
+function removeCategory(state, { client, name }) {
+  if (client !== 'qbit' && client !== 'sab') throw new Error("client must be 'qbit' or 'sab'");
+  const key = client === 'sab' ? String(name || '').trim().toLowerCase() : String(name || '').trim();
+  const map = client === 'qbit' ? state.qbitCategories : state.sabCategories;
+  const existed = key in map;
+  delete map[key];
+  state.seededCategories = state.seededCategories.filter((c) => !(c.client === client && c.name === key));
+  return existed;
+}
+
 function removeSeededCategories(state) {
   for (const { client, name } of state.seededCategories) {
     delete (client === 'qbit' ? state.qbitCategories : state.sabCategories)[name];
@@ -70,6 +81,7 @@ export async function handleControl(state, req, res, url) {
     }
     if (p === '/categories' && req.method === 'POST') {
       const { params } = await readParams(req, url);
+      if (params.remove) return sendJson(res, 200, { ok: true, removed: removeCategory(state, params) });
       return sendJson(res, 200, { ok: true, category: seedCategory(state, params) });
     }
     if (p === '/reset' && req.method === 'POST') {

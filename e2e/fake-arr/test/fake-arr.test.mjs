@@ -567,3 +567,25 @@ test('categories (#46): seeded categories, SABnzbd lower-case names, autoTMM=fal
   assert.equal(st.qbitCategories.Books, undefined);
   assert.equal(st.sabCategories.books, undefined);
 });
+
+test('categories (#46): a SABnzbd dir ending in "*" has no job folder; a category can be removed', async () => {
+  await loadDef({ name: 'unit-cat46-flat', book: 'phm', indexers: [{ id: 2, name: 'U', protocol: 'usenet' }], releases: [
+    { id: 'n', protocol: 'usenet', indexerId: 2, title: '{{title}} nzb', fixture: 'phm-m4b', download: { completeMs: 300 } },
+  ] });
+  await control('/categories', { client: 'sab', name: 'Flat', path: 'flat-app*' });
+  const api = (q) => fetch(`${base('sab')}/api?${new URLSearchParams({ output: 'json', apikey: 'sabkey', ...q })}`).then((r) => r.json());
+  const rels = await search('Fixture');
+  const nzb = Buffer.from(await (await fetch(rels.find((r) => r.protocol === 'usenet').downloadUrl)).arrayBuffer());
+  const fd = new FormData();
+  fd.append('nzbfile', new Blob([nzb], { type: 'application/x-nzb' }), 'x.nzb');
+  for (const [k, v] of Object.entries({ mode: 'addfile', cat: 'flat', output: 'json', apikey: 'sabkey' })) fd.append(k, v);
+  const id = (await fetch(`${base('sab')}/api`, { method: 'POST', body: fd }).then((r) => r.json())).nzo_ids[0];
+  const slot = await waitFor(async () => (await api({ mode: 'history' })).history.slots.find((s) => s.nzo_id === id));
+  assert.equal(slot.storage, `${cfg.downloadsDir}/flat-app`);
+  assert.ok(fs.readdirSync(`${cfg.downloadsDir}/flat-app`).some((n) => n.endsWith('.m4b')), 'files straight in the category folder');
+  assert.equal((await api({ mode: 'get_config' })).config.categories.find((c) => c.name === 'flat').dir, 'flat-app*');
+
+  assert.equal((await control('/categories', { client: 'sab', name: 'FLAT', remove: true })).removed, true);
+  assert.equal((await control('/categories', { client: 'qbit', name: 'missing', remove: true })).removed, false);
+  assert.equal((await control('/state')).sabCategories.flat, undefined);
+});
