@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
+import type { SearchStats } from '@/lib/utils/indexer-search-failures';
 
 const prismaMock = createPrismaMock();
 const configMock = vi.hoisted(() => ({ get: vi.fn(), getAudibleRegion: vi.fn().mockResolvedValue('us') }));
@@ -32,7 +33,7 @@ const WRONG_BOOK = release('Someone Else - Another Thing [M4B]');
 
 /** Answer every indexer search with `results`; `failedQueries` of them count as failed (#522 stats) */
 const searchAnswers = (results: unknown[], failedQueries = 0) => {
-  prowlarrMock.searchWithVariations.mockImplementation(async (_t: string, _a: string, _o: unknown, _x: unknown, stats: any) => {
+  prowlarrMock.searchWithVariations.mockImplementation(async (_t: string, _a: string, _o: unknown, _x: unknown, stats: SearchStats) => {
     stats.queriesSent += 1 + failedQueries;
     stats.queriesFailed += failedQueries;
     for (let i = 0; i < failedQueries; i++) stats.failures.push({ query: 'Book Author', message: 'HTTP 500' });
