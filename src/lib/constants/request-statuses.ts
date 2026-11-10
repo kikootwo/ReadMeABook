@@ -74,6 +74,16 @@ export const SEARCHABLE_STATUSES = [
   'awaiting_release',
 ] as const;
 
+/**
+ * Statuses no `search_indexers` write may move a request out of (#591), for its `searching`
+ * claim and for every write after the indexer queries alike: a download under way or done, a
+ * pick waiting for approval, a denied request. Nothing queues a search from these on purpose
+ * (approve writes `pending` first). Any other status (`pending` after Manual Search) is written.
+ */
+export const SEARCH_JOB_REFUSED_STATUSES = [
+  'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied',
+] as const;
+
 /** Audiobook request statuses POST /api/requests/[id]/fetch-ebook accepts (admin). */
 export const EBOOK_FETCHABLE_STATUSES = ['downloaded', 'available'] as const;
 
