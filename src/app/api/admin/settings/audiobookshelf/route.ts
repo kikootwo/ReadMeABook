@@ -11,6 +11,7 @@ import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedAudiobookshelfCredential } from '@/lib/services/saved-credentials.service';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { REQUESTER_TAG_SETTING_KEY } from '@/lib/constants/requester-tags';
+import { EXPLICIT_MARK_SETTING_KEY } from '@/lib/constants/explicit-mark';
 
 const logger = RMABLogger.create('API.Admin.Settings.Audiobookshelf');
 
@@ -21,7 +22,7 @@ export async function PUT(request: NextRequest) {
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { serverUrl, apiToken, libraryId, ebookLibraryId, triggerScanAfterImport, tagRequester } = body;
+        const { serverUrl, apiToken, libraryId, ebookLibraryId, triggerScanAfterImport, tagRequester, explicitMarkEnabled } = body;
 
         // Ebook library: a string ('' clears it); omitted keeps the saved value
         if (ebookLibraryId !== undefined && typeof ebookLibraryId !== 'string') {
@@ -75,6 +76,11 @@ export async function PUT(request: NextRequest) {
           const wasOn = (await configService.get(REQUESTER_TAG_SETTING_KEY)) === 'true';
           startBackfill = tagRequester && !wasOn;
           updates.push({ key: REQUESTER_TAG_SETTING_KEY, value: tagRequester ? 'true' : 'false' });
+        }
+
+        // Explicit mark (#542, off by default): written only when sent as a boolean
+        if (typeof explicitMarkEnabled === 'boolean') {
+          updates.push({ key: EXPLICIT_MARK_SETTING_KEY, value: explicitMarkEnabled ? 'true' : 'false' });
         }
 
         // Update configuration

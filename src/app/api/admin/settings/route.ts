@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { REQUESTER_TAG_SETTING_KEY } from '@/lib/constants/requester-tags';
+import { EXPLICIT_MARK_SETTING_KEY } from '@/lib/constants/explicit-mark';
 import { loadRequesterTagWarnings } from '@/lib/services/audiobookshelf/requester-tag-users';
 import { FILE_PLACEMENT_KEY, LINK_FALLBACK_KEY, METADATA_OPF_KEY, parseFilePlacement, parseLinkFallbackNote } from '@/lib/utils/library-placement';
 
@@ -66,6 +67,8 @@ export async function GET(request: NextRequest) {
         tagRequester: configMap.get(REQUESTER_TAG_SETTING_KEY) === 'true',
         // Computed whether or not tagging is on, so the box shows as soon as it is ticked (#232)
         requesterTagWarnings: await loadRequesterTagWarnings(logger),
+        // Off when the key is absent (#542)
+        explicitMarkEnabled: configMap.get(EXPLICIT_MARK_SETTING_KEY) === 'true',
       },
       oidc: {
         enabled: configMap.get('oidc.enabled') === 'true',

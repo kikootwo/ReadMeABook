@@ -145,7 +145,7 @@ describe('logRunWarning (#232)', () => {
     for (const id of ['1', '1', '2', '2', '4', '4']) logRunWarning(map, map.usersById.get(id), seen, log);
 
     expect(log.warn.mock.calls.map((c) => c[0])).toEqual([
-      'Not tagging requests of "李雷": the username has no letters or digits a tag can use',
+      `Not tagging requests of "李雷": the username can't be turned into a tag`,
       'req:bob is also the tag of pending user "bob.": if they are approved, neither is tagged',
       'req:carol is also the tag of deleted user "carol"; books tagged for them still carry it',
     ]);

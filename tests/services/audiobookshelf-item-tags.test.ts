@@ -1,13 +1,16 @@
 /**
- * Component: Audiobookshelf API client, addABSItemTags (#232)
+ * Component: Audiobookshelf API client, writeABSItem: requester tags (#232)
  * Documentation: documentation/features/requester-tags.md
  *
  * ABS's PATCH /items/:id/media replaces the whole tags array: the item is read first, its tags are
  * kept in order, and a list that can't be read is never written. Real: api.ts. Mocked: fetch, config.
+ * The Explicit flag through the same writer: audiobookshelf-item-explicit.test.ts.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ABS_TAG_TIMEOUT_MS, addABSItemTags } from '@/lib/services/audiobookshelf/api';
+import { ABS_TAG_TIMEOUT_MS, writeABSItem } from '@/lib/services/audiobookshelf/api';
+
+const addABSItemTags = (itemId: string, tags: string[]) => writeABSItem(itemId, { tags });
 
 const configServiceMock = vi.hoisted(() => ({ get: vi.fn() }));
 const fetchMock = vi.hoisted(() => vi.fn());
@@ -17,7 +20,7 @@ const ok = (body: unknown) => ({ ok: true, status: 200, statusText: 'OK', json: 
 const fail = (status: number, statusText: string) => ({ ok: false, status, statusText, json: async () => ({}) });
 const calls = () => fetchMock.mock.calls.map(([url, init]) => ({ url, method: init.method, body: init.body ? JSON.parse(init.body) : undefined }));
 
-describe('addABSItemTags (#232)', () => {
+describe('writeABSItem: tags (#232)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchMock.mockReset();
@@ -32,7 +35,7 @@ describe('addABSItemTags (#232)', () => {
 
     const out = await addABSItemTags('li_1', ['req:alice']);
 
-    expect(out).toEqual({ status: 'added', tags: ['req:alice'] });
+    expect(out).toEqual({ tags: 'added', addedTags: ['req:alice'], explicit: 'none' });
     expect(calls()).toEqual([
       { url: 'http://abs/api/items/li_1', method: 'GET', body: undefined },
       { url: 'http://abs/api/items/li_1/media', method: 'PATCH', body: { tags: ['keepme', 'Fiction', 'req:alice'] } },
@@ -54,7 +57,7 @@ describe('addABSItemTags (#232)', () => {
   it('no PATCH when every tag is already there', async () => {
     fetchMock.mockResolvedValueOnce(ok({ media: { tags: ['req:alice', 'x'] } }));
 
-    expect(await addABSItemTags('li_1', ['req:alice'])).toEqual({ status: 'present' });
+    expect(await addABSItemTags('li_1', ['req:alice'])).toEqual({ tags: 'present', addedTags: [], explicit: 'none' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -63,7 +66,7 @@ describe('addABSItemTags (#232)', () => {
 
     const out = await addABSItemTags('li_1', ['req:alice', 'req:bob', 'req:alice']);
 
-    expect(out).toEqual({ status: 'added', tags: ['req:alice'] });
+    expect(out).toEqual({ tags: 'added', addedTags: ['req:alice'], explicit: 'none' });
     expect(calls()[1].body).toEqual({ tags: ['req:bob', 'req:alice'] });
   });
 
@@ -75,14 +78,14 @@ describe('addABSItemTags (#232)', () => {
   ])('never PATCHes when the read has %s', async (_label, item) => {
     fetchMock.mockResolvedValueOnce(ok(item));
 
-    expect(await addABSItemTags('li_1', ['req:alice'])).toEqual({ status: 'unreadable' });
+    expect(await addABSItemTags('li_1', ['req:alice'])).toEqual({ tags: 'unreadable', addedTags: [], explicit: 'none' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('reports failed when the saved item lacks the tag', async () => {
     fetchMock.mockResolvedValueOnce(ok({ media: { tags: [] } })).mockResolvedValueOnce(ok({ libraryItem: { media: { tags: [] } } }));
 
-    expect(await addABSItemTags('li_1', ['req:alice'])).toMatchObject({ status: 'failed' });
+    expect(await addABSItemTags('li_1', ['req:alice'])).toMatchObject({ tags: 'failed', error: 'tags not saved' });
   });
 
   it.each([
@@ -92,7 +95,7 @@ describe('addABSItemTags (#232)', () => {
   ])('never throws on %s', async (_label, responses, httpStatus) => {
     for (const r of responses) fetchMock.mockResolvedValueOnce(r);
 
-    expect(await addABSItemTags('li_1', ['req:alice'])).toMatchObject({ status: 'failed', httpStatus });
+    expect(await addABSItemTags('li_1', ['req:alice'])).toMatchObject({ tags: 'failed', explicit: 'none', httpStatus });
   });
 
   it('never throws on a timeout or network error', async () => {
@@ -100,7 +103,7 @@ describe('addABSItemTags (#232)', () => {
 
     const out = await addABSItemTags('li_1', ['req:alice']);
 
-    expect(out).toMatchObject({ status: 'failed', error: expect.stringContaining('timeout') });
+    expect(out).toMatchObject({ tags: 'failed', error: expect.stringContaining('timeout') });
     expect(out).not.toHaveProperty('httpStatus');
   });
 });

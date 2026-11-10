@@ -3,7 +3,9 @@
  * Documentation: documentation/settings-pages.md
  */
 
+import { mutate } from 'swr';
 import { fetchWithAuth } from '@/lib/utils/api';
+import { PROVIDERS_KEY } from '@/lib/hooks/useExplicitMark';
 import type { Settings, SettingsTab, SavedIndexerConfig } from './types';
 import type { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
 import type { IndexerSavePlan } from './useConfiguredIndexers';
@@ -93,6 +95,7 @@ export const saveTabSettings = async (
         }).then(res => {
           if (!res.ok) throw new Error('Failed to save Audiobookshelf settings');
         });
+        void mutate(PROVIDERS_KEY); // the pages' Explicit mark flag (#542)
       }
       break;
 

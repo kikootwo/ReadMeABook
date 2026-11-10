@@ -68,7 +68,7 @@ describe('RequesterTagOption (#232)', () => {
     expect(box.className).toContain('bg-amber-50');
     expect(boxText).toContain('req:johnsmith is shared by "john.smith", "johnsmith": neither is tagged.');
     expect(boxText).toContain('req:bob is also the tag of pending user "bob.": if you approve them, neither is tagged.');
-    expect(boxText).toContain('"李雷" has no letters or digits a tag can use and is never tagged.');
+    expect(boxText).toContain(`"李雷" can't be turned into a tag and is never tagged.`);
     expect(boxText).toContain('req:carol (user "carol") is also the tag of deleted user "carol"; books tagged for them still carry it.');
     expect(boxText).toContain('give those users\' books a tag of your own in Audiobookshelf, not the shared one, which would show the book to every user who has it.');
   });

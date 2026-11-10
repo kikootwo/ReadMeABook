@@ -126,6 +126,20 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
     expect(Number(rows), 'seeded requests').toBeGreaterThanOrEqual(3);
     expect(set, 'approval_bypassed_by NULL on every seeded row').toBe('0');
   }
+  // #542: the startup schema sync added requests."explicit" (NOT NULL, default false), false on
+  // every seeded row, and the request list carries it. Required like the check above.
+  expect.soft(execBridgeAvailable(), `explicit: ${EXEC_BRIDGE_SKIP}`).toBe(true);
+  if (execBridgeAvailable()) {
+    const column = psql("select concat_ws('|', is_nullable, column_default) from information_schema.columns where table_name = 'requests' and column_name = 'explicit'");
+    const rows = psql('select count(*) from requests');
+    const set = psql('select count(*) from requests where "explicit"');
+    const listed = (await rmab.get<{ requests: { explicit?: unknown }[] }>('/api/requests?take=100')).requests.map((r) => r.explicit);
+    writeEvidence('upgrade/542-explicit.json', { column, rows, set, listed });
+    expect(column, 'requests.explicit exists, NOT NULL, default false').toBe('NO|false');
+    expect(Number(rows), 'seeded requests').toBeGreaterThanOrEqual(3);
+    expect(set, 'explicit false on every seeded row').toBe('0');
+    expect(listed.length > 0 && listed.every((v) => v === false), 'GET /api/requests rows carry explicit: false').toBe(true);
+  }
 
   const search = await rmab.post<any>(`/api/requests/${failed.id}/interactive-search`, {});
   writeEvidence('upgrade/interactive-search.json', search);

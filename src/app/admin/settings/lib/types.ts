@@ -49,6 +49,8 @@ export interface AudiobookshelfSettings {
   triggerScanAfterImport: boolean;
   /** Tag delivered items with req:<username> (audiobookshelf.tag_requester, #232) */
   tagRequester: boolean;
+  /** Show the Explicit mark on requests (audiobookshelf.explicit_mark_enabled, #542; off by default) */
+  explicitMarkEnabled: boolean;
   /** Read-only, from the settings GET: names that share, lack or overlap a tag */
   requesterTagWarnings?: RequesterTagWarnings;
 }

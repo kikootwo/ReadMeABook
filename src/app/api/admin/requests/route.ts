@@ -204,6 +204,7 @@ export async function GET(request: NextRequest) {
             downloadAttempts: request.downloadAttempts,
             customSearchTerms: request.customSearchTerms || null,
             blockedCount: request._count?.blockedReleases ?? 0,
+            explicit: request.explicit === true, // #542
             // Bulk delete leaves these alone (#212); derived, so stored paths never leave the server
             inLibrary: deleteTouchesLibrary(request, (request.audiobook.requests?.length ?? 0) > 0),
           };

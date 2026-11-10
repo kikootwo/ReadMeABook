@@ -28,7 +28,7 @@ export interface RequesterTagWarnings {
   shared: { tag: string; usernames: string[] }[];
   /** Pending or rejected users whose tag equals a taggable user's tag */
   lookalikes: { tag: string; username: string; status: string; matches: string[] }[];
-  /** Taggable users whose name leaves no letters or digits a tag can use */
+  /** Taggable users whose name can't be turned into a tag (no letter or digit left, or letters none of which survive) */
   untaggable: string[];
   /** Taggable users whose tag equals a deleted user's tag */
   deletedOverlaps: { tag: string; username: string; deletedUsernames: string[] }[];
@@ -162,7 +162,7 @@ export function logRunWarning(
   };
   const reason = map.refusedUsers.get(user.id);
   if (reason === 'no_tag') {
-    once(`none:${user.id}`, `Not tagging requests of "${user.plexUsername}": the username has no letters or digits a tag can use`);
+    once(`none:${user.id}`, `Not tagging requests of "${user.plexUsername}": the username can't be turned into a tag`);
     return;
   }
   const tag = requesterTag(user.plexUsername);

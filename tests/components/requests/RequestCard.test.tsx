@@ -355,4 +355,21 @@ describe('RequestCard', () => {
       expect(props.requestStatus).toBe('failed');
     }
   );
+
+  // #542: after a pick from the details modal advances the request, My Requests reloads it
+  it('a request advanced from the details modal reloads the list', async () => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+    const onChanged = vi.fn();
+
+    render(
+      <RequestCard
+        request={{ ...baseRequest, status: 'failed', userId: 'user-1', audiobook: { ...baseRequest.audiobook, audibleAsin: 'ASIN123' } }}
+        onChanged={onChanged}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: baseRequest.audiobook.title }));
+    detailsModalSpy.mock.calls.at(-1)?.[0].onRequestSuccess?.();
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
 });

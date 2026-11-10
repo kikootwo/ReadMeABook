@@ -149,7 +149,7 @@ describe('InteractiveTorrentSearchModal', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
 
     await waitFor(() => {
-      expect(requestWithTorrentMock).toHaveBeenCalledWith(fullAudiobook, baseResult);
+      expect(requestWithTorrentMock).toHaveBeenCalledWith(fullAudiobook, baseResult, { explicit: undefined });
     });
     expect(onClose).toHaveBeenCalled();
   });

@@ -28,4 +28,22 @@ describe('Modal', () => {
     unmount();
     expect(document.body.style.overflow).toBe(''); // Cleared to default
   });
+
+  it('opened over another dialog that locks the page: closing leaves that lock in place', () => {
+    document.body.style.overflow = 'hidden'; // the outer dialog (e.g. the details modal)
+
+    const { rerender } = render(
+      <Modal isOpen onClose={vi.fn()} title="Confirm">
+        <div>Confirm body</div>
+      </Modal>
+    );
+    rerender(
+      <Modal isOpen={false} onClose={vi.fn()} title="Confirm">
+        <div>Confirm body</div>
+      </Modal>
+    );
+
+    expect(document.body.style.overflow).toBe('hidden');
+    document.body.style.overflow = '';
+  });
 });

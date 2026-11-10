@@ -46,11 +46,13 @@ export function Modal({
     };
 
     document.addEventListener('keydown', handleEsc);
+    // Opened over another dialog that already locks the page (a confirm in the details modal): leave its lock
+    const outerLock = document.body.style.overflow === 'hidden';
     document.body.style.overflow = 'hidden';
 
     return () => {
       document.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = '';
+      if (!outerLock) document.body.style.overflow = '';
     };
   }, [isOpen, handleClose]);
 

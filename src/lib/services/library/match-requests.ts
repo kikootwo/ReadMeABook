@@ -251,14 +251,15 @@ export async function matchRequestsToLibrary(opts: {
     );
   }
 
-  // Delivery steps (Audiobookshelf): matching, item ids and notifications are done, so a failure
+  // Delivery steps (Audiobookshelf): requester tags and the Explicit flag (#232, #542). Matching,
+  // item ids and notifications are done, so a failure
   // here never blocks or undoes a delivery.
   if (backendMode === 'audiobookshelf') {
     try {
-      const { runRequesterTagStep } = await import('@/lib/services/audiobookshelf/requester-tags');
-      await runRequesterTagStep({ deliveredBookIds: delivered, listedItems, logger });
+      const { runItemMarkStep } = await import('@/lib/services/audiobookshelf/requester-tags');
+      await runItemMarkStep({ deliveredBookIds: delivered, listedItems, logger });
     } catch (error) {
-      logger.error(`Requester tagging failed: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error(`Audiobookshelf item step (requester tags, Explicit flag) failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return result;

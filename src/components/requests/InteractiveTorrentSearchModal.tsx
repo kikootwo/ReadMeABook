@@ -57,6 +57,8 @@ interface InteractiveTorrentSearchModalProps {
   searchMode?: 'audiobook' | 'ebook'; // Search mode - defaults to audiobook
   replaceIssueId?: string; // Optional - when set, confirm handler calls replace endpoint instead
   onConfirm?: (torrent: TorrentResult) => Promise<void>; // Optional - overrides default confirm handler
+  explicit?: boolean; // Optional - new request from the details modal is marked Explicit (#542)
+  beforeSelect?: () => Promise<void>; // Optional - runs before select-torrent on an existing request; a throw stops the pick and shows its message (#542)
 }
 
 // Format relative time from publish date
@@ -111,6 +113,8 @@ export function InteractiveTorrentSearchModal({
   searchMode = 'audiobook',
   replaceIssueId,
   onConfirm,
+  explicit,
+  beforeSelect,
 }: InteractiveTorrentSearchModalProps) {
   // Hooks for existing audiobook request flow
   const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError, searchFailures: byRequestFailures } = useInteractiveSearch();
@@ -133,6 +137,7 @@ export function InteractiveTorrentSearchModal({
 
   const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
+  const [beforeSelectError, setBeforeSelectError] = useState<string | null>(null);
   const [blockedLookup, setBlockedLookup] = useState<BlockedReleaseLookup>(EMPTY_BLOCKED_LOOKUP);
 
   // Per locked decision #3, interactive search is NOT filtered — it shows
@@ -149,7 +154,11 @@ export function InteractiveTorrentSearchModal({
   // Stable close handler via ref
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const handleClose = useCallback(() => { onCloseRef.current(); }, []);
+  // The running confirm (#542): one at a time; backing out (Esc, close) clears it, so a run
+  // still saving the mark stops before select-torrent
+  const confirmRunRef = useRef<object | null>(null);
+  const handleClose = useCallback(() => { confirmRunRef.current = null; onCloseRef.current(); }, []);
+  useEffect(() => () => { confirmRunRef.current = null; }, []);
 
   // Determine which mode we're in
   const isEbookMode = searchMode === 'ebook';
@@ -168,13 +177,13 @@ export function InteractiveTorrentSearchModal({
       : isEbookMode
         ? (useAsinMode ? isSelectingEbookByAsin : isSelectingEbook)
         : (hasRequestId ? isSelectingTorrent : isRequestingWithTorrent);
-  const error = replaceIssueId
+  const error = beforeSelectError || (replaceIssueId
     ? (replaceError || (hasRequestId ? searchByRequestError : searchByAudiobookError))
     : isEbookMode
       ? (useAsinMode ? (searchEbooksByAsinError || selectEbookByAsinError) : (searchEbooksError || selectEbookError))
       : (hasRequestId
           ? (searchByRequestError || selectTorrentError)
-          : (searchByAudiobookError || requestWithTorrentError));
+          : (searchByAudiobookError || requestWithTorrentError)));
 
   // Some or all indexer searches failed (#522): shown instead of a bare "nothing found"
   const searchFailures = isEbookMode
@@ -242,6 +251,7 @@ export function InteractiveTorrentSearchModal({
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (confirmTorrent) {
+          confirmRunRef.current = null;
           setConfirmTorrent(null);
         } else {
           handleClose();
@@ -293,8 +303,11 @@ export function InteractiveTorrentSearchModal({
   };
 
   const handleConfirmDownload = async () => {
-    if (!confirmTorrent) return;
+    if (!confirmTorrent || confirmRunRef.current) return;
+    const run = {};
+    confirmRunRef.current = run;
     let outcome: { needsApproval?: boolean } | undefined;
+    setBeforeSelectError(null);
     try {
       if (onConfirm) {
         // Custom confirm handler (e.g., admin approve-with-torrent flow)
@@ -314,10 +327,18 @@ export function InteractiveTorrentSearchModal({
         }
         outcome = { needsApproval: result?.needsApproval === true };
       } else if (hasRequestId) {
+        if (beforeSelect) {
+          setIsCustomConfirming(true); // Download and Cancel stay disabled while the mark saves
+          await beforeSelect().catch((err: unknown) => {
+            setBeforeSelectError(err instanceof Error ? err.message : String(err));
+            throw err;
+          });
+          if (confirmRunRef.current !== run) return; // backed out while it saved
+        }
         await selectTorrent(requestId, confirmTorrent);
       } else {
         if (!fullAudiobook) throw new Error('Audiobook data required to create request');
-        await requestWithTorrent(fullAudiobook, confirmTorrent);
+        await requestWithTorrent(fullAudiobook, confirmTorrent, { explicit });
       }
       onSuccess?.(outcome);
       setConfirmTorrent(null);
@@ -326,6 +347,7 @@ export function InteractiveTorrentSearchModal({
       console.error('Failed to download:', err);
       setConfirmTorrent(null);
     } finally {
+      if (confirmRunRef.current === run) confirmRunRef.current = null;
       setIsCustomConfirming(false);
     }
   };

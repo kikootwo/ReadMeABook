@@ -35,6 +35,8 @@ export interface CreateRequestOptions {
   bypassIgnore?: boolean;
   /** Shelf sync and watched lists: never replace a cancelled request, back off on failures (auto-rerequest.ts) */
   automatic?: boolean;
+  /** Mark the request Explicit (#542); a re-request keeps the replaced request's mark either way */
+  explicit?: boolean;
 }
 
 export type CreateRequestResult =
@@ -203,7 +205,7 @@ export async function createRequestForUser(
 
   // A failed/warn/cancelled request is replaced by the new one (atomically, below),
   // keeping its blocklist; it is not touched until the new request is created
-  let replacesRequest: { id: string; customSearchTerms: string | null } | null = null;
+  let replacesRequest: { id: string; customSearchTerms: string | null; explicit: boolean } | null = null;
   let autoReRequest: AutoReRequestGo | undefined; // set only by automatic callers; user requests start at count 0
   if (existingRequest) {
     if (!RE_REQUESTABLE_STATUSES.includes(existingRequest.status)) {
@@ -218,7 +220,7 @@ export async function createRequestForUser(
       if (decision.skip) return decision.skip;
       autoReRequest = decision;
     }
-    replacesRequest = { id: existingRequest.id, customSearchTerms: existingRequest.customSearchTerms ?? null };
+    replacesRequest = { id: existingRequest.id, customSearchTerms: existingRequest.customSearchTerms ?? null, explicit: existingRequest.explicit === true };
   }
 
   // Check ANY user's active request for same audiobook (avoid duplicate processing)
@@ -296,6 +298,8 @@ export async function createRequestForUser(
           type: 'audiobook',
           progress: 0,
           releaseDate,
+          // Only an admin clears a mark (#542): a re-request can add one, never drop one
+          explicit: options.explicit === true || replacesRequest?.explicit === true,
           ...(replacesRequest?.customSearchTerms && { customSearchTerms: replacesRequest.customSearchTerms }),
           ...(autoReRequest && { autoRerequestCount: autoReRequest.nextCount }),
         },

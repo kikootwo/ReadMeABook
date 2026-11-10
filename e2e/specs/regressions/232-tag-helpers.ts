@@ -11,14 +11,17 @@ import { SCAN_TYPES } from './284-helpers';
 export const TAG_KEY = 'audiobookshelf.tag_requester';
 const PASSWORD = 'e2e-232-tags-pass';
 
+/** A documentation-range address (TEST-NET-3) per name: the register route keys its limit on a valid client address (#575). Shared by the e2e register helpers. */
+export const addressFor = (name: string) => `203.0.113.${([...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 254) + 1}`;
+
 /**
  * Register a local user (registration on, no approval) and set its auto-approve. The register route
- * allows 5 attempts an hour per X-Forwarded-For value, so each user sends its own.
+ * allows 5 attempts an hour per client address, so each user sends its own.
  */
 export async function registerUser(admin: Rmab, username: string, autoApproveRequests: boolean): Promise<{ id: string; rmab: Rmab }> {
   const res = await fetch(`${urls.rmab()}/api/auth/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `e2e-232-${encodeURIComponent(username)}` },
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': addressFor(username) },
     body: JSON.stringify({ username, password: PASSWORD }),
   });
   const body = await res.json();

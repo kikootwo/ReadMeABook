@@ -66,7 +66,7 @@ src/app/admin/settings/
 ## Sections
 
 1. **Plex** - URL, token (masked), library ID, Audible region, filesystem scan trigger toggle
-2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, filesystem scan trigger toggle, requester tags toggle (`audiobookshelf.tag_requester`, `RequesterTagOption.tsx`; amber box of names that share, lack or overlap a tag while ticked; [requester-tags.md](features/requester-tags.md))
+2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, filesystem scan trigger toggle, requester tags toggle (`audiobookshelf.tag_requester`, `RequesterTagOption.tsx`; amber box of names that share, lack or overlap a tag while ticked; [requester-tags.md](features/requester-tags.md)), Explicit mark switch (`audiobookshelf.explicit_mark_enabled`, off by default, `ExplicitMarkOption.tsx`, field `explicitMarkEnabled`; [explicit-flag.md](features/explicit-flag.md))
 3. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle, **audiobook/ebook categories per indexer**
 4. **Download Client** - Type (qBittorrent, Transmission, SABnzbd), URL, credentials (masked), custom download path (per-client relative sub-path with live preview)
 5. **Paths** - Download + media directories, audiobook organization template, metadata tagging toggle, chapter merging toggle, Plex format coercion toggle. Audiobookshelf mode: the tagging toggle is replaced by the Library files section (`LibraryFilesSection.tsx`: File placement + Metadata radios, chapter merge moved in; guards both ways, stored conflict blocks Save via `pathsPlacementConflict()`) → [features/library-placement.md](features/library-placement.md)
