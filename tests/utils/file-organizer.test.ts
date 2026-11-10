@@ -306,7 +306,8 @@ describe('file organizer', () => {
     copyFileMock.copyFile.mockResolvedValue(undefined);
     fsMock.chmod.mockResolvedValue(undefined);
     const organizer = new FileOrganizer('/media', '/tmp');
-    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
+    vi.spyOn(organizer as unknown as { findAudiobookFiles: () => Promise<unknown> }, 'findAudiobookFiles')
+      .mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
     const onMergeProgress = vi.fn();
 
     await organizer.organize('/downloads/book', { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, { onMergeProgress });
