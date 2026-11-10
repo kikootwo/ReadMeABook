@@ -106,6 +106,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 ## Features
 
 - Auto-refresh every 10 seconds (SWR); the requests table pauses it while rows are selected or a bulk run is going
+- A failed metrics or downloads poll shows the full-page error only before the first load; afterwards the dashboard stays with a `role="alert"` line (a bulk run in the table keeps going)
 - Back to Home button in header
 - Admin role required
 - Real-time progress updates

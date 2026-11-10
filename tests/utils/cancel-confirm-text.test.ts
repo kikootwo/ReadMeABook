@@ -34,32 +34,26 @@ describe('cancelConfirmText', () => {
   });
 });
 
-describe('bulkCancelConfirmLines (one text source with the single cancel)', () => {
-  const counts = { total: 40, downloadingAudiobooks: 12, downloadingEbooks: 1, awaitingApproval: 3 };
-
-  it("uses the 'list' sentences today", () => {
+describe('bulkCancelConfirmLines (the bulk cancel confirm, one switch for its wording)', () => {
+  it("uses the 'list' sentence today", () => {
     expect(BULK_CANCEL_TEXT).toBe('list');
-    expect(bulkCancelConfirmLines(counts)).toEqual([
-      'They stay in the list as Cancelled.',
-      '3 waiting for approval are withdrawn; the user can request them again later.',
-      'Nothing in your library is touched.',
+    expect(bulkCancelConfirmLines({ total: 57, awaitingApproval: 15 })).toEqual([
+      'They stay in the list as Cancelled. Nothing in your library is touched.',
+      '15 waiting for approval are withdrawn.',
     ]);
-    expect(bulkCancelConfirmLines({ total: 1, downloadingAudiobooks: 0, downloadingEbooks: 0, awaitingApproval: 1 })).toEqual([
-      'It stays in the list as Cancelled.',
-      '1 waiting for approval is withdrawn; the user can request it again later.',
-      'Nothing in your library is touched.',
+    expect(bulkCancelConfirmLines({ total: 1, awaitingApproval: 1 })).toEqual([
+      'It stays in the list as Cancelled. Nothing in your library is touched.',
+      '1 waiting for approval is withdrawn.',
     ]);
+    expect(bulkCancelConfirmLines({ total: 3, awaitingApproval: 0 })).toEqual(['They stay in the list as Cancelled. Nothing in your library is touched.']);
   });
 
-  it("'single' reuses the single cancel's download sentences in the plural", () => {
-    expect(bulkCancelConfirmLines(counts, 'single')).toEqual([
-      'RMAB stops looking for them.',
-      'For the 12 audiobooks downloading, it stops the download and removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed.',
-      'For the ebook downloading, it stops the download. What it already downloaded may stay in the download client or the downloads folder.',
-      '3 waiting for approval are withdrawn; the user can request them again later.',
-      'Nothing in your library is touched.',
+  it("'single' says the downloads stop and what they fetched is removed", () => {
+    expect(bulkCancelConfirmLines({ total: 40, awaitingApproval: 0 }, 'single')).toEqual([
+      'Downloads stop and what they fetched is removed, unless another request uses it. Nothing in your library is touched.',
     ]);
-    expect(CANCEL_CONFIRM_AUDIOBOOK).toContain('removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed.');
-    expect(CANCEL_CONFIRM_EBOOK).toContain('What it already downloaded may stay in the download client or the downloads folder.');
+    expect(bulkCancelConfirmLines({ total: 1, awaitingApproval: 0 }, 'single')).toEqual([
+      'Its download stops and what it fetched is removed, unless another request uses it. Nothing in your library is touched.',
+    ]);
   });
 });

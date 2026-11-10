@@ -54,7 +54,7 @@ Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLo
 - Admins: message names the client and a sharing request. Owners/user tokens: never (`cancelMessage(outcome, 'owner')`), and `download` is `kept` for `kept_shared` and `kept_not_owned` (`reportedOutcome`), with one message for both.
 - `retry_later` says "on its next seeding cleanup". `not_removed` (usenet) promises no retry.
 - Admin table toast shows the server message: `toast.warning` for `retry_later` / `not_removed`, else success. User `RequestCard` shows no toast.
-- Bulk cancel (admin table, #212): the same `PATCH` per request, one at a time; confirm body from `bulkCancelConfirmLines()` in the same file (`BULK_CANCEL_TEXT` switches it to the single action's sentences). [bulk-request-actions.md](bulk-request-actions.md)
+- Bulk cancel (admin table, #212): the same `PATCH` per request, one at a time; confirm body from `bulkCancelConfirmLines()` in the same file (`BULK_CANCEL_TEXT` switches its first sentence to say the downloads stop and what they fetched is removed). [bulk-request-actions.md](bulk-request-actions.md)
 - Confirm text (both modals, `cancelConfirmText(status, type)` in `src/lib/utils/cancel-confirm-text.ts`; `awaiting_approval` = withdraw text):
   - `downloading` audiobook: "RMAB stops this request's download and removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed."
   - `downloading` ebook: "RMAB stops this request's download. What it already downloaded may stay in the download client or the downloads folder." (a direct download's file is not removed)

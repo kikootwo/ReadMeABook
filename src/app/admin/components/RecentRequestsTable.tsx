@@ -531,25 +531,23 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     }
   };
 
-  // Render loading state
-  if (isLoading && !data) {
+  // Render loading and error states; a bulk run keeps its bar (progress, Stop, result) through both
+  if ((isLoading && !data) || error) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
-        <div className="flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <>
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
+          {error ? (
+            <div className="text-center text-red-600 dark:text-red-400">
+              Failed to load requests. Please try again.
+            </div>
+          ) : (
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          )}
         </div>
-      </div>
-    );
-  }
-
-  // Render error state
-  if (error) {
-    return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
-        <div className="text-center text-red-600 dark:text-red-400">
-          Failed to load requests. Please try again.
-        </div>
-      </div>
+        <BulkActionBar rows={data?.requests ?? []} listReady={false} selection={selection} run={bulkRun} listKey={apiUrl} />
+      </>
     );
   }
 
@@ -724,7 +722,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                 {requests.map((request) => (
                   <tr
                     key={request.requestId}
-                    className={`hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors ${selection.ids.has(request.requestId) ? 'bg-blue-50/70 dark:bg-blue-900/20' : ''}`}
+                    className={`transition-colors ${selection.ids.has(request.requestId) ? 'bg-blue-50/70 dark:bg-blue-900/20 hover:bg-blue-100/70 dark:hover:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-900/50'}`}
                   >
                     <td className="w-10 px-3 py-4">
                       <SelectRowCheckbox id={request.requestId} title={request.displayTitle ?? request.title} selection={selection} disabled={bulkRun.running} />

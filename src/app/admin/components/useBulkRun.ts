@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { runBulkItem, type BulkAction, type BulkItem, type BulkItemOutcome, type BulkSummary } from './bulk-actions';
+import { NO_ANSWER_REASON, runBulkItem, type BulkAction, type BulkItem, type BulkItemOutcome, type BulkSummary } from './bulk-actions';
 
 export interface BulkProgress {
   action: BulkAction;
@@ -56,8 +56,8 @@ export function useBulkRun(runItem: RunItem = runBulkItem): BulkRun {
         let outcome: BulkItemOutcome;
         try {
           outcome = await runItem(action, item.id);
-        } catch (error) {
-          outcome = { result: 'failed', reason: error instanceof Error ? error.message : 'the request did not complete' };
+        } catch {
+          outcome = { result: 'failed', reason: NO_ANSWER_REASON };
         }
         outcomes.push({ ...item, ...outcome });
         const finished = next + 1;

@@ -89,7 +89,7 @@ describe('useBulkRun', () => {
     let summary: unknown;
     await act(async () => { summary = await result.current.start('approve', items(2), [{ id: 'x', title: 'X', result: 'skipped', reason: 'not waiting for approval' }]); });
     expect(summary).toMatchObject({
-      outcomes: [{ id: 'id-0', result: 'failed', reason: 'network down' }, { id: 'id-1', result: 'done' }],
+      outcomes: [{ id: 'id-0', result: 'failed', reason: 'no answer from RMAB' }, { id: 'id-1', result: 'done' }],
       preSkipped: [{ id: 'x', result: 'skipped' }],
       stopped: false,
     });

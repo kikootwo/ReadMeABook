@@ -13,7 +13,7 @@ Checkboxes on the admin Request Management table. Each action is the existing si
 | Cancel | `CANCELLABLE_STATUSES` (`awaiting_approval` = withdraw) | `PATCH /api/requests/:id {action:'cancel'}` | 400 `ValidationError`: not cancellable now |
 | Delete | any row with `inLibrary` false | `DELETE /api/admin/requests/:id?keepLibrary=1` | 409 `InLibrary`: in your library or being imported |
 
-- Any action: 404 = skipped "no longer exists". Any other refusal or a network error = failed, with the server's message.
+- Any action: 404 = skipped "no longer exists". Any other refusal = failed, with the server's message; a call with no answer (thrown fetch) = failed "no answer from RMAB" (`NO_ANSWER_REASON`), never the browser's error text.
 - Approve never sends an admin pick: a user's stored pick still downloads, as on the approval card.
 - Search again and Retry are not bulk actions (each queues an indexer search or download).
 
@@ -26,36 +26,38 @@ Checkboxes on the admin Request Management table. Each action is the existing si
 
 ## Run (`useBulkRun.ts`)
 - Owns a fixed list of the eligible selected requests (`{id, title}`), so a selection change mid-run does not change it.
-- `for` loop, `await` per item; per-item progress ("Deleting 3 of 40..."); a throw = failed item; the run goes on.
+- `for` loop, `await` per item; per-item progress ("Deleting 3 of 40..."); a throw = failed item ("no answer from RMAB"); the run goes on.
 - Stop: takes effect after the current request. Unmount (leaving the page): nothing new starts. Closing the tab: the request in flight finishes on the server, nothing more.
 - A second `start` while running returns null.
 - After a run: the selection keeps the requests not done (skipped, failed, not started); SWR refresh of the list, `/api/admin/metrics`, `/api/admin/requests/pending-approval`, and `/api/audiobooks*` after a delete.
-- Row menus, checkboxes and bar buttons are disabled during a run; filters and paging are not (the run owns its list).
+- Row menus, checkboxes and bar buttons are disabled during a run; filters and paging are not (the run owns its list). A list change mid-run clears the selection; the result still shows, without "(still selected)".
+- The run survives a failed poll: the table renders the bar in its loading and error states (`listReady={false}`: no prune), and the dashboard (`admin/page.tsx`) keeps rendering on a poll error once its data loaded (a `role="alert"` line instead of the full-page error).
 
 ## Bar (`BulkActionBar.tsx`)
-- `position: fixed` at the bottom of the viewport at every width, outside the table's scroll container (`z-40`; ConfirmDialog `z-50`; toasts top-right). A spacer under the table keeps the last rows reachable.
-- Left: "N selected" and Clear; during a run the progress; after it the result line (focused, `tabIndex=-1`) with Details (failed and skipped: title and reason, first 50) and Dismiss.
+- `position: fixed` at the bottom of the viewport at every width, outside the table's scroll container (`z-40`; ConfirmDialog `z-50`). A spacer under the table, sized from the bar's measured height (`ResizeObserver`; Details open included; `h-40 sm:h-24` before the first measure), keeps the last rows reachable.
+- Left: one status line (`tabIndex=-1`): "N selected" and Clear; during a run the progress; after it the result with Details (failed and skipped: title and reason, first 50, closed) and Dismiss. Focus moves to it when a run starts and stays there for the result.
 - Right: Approve, Deny, Cancel, Delete, each with the count it applies to, disabled at 0. During a run: Stop.
-- `role="region" aria-label="Bulk actions"`, `aria-live="polite"` on the status line. Checkboxes: `Select all requests on this page`, `Select <title>`; 44px hit area via the label; cell `w-10 px-3`.
-- Confirm (ConfirmDialog, focus on the safe button) closes on confirm; progress shows in the bar. Summary toast: success, or a 10 s warning when anything was skipped, failed or stopped.
+- `role="region" aria-label="Bulk actions"`. A separate `sr-only` `aria-live="polite"` line announces twice per run: the start ("Deleting 98 requests.") and the result; per-item progress is not announced. Checkboxes: `Select all requests on this page`, `Select <title>`; 44px hit area via the label; cell `w-10 px-3`.
+- Confirm (ConfirmDialog, focus on the safe button) closes on confirm; progress shows in the bar. A confirm left open closes for good when the selection it was built from changes or empties. No toast: the bar carries the result.
+- Selected rows: `bg-blue-50/70 dark:bg-blue-900/20`, hover `bg-blue-100/70 dark:bg-blue-900/30` (the grey row hover only on unselected rows).
 
-## Texts (`bulk-action-text.ts`; cancel sentences in `src/lib/utils/cancel-confirm-text.ts`)
-| Confirm | Title / button | Body |
+## Texts (`bulk-action-text.ts`; cancel lines in `src/lib/utils/cancel-confirm-text.ts`)
+| Confirm | Title / buttons | Body |
 |---|---|---|
-| Approve (primary) | Approve N requests? / Approve N requests | "RMAB starts searching for each one now, or on its release date if it isn't out yet." "A release the user already picked starts downloading at once." |
-| Deny (danger) | Deny N requests? / Deny N requests | "They're marked Denied and not searched for." |
-| Cancel (danger) | Cancel N requests? / Cancel N requests, Keep requests | `bulkCancelConfirmLines()`: "They stay in the list as Cancelled." "M waiting for approval are withdrawn; the user can request them again later." "Nothing in your library is touched." |
-| Delete (danger) | Delete N requests? / Delete N requests | "They're removed and can be requested again." "Downloads RMAB added are removed from the download client, unless they're still seeding or another request uses them." "Nothing in your library is touched." "M selected are books in your library or being imported and are left as they are." `DELETE_COMES_BACK_LINE` |
+| Approve (primary) | Approve N requests? / Approve N, Back | "RMAB starts on each one now: a search, or the release its user picked. Unreleased ones wait for release day." |
+| Deny (danger) | Deny N requests? / Deny N, Back | "They're marked Denied." |
+| Cancel (danger) | Cancel N requests? / Cancel N, Keep them | `bulkCancelConfirmLines()`: "They stay in the list as Cancelled. Nothing in your library is touched." "M waiting for approval are withdrawn." |
+| Delete (danger) | Delete N requests? / Delete N, Back | "Their downloads go too, unless still seeding or shared. Nothing in your library is touched: M books already in it are skipped." (no skips: ends at "touched.") `deleteComesBackLine()`: "A watched author or series, or a synced shelf, requests them again unless you remove it first or cancel instead." |
 
-- Each confirm adds the not-eligible count ("M selected aren't waiting for approval and are skipped.", "M selected can't be cancelled now and are skipped.").
-- Singular forms throughout ("Delete 1 request?").
-- `BULK_CANCEL_TEXT` (`'list'` | `'single'`): one line switches the bulk cancel body to the single cancel's download sentences in the plural.
-- Result: "Deleted 278 requests." then, as they apply, "M downloads are still in the download client." (cancel: `kept*`, `retry_later`, `not_removed`), "M skipped (reasons with counts).", "M failed.", "M not started; still selected."; a stopped run starts "Stopped after K of N.".
+- Not-eligible count: "M others aren't waiting for approval and are skipped." (approve, deny), "M others can't be cancelled and are skipped." (cancel).
+- Singular forms throughout ("Delete 1 request?", "Keep it", "1 book already in it is skipped.").
+- `BULK_CANCEL_TEXT` (`'list'` | `'single'`): one line switches the cancel's first sentence to "Downloads stop and what they fetched is removed, unless another request uses it."
+- Result: "Deleted 97." then, as they apply, "M in your library skipped." (every skip in the library; else "M skipped."), "M failed.", "M downloads stay in the download client." (cancel: `kept*`, `retry_later`, `not_removed`). A stopped run: "Stopped: denied 6, 94 not started (still selected)." Reasons per request are in Details.
 
 ## Delete
 - Never removes a book in the library or being imported: rule and refusal in [request-deletion.md](request-deletion.md#bulk-delete-212) (`deleteTouchesLibrary`, inside `deleteRequest`, decided on its own load).
-- What it removes per request is the single delete's: the download per its seeding rule (partial RMAB downloads; finished ones once their rule is met; shared or not-RMAB ones stay), RMAB's `plex_library` rows for the book, the request (soft delete, `deletedBy`).
-- **Comes back:** shelf sync (auto-request shelves) and watched authors/series create a deleted request again on their next run; a cancelled request is never re-created automatically. For those floods use Cancel, or remove the shelf or watch first. The delete confirm says so (`DELETE_COMES_BACK_LINE`).
+- What it removes per request is the single delete's: the download per its seeding rule (partial RMAB downloads; finished ones once their rule is met; shared or not-RMAB ones stay), the request (soft delete, `deletedBy`). Unlike a single delete it leaves RMAB's `plex_library` rows for the book (the book can be in the library by another route).
+- **Comes back:** shelf sync (auto-request shelves) and watched authors/series create a deleted request again on their next run; a cancelled request is never re-created automatically. For those floods remove the shelf or watch first, or use Cancel (a failed request cannot be cancelled). The delete confirm says so (`deleteComesBackLine`).
 
 ## Notifications
 - A bulk action sends what the single action sends, once per request: approve queues `request_approved`, cancel queues `request_cancelled`, deny and delete send none.

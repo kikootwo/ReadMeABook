@@ -13,10 +13,12 @@
  *            375 dark): X and Y stop downloading (torrents/delete with deleteFiles), the flood rows the
  *            cancel applies to are cancelled, the rest skipped.
  *   delete   new fast releases deliver the reader's B, the admin's A and C (in the library: folder,
- *            ABS item, torrent). A seeded cancelled request of the reader on A's book row (S) shares it.
- *            The reader's page selected: B and S are skipped, one flood DELETE fails in the browser,
- *            the rest are deleted. B, A and C keep their files, ABS items and torrents; a direct
- *            DELETE ?keepLibrary=1 on B answers 409 and changes nothing.
+ *            ABS item, torrent). A seeded cancelled request of the reader on A's book row (S) shares it;
+ *            another (R) sits on a second book row of A's book with no folder or item.
+ *            The reader's page selected: B and S are skipped, one flood DELETE fails in the browser
+ *            ("no answer from RMAB"), the rest (R included) are deleted; A's library index rows stay.
+ *            B, A and C keep their files, ABS items and torrents; a direct DELETE ?keepLibrary=1 on B
+ *            answers 409 and changes nothing.
  * Fails before the change: the table has no checkboxes and no bar (the first locator times out).
  */
 
@@ -28,7 +30,7 @@ import { loadScenario, qbitDeletes, lastSeq, waitAvailable } from './423-helpers
 import { cancelScenario, configureIndexers, registerReader, cancelRow, waitDownloading, torrentOf } from './506-helpers';
 import { session } from './284-helpers';
 import {
-  seedFlood, floodCounts, floodRequestId, jobsFor, requestRow, libraryState, listPage, bar, openTable, statusLine,
+  seedFlood, floodCounts, floodRequestId, jobsFor, requestRow, libraryState, listPage, bar, openTable, statusLine, libraryIndexRows,
 } from './212-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -36,7 +38,7 @@ test.skip(Boolean(process.env.E2E_PHASE?.startsWith('upgrade')), 'stack runs onl
 
 const DIR = '212';
 const CANCELLABLE = ['pending', 'searching', 'downloading', 'awaiting_search', 'awaiting_approval', 'awaiting_release'];
-const COMES_BACK = 'A watched author, watched series or synced shelf requests its books again on its next run; cancel those requests instead to stop that.';
+const COMES_BACK = 'A watched author or series, or a synced shelf, requests them again unless you remove it first or cancel instead.';
 
 const dialog = (page: Page) => page.getByRole('dialog');
 const floodNumber = (label: string) => Number(/Made Up Flood Book (\d{3})/.exec(label)?.[1] ?? NaN);
@@ -89,10 +91,10 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     await settled(DIR, 'approve-confirm-1280-light');
     const text = await dialog(page).innerText();
     c.save('approve-confirm.txt', `${text}\n`);
-    c.check('approve confirm: title, count and the search line',
-      text.includes('RMAB starts searching for each one now, or on its release date') && text.includes('A release the user already picked starts downloading at once.'), 'control');
-    await dialog(page).getByRole('button', { name: 'Approve 5 requests' }).click();
-    await expect(statusLine(page)).toHaveText(/^Approved 5 requests\.$/, { timeout: 120_000 });
+    c.check('approve confirm: title, count and the start line',
+      text.includes('RMAB starts on each one now: a search, or the release its user picked. Unreleased ones wait for release day.'), 'control');
+    await dialog(page).getByRole('button', { name: 'Approve 5', exact: true }).click();
+    await expect(statusLine(page)).toHaveText(/^Approved 5\.$/, { timeout: 120_000 });
     const statuses = picked.map((id) => requestRow(id).split('|')[0]);
     c.check(`approve: the 5 picked left awaiting_approval (${statuses.join(', ')})`, statuses.every((s) => s !== 'awaiting_approval'), 'safety');
     const jobs = jobsFor(picked);
@@ -115,24 +117,24 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
       await route.continue();
     });
     await bar(page).getByRole('button', { name: 'Deny 100', exact: true }).click();
-    await dialog(page).getByRole('button', { name: 'Deny 100 requests' }).click();
+    await dialog(page).getByRole('button', { name: 'Deny 100', exact: true }).click();
     await expect(statusLine(page)).toHaveText(/^Denying ([4-9]|\d\d) of 100\.\.\.$/, { timeout: 60_000 });
     await expect(bar(page).getByRole('button', { name: 'Stop' })).toBeVisible();
     await snap(page, DIR, 'deny-run-stop-1280-light');
     await bar(page).getByRole('button', { name: 'Stop' }).click();
-    await expect(statusLine(page)).toHaveText(/^Stopped after \d+ of 100\./, { timeout: 60_000 });
+    await expect(statusLine(page)).toHaveText(/^Stopped: denied \d+, /, { timeout: 60_000 });
     const stoppedText = await statusLine(page).innerText();
     c.save('deny-stopped.txt', `${stoppedText}\n`);
-    const k = Number(/^Stopped after (\d+) of 100/.exec(stoppedText)?.[1]);
+    const k = Number(/^Stopped: denied (\d+),/.exec(stoppedText)?.[1]);
     const deniedAfterStop = listed.filter((id) => requestRow(id).startsWith('denied|')).length;
     c.check(`deny: Stop took effect after the current request (${k} finished, ${deniedAfterStop} denied)`, k > 0 && k < 100 && deniedAfterStop === k, 'safety');
-    c.check(`deny: the stopped result says how many did not start (${stoppedText})`, stoppedText.includes(`Denied ${k} request`) && stoppedText.includes(`${100 - k} not started; still selected.`), 'control');
+    c.check(`deny: the stopped result says how many did not start (${stoppedText})`, stoppedText === `Stopped: denied ${k}, ${100 - k} not started (still selected).`, 'control');
     // In order: the first k of the list are the denied ones
     c.check('deny: one at a time, in list order', listed.slice(0, k).every((id) => requestRow(id).startsWith('denied|')), 'control');
     await page.unroute('**/api/admin/requests/*/approve');
     await bar(page).getByRole('button', { name: `Deny ${100 - k}`, exact: true }).click();
-    await dialog(page).getByRole('button', { name: `Deny ${100 - k} requests` }).click();
-    await expect(statusLine(page)).toHaveText(new RegExp(`^Denied ${100 - k} requests?\\.$`), { timeout: 120_000 });
+    await dialog(page).getByRole('button', { name: `Deny ${100 - k}`, exact: true }).click();
+    await expect(statusLine(page)).toHaveText(`Denied ${100 - k}.`, { timeout: 120_000 });
     const denied = listed.filter((id) => requestRow(id).startsWith('denied|')).length;
     c.check(`deny: all 100 denied in the end (${denied}; ${JSON.stringify(floodCounts())})`, denied === 100 && floodCounts().denied === 100 && floodCounts().awaiting_approval === 15, 'safety');
     const jobs = jobsFor(listed);
@@ -161,6 +163,12 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
       c.save(`${view.name}-buttons.json`, labels);
       c.check(`${view.name}: each button counts what it applies to (${labels.join(', ')}; expected ${JSON.stringify(expected)})`,
         labels.includes(`Approve ${expected.approve}`) && labels.includes(`Deny ${expected.approve}`) && labels.includes(`Cancel ${expected.cancel}`) && labels.includes(`Delete ${expected.delete}`), 'control');
+      // The spacer under the page is at least as tall as the fixed bar (measured after it settles)
+      const heights = async () => bar(view.p).evaluate((el) => ({ spacer: (el.previousElementSibling as HTMLElement).offsetHeight, bar: (el as HTMLElement).offsetHeight }));
+      await expect.poll(async () => { const h = await heights(); return h.spacer >= h.bar; }, { timeout: 10_000 }).toBe(true);
+      const measured = await heights();
+      c.save(`${view.name}-spacer.json`, measured);
+      c.check(`${view.name}: spacer ${measured.spacer}px, bar ${measured.bar}px`, measured.spacer >= measured.bar, 'control');
       await view.p.getByRole('checkbox', { name: /^Select Made Up Flood Book/ }).nth(3).scrollIntoViewIfNeeded();
       await view.s(DIR, view.name);
     }
@@ -175,11 +183,11 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     await settled(DIR, 'cancel-confirm-1280-light');
     const text = await dialog(page).innerText();
     c.save('cancel-confirm.txt', `${text}\n`);
-    c.check('cancel confirm: the shared sentences and the skipped count',
-      text.includes('They stay in the list as Cancelled.') && text.includes(`${expected.approve} waiting for approval are withdrawn; the user can request them again later.`)
-        && text.includes('Nothing in your library is touched.') && text.includes(`${100 - expected.cancel} selected can't be cancelled now and are skipped.`), 'control');
-    await dialog(page).getByRole('button', { name: `Cancel ${expected.cancel} requests` }).click();
-    await expect(statusLine(page)).toHaveText(/^Cancelled \d+ requests\./, { timeout: 180_000 });
+    c.check('cancel confirm: the list line, the withdrawn, the skipped count and the buttons',
+      text.includes('They stay in the list as Cancelled. Nothing in your library is touched.') && text.includes(`${expected.approve} waiting for approval are withdrawn.`)
+        && text.includes(`${100 - expected.cancel} others can't be cancelled and are skipped.`) && await dialog(page).getByRole('button', { name: 'Keep them' }).isVisible(), 'control');
+    await dialog(page).getByRole('button', { name: `Cancel ${expected.cancel}`, exact: true }).click();
+    await expect(statusLine(page)).toHaveText(/^Cancelled \d+\./, { timeout: 180_000 });
     const result = await statusLine(page).innerText();
     c.save('cancel-result.txt', `${result}\n`);
     const targets = rows.filter((r) => CANCELLABLE.includes(r.status)).map((r) => r.requestId);
@@ -187,7 +195,7 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     c.check(`cancel: every request it applied to is cancelled (${notCancelled.length} not)`, notCancelled.length === 0, 'safety', notCancelled.join(','));
     const others = rows.filter((r) => !CANCELLABLE.includes(r.status)).filter((r) => requestRow(r.requestId).split('|')[0] !== r.status);
     c.check(`cancel: the skipped ones are unchanged (${others.length} changed)`, others.length === 0, 'safety');
-    c.check(`cancel result: count and skipped (${result})`, result.startsWith(`Cancelled ${expected.cancel} requests.`) && result.includes(`${100 - expected.cancel} skipped (not cancellable now).`), 'control');
+    c.check(`cancel result: count and skipped (${result})`, result.startsWith(`Cancelled ${expected.cancel}. ${100 - expected.cancel} skipped.`), 'control');
     const deletes = await qbitDeletes(seq);
     c.save('cancel-qbit-deletes.json', deletes);
     for (const [name, t, id] of [['X', tX, ids.X], ['Y', tY, ids.Y]] as const) {
@@ -221,8 +229,19 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     `insert into requests (id, user_id, audiobook_id, type, status, progress, cancelled_at, created_at, updated_at)
      select ${sqlStr(ids.S)}, ${sqlStr(reader.userId)}, audiobook_id, 'audiobook', 'cancelled', 0, now(), now(), now() from requests where id = ${sqlStr(ids.A)}`
   );
+  // R: the reader's cancelled request on a second book row of A's book (same ASIN, title and author,
+  // no folder or item): in the library by another route, so a bulk delete passes it
+  const [asinA, titleA, authorA] = psql(
+    `select coalesce(a.audible_asin, '-') || '|' || a.title || '|' || a.author from audiobooks a join requests r on r.audiobook_id = a.id where r.id = ${sqlStr(ids.A)}`
+  ).split('|');
+  const bookR = crypto.randomUUID();
+  ids.R = crypto.randomUUID();
+  psql(`insert into audiobooks (id, audible_asin, title, author, status, created_at, updated_at)
+        values (${sqlStr(bookR)}, ${sqlStr(asinA)}, ${sqlStr(titleA)}, ${sqlStr(authorA)}, 'requested', now(), now())`);
+  psql(`insert into requests (id, user_id, audiobook_id, type, status, progress, cancelled_at, created_at, updated_at)
+        values (${sqlStr(ids.R)}, ${sqlStr(reader.userId)}, ${sqlStr(bookR)}, 'audiobook', 'cancelled', 0, now(), now(), now())`);
   c.save('ids.json', ids);
-  const before = { A: await libraryState(ids.A, 'a'), B: await libraryState(ids.B, 'b'), C: await libraryState(ids.C, 'c') };
+  const before ={ A: await libraryState(ids.A, 'a'), B: await libraryState(ids.B, 'b'), C: await libraryState(ids.C, 'c') };
   c.save('library-before.json', before);
   for (const [name, s] of Object.entries(before)) {
     c.check(`${name} in the library before (folder, files, ABS item, torrent: ${JSON.stringify({ ...s, shas: s.shas.split('\n').length })})`,
@@ -239,6 +258,9 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     c.check(`delete page: B and S flagged inLibrary, A and C not on it (${inLibrary.length} flagged)`,
       inLibrary.includes(ids.B) && inLibrary.includes(ids.S) && !rows.some((r) => [ids.A, ids.C].includes(r.requestId)), 'control');
     const toDelete = rows.filter((r) => !r.inLibrary).map((r) => r.requestId);
+    const indexBefore = libraryIndexRows(asinA, titleA, authorA);
+    c.check(`R is on the page and not flagged; A's book has library index rows (${indexBefore})`,
+      toDelete.includes(ids.R) && toDelete[toDelete.length - 1] !== ids.R && asinA !== '-' && indexBefore > 0, 'control');
     const failing = toDelete[toDelete.length - 1];
     await page.route((url) => url.pathname === `/api/admin/requests/${failing}`, (route) =>
       route.request().method() === 'DELETE' ? route.abort('failed') : route.continue());
@@ -250,17 +272,22 @@ test('212 bulk approve, deny, cancel and delete from the admin table', async ({ 
     await settled(DIR, 'delete-confirm-1280-light');
     const text = await dialog(page).innerText();
     c.save('delete-confirm.txt', `${text}\n`);
-    c.check('delete confirm: count, what is removed, the skipped library books and the comes-back line',
-      text.includes("They're removed and can be requested again.") && text.includes('Nothing in your library is touched.')
-        && text.includes(`${inLibrary.length} selected are books in your library or being imported and are left as they are.`) && text.includes(COMES_BACK), 'control');
-    await dialog(page).getByRole('button', { name: `Delete ${toDelete.length} requests` }).click();
-    await expect(statusLine(page)).toHaveText(/^Deleted \d+ requests\./, { timeout: 300_000 });
+    c.check('delete confirm: downloads, nothing in the library touched with the books skipped, the comes-back line',
+      text.includes(`Their downloads go too, unless still seeding or shared. Nothing in your library is touched: ${inLibrary.length} books already in it are skipped.`)
+        && text.includes(COMES_BACK), 'control');
+    await dialog(page).getByRole('button', { name: `Delete ${toDelete.length}`, exact: true }).click();
+    await expect(statusLine(page)).toHaveText(/^Deleted \d+\./, { timeout: 300_000 });
     await bar(page).locator('summary', { hasText: 'Details' }).click();
     await settled(DIR, 'delete-result-1280-light');
     const result = await statusLine(page).innerText();
-    c.save('delete-result.txt', `${result}\n${(await bar(page).locator('details li').allInnerTexts()).join('\n')}\n`);
+    const details = await bar(page).locator('details li').allInnerTexts();
+    c.save('delete-result.txt', `${result}\n${details.join('\n')}\n`);
     c.check(`delete result: deleted, skipped and failed counts (${result})`,
-      result === `Deleted ${toDelete.length - 1} requests. ${inLibrary.length} skipped (in your library or being imported). 1 failed.`, 'control');
+      result === `Deleted ${toDelete.length - 1}. ${inLibrary.length} in your library skipped. 1 failed.`, 'control');
+    c.check(`delete result: the failed one says RMAB did not answer (${details[0]})`, /: no answer from RMAB$/.test(details[0] ?? ''), 'control');
+    const indexAfter = libraryIndexRows(asinA, titleA, authorA);
+    c.check(`delete: R deleted, A's library index rows untouched (${indexBefore} before, ${indexAfter} after)`,
+      requestRow(ids.R).endsWith(`|${adminId}`) && indexAfter === indexBefore, 'safety');
     const deleted = toDelete.filter((id) => requestRow(id).endsWith(`|${adminId}`)).length;
     c.check(`delete: every other request deleted by the admin (${deleted} of ${toDelete.length - 1})`, deleted === toDelete.length - 1, 'safety');
     c.check(`delete: the failed one is still there (${requestRow(failing)})`, requestRow(failing).split('|')[1] === '', 'safety');

@@ -6,11 +6,12 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const useSWRMock = vi.hoisted(() => vi.fn());
 const mutateMock = vi.hoisted(() => vi.fn());
+const fetchWithAuthMock = vi.hoisted(() => vi.fn());
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
@@ -19,7 +20,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('swr', () => ({ default: useSWRMock, mutate: mutateMock }));
-vi.mock('@/lib/utils/api', () => ({ fetchWithAuth: vi.fn(), authenticatedFetcher: vi.fn() }));
+vi.mock('@/lib/utils/api', () => ({ fetchWithAuth: fetchWithAuthMock, authenticatedFetcher: vi.fn() }));
 vi.mock('@/components/ui/Toast', () => ({ useToast: () => toastMock }));
 vi.mock('@/app/admin/components/RequestActionsDropdown', () => ({
   RequestActionsDropdown: ({ isLoading }: { isLoading?: boolean }) => <span data-testid="row-menu" data-loading={String(!!isLoading)} />,
@@ -42,6 +43,7 @@ const lastListOptions = () => [...useSWRMock.mock.calls].reverse().find(([url]) 
 describe('RecentRequestsTable bulk selection', () => {
   beforeEach(() => {
     useSWRMock.mockReset();
+    fetchWithAuthMock.mockReset();
     useSWRMock.mockImplementation((url: string) => {
       if (url.startsWith('/api/admin/requests')) return { data: DATA, error: null, isLoading: false };
       if (url === '/api/admin/users') return { data: { users: [] }, error: null, isLoading: false };
@@ -74,6 +76,35 @@ describe('RecentRequestsTable bulk selection', () => {
     expect(screen.getByRole('button', { name: 'Approve 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Delete 2' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Cancel 1' })).toBeTruthy();
+  });
+
+  it('a selected row keeps its tint under hover, light and dark', () => {
+    render(<RecentRequestsTable />);
+    const rowOf = (name: string) => screen.getByRole('checkbox', { name }).closest('tr') as HTMLElement;
+    expect(rowOf('Select Made Up r2').className).toContain('hover:bg-gray-50');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Made Up r2' }));
+    const cls = rowOf('Select Made Up r2').className.split(/\s+/);
+    expect(cls).toEqual(expect.arrayContaining(['bg-blue-50/70', 'dark:bg-blue-900/20']));
+    expect(cls.filter((c) => c.startsWith('hover:') || c.startsWith('dark:hover:')).every((c) => c.includes('blue'))).toBe(true);
+    expect(cls.some((c) => c.startsWith('dark:hover:'))).toBe(true);
+  });
+
+  it('a failed list fetch during a run keeps the bar with its progress and Stop', async () => {
+    fetchWithAuthMock.mockImplementation(() => new Promise(() => {}));
+    const { rerender } = render(<RecentRequestsTable />);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Made Up r2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete 1' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete 1' }));
+    expect(await screen.findByText('Deleting 0 of 1...')).toBeTruthy();
+    useSWRMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/admin/requests')) return { data: DATA, error: new Error('Failed to load'), isLoading: false };
+      if (url === '/api/admin/users') return { data: { users: [] }, error: null, isLoading: false };
+      return { data: null, error: null, isLoading: false };
+    });
+    rerender(<RecentRequestsTable />);
+    expect(screen.getByText('Failed to load requests. Please try again.')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Bulk actions' })).getByText('Deleting 0 of 1...')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
   });
 
   it('changing a filter clears the selection', () => {

@@ -21,49 +21,28 @@ export function cancelConfirmText(status: string, type: string | undefined): str
   return type === 'ebook' ? CANCEL_CONFIRM_EBOOK : CANCEL_CONFIRM_AUDIOBOOK;
 }
 
-/** What a bulk cancel (admin table, #212) will act on, by the kind of sentence each needs. */
+/** What a bulk cancel (admin table, #212) will act on. */
 export interface BulkCancelCounts {
   /** Every request the cancel acts on */
   total: number;
-  downloadingAudiobooks: number;
-  downloadingEbooks: number;
   /** Withdrawn rather than cancelled (the single action calls it "Withdraw request") */
   awaitingApproval: number;
 }
 
 /**
- * Which sentences the bulk cancel confirm uses: 'list' (the request stays in the list as
- * Cancelled) or 'single' (the single cancel's own download sentences, in the plural).
+ * The bulk cancel confirm's first sentence: 'list' (the requests stay in the list as
+ * Cancelled) or 'single' (their downloads stop and what they fetched is removed).
  */
 export const BULK_CANCEL_TEXT: 'list' | 'single' = 'list';
 
-const areIs = (n: number) => (n === 1 ? 'is' : 'are');
-
-/** The bulk cancel confirm's body, one sentence per line. */
+/** The bulk cancel confirm's body, one line each. */
 export function bulkCancelConfirmLines(counts: BulkCancelCounts, variant: 'list' | 'single' = BULK_CANCEL_TEXT): string[] {
-  const lines: string[] = [];
-  if (variant === 'single') {
-    lines.push(counts.total === 1 ? 'RMAB stops looking for it.' : 'RMAB stops looking for them.');
-    const a = counts.downloadingAudiobooks;
-    if (a > 0) {
-      lines.push(
-        `For the ${a === 1 ? 'audiobook' : `${a} audiobooks`} downloading, it stops the download and removes what it downloaded so far, ` +
-          'unless another request still uses it. A download that already finished may stay in the download client to seed.'
-      );
-    }
-    const e = counts.downloadingEbooks;
-    if (e > 0) {
-      lines.push(
-        `For the ${e === 1 ? 'ebook' : `${e} ebooks`} downloading, it stops the download. ` +
-          'What it already downloaded may stay in the download client or the downloads folder.'
-      );
-    }
-  } else {
-    lines.push(counts.total === 1 ? 'It stays in the list as Cancelled.' : 'They stay in the list as Cancelled.');
-  }
-  if (counts.awaitingApproval > 0) {
-    lines.push(`${counts.awaitingApproval} waiting for approval ${areIs(counts.awaitingApproval)} withdrawn; the user can request ${counts.awaitingApproval === 1 ? 'it' : 'them'} again later.`);
-  }
-  lines.push('Nothing in your library is touched.');
+  const one = counts.total === 1;
+  const first = variant === 'single'
+    ? (one ? 'Its download stops and what it fetched is removed' : 'Downloads stop and what they fetched is removed') + ', unless another request uses it.'
+    : one ? 'It stays in the list as Cancelled.' : 'They stay in the list as Cancelled.';
+  const lines = [`${first} Nothing in your library is touched.`];
+  const waiting = counts.awaitingApproval;
+  if (waiting > 0) lines.push(`${waiting} waiting for approval ${waiting === 1 ? 'is' : 'are'} withdrawn.`);
   return lines;
 }

@@ -3,13 +3,14 @@
  * Documentation: documentation/admin-features/bulk-request-actions.md
  *
  * Every string the bulk action bar shows: buttons, confirms, progress and results.
- * The cancel confirm's sentences come from cancel-confirm-text.ts (shared with the single cancel).
+ * The cancel confirm's first lines come from cancel-confirm-text.ts (its one-line wording switch).
  */
 
 import { bulkCancelConfirmLines } from '@/lib/utils/cancel-confirm-text';
-import { appliesTo, type BulkAction, type BulkRow, type BulkSummary } from './bulk-actions';
+import { appliesTo, SKIP_REASONS, type BulkAction, type BulkRow, type BulkSummary } from './bulk-actions';
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+const isAre = (n: number) => plural(n, 'is', 'are');
 export const requestsWord = (n: number) => `${n} ${plural(n, 'request', 'requests')}`;
 
 const VERB: Record<BulkAction, { label: string; doing: string; done: string }> = {
@@ -19,13 +20,15 @@ const VERB: Record<BulkAction, { label: string; doing: string; done: string }> =
   delete: { label: 'Delete', doing: 'Deleting', done: 'Deleted' },
 };
 
-/** Shown in the delete confirm and the docs: what brings a deleted request back. */
-export const DELETE_COMES_BACK_LINE =
-  'A watched author, watched series or synced shelf requests its books again on its next run; cancel those requests instead to stop that.';
+/** The delete confirm's second line: what brings a deleted request back, and the two ways to stop it. */
+export const deleteComesBackLine = (n: number) =>
+  `A watched author or series, or a synced shelf, requests ${plural(n, 'it', 'them')} again unless you remove it first or cancel instead.`;
 
 export const selectedText = (n: number) => `${n} selected`;
 export const buttonText = (action: BulkAction, count: number) => `${VERB[action].label} ${count}`;
 export const progressText = (action: BulkAction, finished: number, total: number) => `${VERB[action].doing} ${finished} of ${total}...`;
+/** Announced once when a run starts */
+export const runStartText = (action: BulkAction, total: number) => `${VERB[action].doing} ${requestsWord(total)}.`;
 
 export interface ConfirmText {
   title: string;
@@ -40,48 +43,31 @@ export function confirmText(action: BulkAction, rows: BulkRow[]): ConfirmText {
   const targets = rows.filter((row) => appliesTo(action, row));
   const n = targets.length;
   const skipped = rows.length - n;
-  const word = requestsWord(n);
+  const base = { title: `${VERB[action].label} ${requestsWord(n)}?`, confirmLabel: buttonText(action, n), cancelLabel: 'Back' };
   if (action === 'approve' || action === 'deny') {
-    const lines = action === 'approve'
-      ? [
-        `RMAB starts searching for ${plural(n, 'it', 'each one')} now, or on its release date if it isn't out yet.`,
-        'A release the user already picked starts downloading at once.',
-      ]
-      : [`${plural(n, "It's", "They're")} marked Denied and not searched for.`];
-    if (skipped > 0) lines.push(`${skipped} selected ${plural(skipped, "isn't", "aren't")} waiting for approval and ${plural(skipped, 'is', 'are')} skipped.`);
-    return { title: `${VERB[action].label} ${word}?`, lines, confirmLabel: `${VERB[action].label} ${word}`, cancelLabel: 'Back', variant: action === 'approve' ? 'primary' : 'danger' };
+    const lines = [action === 'approve'
+      ? plural(n,
+        'RMAB starts on it now: a search, or the release its user picked. If unreleased, it waits for release day.',
+        'RMAB starts on each one now: a search, or the release its user picked. Unreleased ones wait for release day.')
+      : `${plural(n, "It's", "They're")} marked Denied.`];
+    if (skipped > 0) lines.push(`${skipped} ${plural(skipped, "other isn't", "others aren't")} waiting for approval and ${isAre(skipped)} skipped.`);
+    return { ...base, lines, variant: action === 'approve' ? 'primary' : 'danger' };
   }
   if (action === 'cancel') {
-    const lines = bulkCancelConfirmLines({
-      total: n,
-      downloadingAudiobooks: targets.filter((r) => r.status === 'downloading' && r.type !== 'ebook').length,
-      downloadingEbooks: targets.filter((r) => r.status === 'downloading' && r.type === 'ebook').length,
-      awaitingApproval: targets.filter((r) => r.status === 'awaiting_approval').length,
-    });
-    if (skipped > 0) lines.push(`${skipped} selected can't be cancelled now and ${plural(skipped, 'is', 'are')} skipped.`);
-    return { title: `Cancel ${word}?`, lines, confirmLabel: `Cancel ${word}`, cancelLabel: 'Keep requests', variant: 'danger' };
+    const lines = bulkCancelConfirmLines({ total: n, awaitingApproval: targets.filter((r) => r.status === 'awaiting_approval').length });
+    if (skipped > 0) lines.push(`${skipped} ${plural(skipped, 'other', 'others')} can't be cancelled and ${isAre(skipped)} skipped.`);
+    return { ...base, lines, cancelLabel: plural(n, 'Keep it', 'Keep them'), variant: 'danger' };
   }
+  const inLibrary = skipped > 0 ? `: ${skipped} ${plural(skipped, 'book', 'books')} already in it ${isAre(skipped)} skipped.` : '.';
   const lines = [
-    `${plural(n, "It's", "They're")} removed and can be requested again.`,
-    "Downloads RMAB added are removed from the download client, unless they're still seeding or another request uses them.",
-    'Nothing in your library is touched.',
+    `${plural(n, 'Its download goes', 'Their downloads go')} too, unless still seeding or shared. Nothing in your library is touched${inLibrary}`,
+    deleteComesBackLine(n),
   ];
-  if (skipped > 0) {
-    lines.push(`${skipped} selected ${plural(skipped, 'is a book', 'are books')} in your library or being imported and ${plural(skipped, 'is', 'are')} left as ${plural(skipped, 'it is', 'they are')}.`);
-  }
-  lines.push(DELETE_COMES_BACK_LINE);
-  return { title: `Delete ${word}?`, lines, confirmLabel: `Delete ${word}`, cancelLabel: 'Back', variant: 'danger' };
+  return { ...base, lines, variant: 'danger' };
 }
 
 /** Cancel outcomes that leave the download in the client. */
 const DOWNLOAD_STAYS = ['kept', 'kept_seeding', 'kept_unlimited', 'kept_shared', 'kept_not_owned', 'kept_finished', 'retry_later', 'not_removed'];
-
-function countBy(items: { reason?: string }[]): string {
-  const counts = new Map<string, number>();
-  for (const item of items) counts.set(item.reason ?? 'unknown', (counts.get(item.reason ?? 'unknown') ?? 0) + 1);
-  if (counts.size === 1) return [...counts.keys()][0];
-  return [...counts.entries()].map(([reason, count]) => `${count} ${reason}`).join(', ');
-}
 
 export interface ResultText {
   lines: string[];
@@ -91,21 +77,27 @@ export interface ResultText {
   tone: 'success' | 'warning';
 }
 
-/** What a finished (or stopped) run reports. */
-export function resultText(summary: BulkSummary): ResultText {
+/**
+ * What a finished (or stopped) run reports. `stillSelected`: the requests not started are
+ * still selected (false when the list changed during the run and cleared the selection).
+ */
+export function resultText(summary: BulkSummary, { stillSelected = true }: { stillSelected?: boolean } = {}): ResultText {
   const done = summary.outcomes.filter((o) => o.result === 'done');
   const skipped = [...summary.preSkipped, ...summary.outcomes.filter((o) => o.result === 'skipped')];
   const failed = summary.outcomes.filter((o) => o.result === 'failed');
-  const lines: string[] = [];
-  const doneLine = `${VERB[summary.action].done} ${requestsWord(done.length)}.`;
-  lines.push(summary.stopped ? `Stopped after ${summary.outcomes.length} of ${summary.total}. ${doneLine}` : doneLine);
+  const verb = VERB[summary.action].done;
+  const lines = [summary.stopped
+    ? `Stopped: ${verb.toLowerCase()} ${done.length}, ${summary.notStarted.length} not started${stillSelected ? ' (still selected)' : ''}.`
+    : `${verb} ${done.length}.`];
+  if (skipped.length > 0) {
+    const allInLibrary = skipped.every((o) => o.reason === SKIP_REASONS.inLibrary);
+    lines.push(`${skipped.length} ${allInLibrary ? 'in your library ' : ''}skipped.`);
+  }
+  if (failed.length > 0) lines.push(`${failed.length} failed.`);
   if (summary.action === 'cancel') {
     const stays = done.filter((o) => o.download && DOWNLOAD_STAYS.includes(o.download)).length;
-    if (stays > 0) lines.push(`${stays} ${plural(stays, 'download is', 'downloads are')} still in the download client.`);
+    if (stays > 0) lines.push(`${stays} ${plural(stays, 'download stays', 'downloads stay')} in the download client.`);
   }
-  if (skipped.length > 0) lines.push(`${skipped.length} skipped (${countBy(skipped)}).`);
-  if (failed.length > 0) lines.push(`${failed.length} failed.`);
-  if (summary.notStarted.length > 0) lines.push(`${summary.notStarted.length} not started; still selected.`);
   const all = [...failed, ...skipped].map((o) => `${o.title}: ${o.reason ?? 'unknown'}`);
   return {
     lines,

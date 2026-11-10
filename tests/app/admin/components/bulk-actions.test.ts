@@ -59,9 +59,9 @@ describe('runBulkItem: the existing single routes', () => {
     expect(await runBulkItem('cancel', 'id-1')).toEqual({ result: 'done', download: 'kept_seeding' });
   });
 
-  it('a network error is a failed item, never a throw', async () => {
+  it('a network error is a failed item saying RMAB did not answer, never the browser error or a throw', async () => {
     fetchWithAuthMock.mockRejectedValueOnce(new Error('Failed to fetch'));
-    expect(await runBulkItem('delete', 'id-1')).toEqual({ result: 'failed', reason: 'Failed to fetch' });
+    expect(await runBulkItem('delete', 'id-1')).toEqual({ result: 'failed', reason: 'no answer from RMAB' });
   });
 });
 

@@ -59,6 +59,9 @@ export const SKIP_REASONS = {
   gone: 'no longer exists',
 } as const;
 
+/** A call that got no answer (network down, RMAB restarting): never the browser's own error text. */
+export const NO_ANSWER_REASON = 'no answer from RMAB';
+
 /** Whether `action` applies to `row`, exactly as the single action allows it. */
 export function appliesTo(action: BulkAction, row: BulkRow): boolean {
   switch (action) {
@@ -122,7 +125,7 @@ export async function runBulkItem(action: BulkAction, id: string): Promise<BulkI
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return classifyRefusal(action, response.status, body ?? {});
     return action === 'cancel' && typeof body?.download === 'string' ? { result: 'done', download: body.download } : { result: 'done' };
-  } catch (error) {
-    return { result: 'failed', reason: error instanceof Error ? error.message : 'the request did not complete' };
+  } catch {
+    return { result: 'failed', reason: NO_ANSWER_REASON };
   }
 }

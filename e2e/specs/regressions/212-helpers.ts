@@ -99,5 +99,13 @@ export async function openTable(page: Page, query: string) {
   await expect(page.getByRole('checkbox', { name: 'Select all requests on this page' })).toBeVisible({ timeout: 60_000 });
 }
 
-/** The bar's status line (selection count, progress or result). */
-export const statusLine = (page: Page) => bar(page).locator('p').first();
+/** The bar's status line (selection count, progress or result; focusable, unlike the screen reader line). */
+export const statusLine = (page: Page) => bar(page).locator('p[tabindex="-1"]');
+
+/** plex_library rows the delete's index cleanup would match for a book (by ASIN, or exact title and author). */
+export function libraryIndexRows(asin: string, title: string, author: string): number {
+  return Number(psql(
+    `select count(*) from plex_library where asin = ${sqlStr(asin)} or plex_guid like ${sqlStr(`%${asin}%`)}
+     or (lower(title) = lower(${sqlStr(title)}) and lower(author) = lower(${sqlStr(author)}))`
+  ));
+}

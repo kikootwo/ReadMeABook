@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buttonText, confirmText, DELETE_COMES_BACK_LINE, progressText, resultText, selectedText } from '@/app/admin/components/bulk-action-text';
+import { buttonText, confirmText, deleteComesBackLine, progressText, resultText, runStartText, selectedText } from '@/app/admin/components/bulk-action-text';
 import type { BulkRow, BulkSummary } from '@/app/admin/components/bulk-actions';
 
 let n = 0;
@@ -12,107 +12,114 @@ const r = (status: string, extra: Partial<BulkRow> = {}): BulkRow => ({ requestI
 const many = (count: number, status: string, extra: Partial<BulkRow> = {}) => Array.from({ length: count }, () => r(status, extra));
 
 describe('bar texts', () => {
-  it('count, buttons and progress', () => {
+  it('count, buttons, progress and the run start', () => {
     expect(selectedText(52)).toBe('52 selected');
     expect(buttonText('delete', 52)).toBe('Delete 52');
     expect(buttonText('approve', 0)).toBe('Approve 0');
     expect(progressText('delete', 120, 280)).toBe('Deleting 120 of 280...');
+    expect(runStartText('delete', 98)).toBe('Deleting 98 requests.');
   });
 });
 
 describe('confirmText', () => {
-  it('delete states the count, what is removed, the books in the library skipped and that requests can come back', () => {
-    const c = confirmText('delete', [...many(278, 'failed'), ...many(2, 'available', { inLibrary: true })]);
-    expect(c.title).toBe('Delete 278 requests?');
-    expect(c.confirmLabel).toBe('Delete 278 requests');
-    expect(c.variant).toBe('danger');
+  it('delete: downloads, nothing in the library touched with the books skipped, and how they come back', () => {
+    const c = confirmText('delete', [...many(98, 'failed'), ...many(2, 'available', { inLibrary: true })]);
+    expect(c).toMatchObject({ title: 'Delete 98 requests?', confirmLabel: 'Delete 98', cancelLabel: 'Back', variant: 'danger' });
     expect(c.lines).toEqual([
-      "They're removed and can be requested again.",
-      "Downloads RMAB added are removed from the download client, unless they're still seeding or another request uses them.",
-      'Nothing in your library is touched.',
-      '2 selected are books in your library or being imported and are left as they are.',
-      DELETE_COMES_BACK_LINE,
+      'Their downloads go too, unless still seeding or shared. Nothing in your library is touched: 2 books already in it are skipped.',
+      'A watched author or series, or a synced shelf, requests them again unless you remove it first or cancel instead.',
     ]);
-    expect(DELETE_COMES_BACK_LINE).toMatch(/watched author.*shelf.*cancel/);
   });
 
-  it('singular texts', () => {
-    const c = confirmText('delete', [r('failed'), r('available', { inLibrary: true })]);
-    expect(c.title).toBe('Delete 1 request?');
-    expect(c.lines[0]).toBe("It's removed and can be requested again.");
-    expect(c.lines[3]).toBe('1 selected is a book in your library or being imported and is left as it is.');
-    expect(confirmText('approve', [r('awaiting_approval')]).title).toBe('Approve 1 request?');
-    expect(confirmText('cancel', [r('pending')]).title).toBe('Cancel 1 request?');
+  it('delete with no skips ends at "touched."; one skip is singular', () => {
+    expect(confirmText('delete', many(3, 'failed')).lines[0]).toBe('Their downloads go too, unless still seeding or shared. Nothing in your library is touched.');
+    const one = confirmText('delete', [r('failed'), r('available', { inLibrary: true })]);
+    expect(one).toMatchObject({ title: 'Delete 1 request?', confirmLabel: 'Delete 1' });
+    expect(one.lines).toEqual([
+      'Its download goes too, unless still seeding or shared. Nothing in your library is touched: 1 book already in it is skipped.',
+      deleteComesBackLine(1),
+    ]);
+    expect(deleteComesBackLine(1)).toBe('A watched author or series, or a synced shelf, requests it again unless you remove it first or cancel instead.');
   });
 
-  it('approve says it starts that many searches and names the skipped', () => {
-    const c = confirmText('approve', [...many(12, 'awaiting_approval'), r('failed')]);
-    expect(c.title).toBe('Approve 12 requests?');
-    expect(c.confirmLabel).toBe('Approve 12 requests');
-    expect(c.variant).toBe('primary');
+  it('approve: one line on what starts, and the skipped', () => {
+    const c = confirmText('approve', [...many(5, 'awaiting_approval'), ...many(85, 'failed')]);
+    expect(c).toMatchObject({ title: 'Approve 5 requests?', confirmLabel: 'Approve 5', cancelLabel: 'Back', variant: 'primary' });
     expect(c.lines).toEqual([
-      "RMAB starts searching for each one now, or on its release date if it isn't out yet.",
-      'A release the user already picked starts downloading at once.',
-      "1 selected isn't waiting for approval and is skipped.",
+      'RMAB starts on each one now: a search, or the release its user picked. Unreleased ones wait for release day.',
+      "85 others aren't waiting for approval and are skipped.",
     ]);
+    expect(confirmText('approve', [r('awaiting_approval'), r('failed')]).lines[1]).toBe("1 other isn't waiting for approval and is skipped.");
   });
 
   it('deny is a danger confirm with the count', () => {
     const c = confirmText('deny', many(3, 'awaiting_approval'));
-    expect(c).toMatchObject({ title: 'Deny 3 requests?', confirmLabel: 'Deny 3 requests', variant: 'danger' });
-    expect(c.lines).toEqual(["They're marked Denied and not searched for."]);
+    expect(c).toMatchObject({ title: 'Deny 3 requests?', confirmLabel: 'Deny 3', cancelLabel: 'Back', variant: 'danger' });
+    expect(c.lines).toEqual(["They're marked Denied."]);
+    expect(confirmText('deny', [r('awaiting_approval')]).lines).toEqual(["It's marked Denied."]);
   });
 
-  it('cancel: the shared text, the withdraw wording for those waiting for approval, the skipped', () => {
-    const c = confirmText('cancel', [...many(37, 'awaiting_search'), ...many(3, 'awaiting_approval'), ...many(2, 'downloading'), r('failed')]);
-    expect(c).toMatchObject({ title: 'Cancel 42 requests?', confirmLabel: 'Cancel 42 requests', cancelLabel: 'Keep requests', variant: 'danger' });
+  it('cancel: the shared text, the withdraw line, the skipped', () => {
+    const c = confirmText('cancel', [...many(40, 'awaiting_search'), ...many(15, 'awaiting_approval'), ...many(2, 'downloading'), ...many(43, 'failed')]);
+    expect(c).toMatchObject({ title: 'Cancel 57 requests?', confirmLabel: 'Cancel 57', cancelLabel: 'Keep them', variant: 'danger' });
     expect(c.lines).toEqual([
-      'They stay in the list as Cancelled.',
-      '3 waiting for approval are withdrawn; the user can request them again later.',
-      'Nothing in your library is touched.',
-      "1 selected can't be cancelled now and is skipped.",
+      'They stay in the list as Cancelled. Nothing in your library is touched.',
+      '15 waiting for approval are withdrawn.',
+      "43 others can't be cancelled and are skipped.",
     ]);
+    const one = confirmText('cancel', [r('pending')]);
+    expect(one).toMatchObject({ title: 'Cancel 1 request?', confirmLabel: 'Cancel 1', cancelLabel: 'Keep it' });
   });
 });
 
 const summary = (over: Partial<BulkSummary>): BulkSummary => ({ action: 'delete', total: 0, outcomes: [], preSkipped: [], stopped: false, notStarted: [], ...over });
 const item = (id: string, result: 'done' | 'skipped' | 'failed', reason?: string, download?: string) => ({ id, title: `Made Up ${id}`, result, reason, download });
+const lib = 'in your library or being imported';
 
 describe('resultText', () => {
   it('all done: one success line', () => {
     const t = resultText(summary({ total: 2, outcomes: [item('a', 'done'), item('b', 'done')] }));
-    expect(t).toEqual({ lines: ['Deleted 2 requests.'], details: [], moreDetails: 0, tone: 'success' });
+    expect(t).toEqual({ lines: ['Deleted 2.'], details: [], moreDetails: 0, tone: 'success' });
   });
 
-  it('skipped and failed counts, grouped reasons and a details list', () => {
+  it('delete: books in the library skipped, failed, and a details list', () => {
     const t = resultText(summary({
-      total: 4,
-      outcomes: [item('a', 'done'), item('b', 'failed', 'the server answered 500'), item('c', 'skipped', 'no longer exists'), item('d', 'done')],
-      preSkipped: [item('e', 'skipped', 'in your library or being imported'), item('f', 'skipped', 'in your library or being imported')],
+      total: 3,
+      outcomes: [item('a', 'done'), item('b', 'failed', 'the server answered 500'), item('d', 'done')],
+      preSkipped: [item('e', 'skipped', lib), item('f', 'skipped', lib)],
     }));
-    expect(t.lines).toEqual([
-      'Deleted 2 requests.',
-      '3 skipped (2 in your library or being imported, 1 no longer exists).',
-      '1 failed.',
-    ]);
-    expect(t.details).toEqual([
-      'Made Up b: the server answered 500',
-      'Made Up e: in your library or being imported',
-      'Made Up f: in your library or being imported',
-      'Made Up c: no longer exists',
-    ]);
+    expect(t.lines).toEqual(['Deleted 2.', '2 in your library skipped.', '1 failed.']);
+    expect(t.details).toEqual(['Made Up b: the server answered 500', `Made Up e: ${lib}`, `Made Up f: ${lib}`]);
     expect(t.tone).toBe('warning');
   });
 
-  it('a stopped run says where it stopped and what stays selected', () => {
-    const t = resultText(summary({ action: 'approve', total: 5, outcomes: [item('a', 'done'), item('b', 'done')], stopped: true, notStarted: [{ id: 'c', title: 'c' }, { id: 'd', title: 'd' }, { id: 'e', title: 'e' }] }));
-    expect(t.lines).toEqual(['Stopped after 2 of 5. Approved 2 requests.', '3 not started; still selected.']);
+  it('mixed skip reasons count as skipped (the reasons are in the details)', () => {
+    const t = resultText(summary({ total: 2, outcomes: [item('a', 'done'), item('c', 'skipped', 'no longer exists')], preSkipped: [item('e', 'skipped', lib)] }));
+    expect(t.lines).toEqual(['Deleted 1.', '2 skipped.']);
+  });
+
+  it('a stopped run says what it did and what stays selected', () => {
+    const notStarted = [{ id: 'c', title: 'c' }, { id: 'd', title: 'd' }, { id: 'e', title: 'e' }];
+    const t = resultText(summary({ action: 'deny', total: 5, outcomes: [item('a', 'done'), item('b', 'done')], stopped: true, notStarted }));
+    expect(t.lines).toEqual(['Stopped: denied 2, 3 not started (still selected).']);
     expect(t.tone).toBe('warning');
   });
 
-  it('cancel counts downloads still in the client', () => {
-    const t = resultText(summary({ action: 'cancel', total: 4, outcomes: [item('a', 'done', undefined, 'removed'), item('b', 'done', undefined, 'kept_seeding'), item('c', 'done', undefined, 'retry_later'), item('d', 'done', undefined, 'none')] }));
-    expect(t.lines).toEqual(['Cancelled 4 requests.', '2 downloads are still in the download client.']);
+  it('never says "still selected" when the selection was cleared during the run', () => {
+    const t = resultText(summary({ action: 'deny', total: 2, outcomes: [item('a', 'done')], stopped: true, notStarted: [{ id: 'b', title: 'b' }] }), { stillSelected: false });
+    expect(t.lines).toEqual(['Stopped: denied 1, 1 not started.']);
+  });
+
+  it('cancel: skipped, then the downloads that stay in the client', () => {
+    const t = resultText(summary({
+      action: 'cancel',
+      total: 4,
+      outcomes: [item('a', 'done', undefined, 'removed'), item('b', 'done', undefined, 'kept_seeding'), item('c', 'done', undefined, 'retry_later'), item('d', 'done', undefined, 'none')],
+      preSkipped: [item('e', 'skipped', 'not cancellable now')],
+    }));
+    expect(t.lines).toEqual(['Cancelled 4.', '1 skipped.', '2 downloads stay in the download client.']);
+    const one = resultText(summary({ action: 'cancel', total: 1, outcomes: [item('a', 'done', undefined, 'kept_seeding')] }));
+    expect(one.lines).toEqual(['Cancelled 1.', '1 download stays in the download client.']);
   });
 
   it('details stop at 50', () => {
