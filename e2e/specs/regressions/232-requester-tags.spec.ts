@@ -26,9 +26,10 @@
  *    without naming the request (POST /api/admin/manual-import): `available`, recorded
  *    `manual_import:denied`, no `req:carol<r>` after the recently-added check, a full scan, or a backfill
  *    (`skippedUnapproved` >= 1).
- * 7. The admin manual-imports phm by ASIN with no request: the import creates the admin's own request (no
- *    download record) → `available`, no `req:` tag after the recently-added check, a full scan, or a
- *    backfill (`skippedImported` >= 1).
+ * 7. The admin manual-imports a made-up book nobody requested (its book row inserted first: offline RMAB
+ *    can't fetch a book by ASIN): the import creates the admin's own request (no download record) →
+ *    `available`, no `req:` tag after the recently-added check, a full scan, or a backfill
+ *    (`skippedImported` >= 1).
  * Values read first, then expect.soft; exec bridge required.
  */
 
@@ -80,7 +81,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   await waitStartupSettled();
 
   // 0. A rerun on this stack: take the fixture books an earlier run delivered back out; users
-  const cleared = await clearEarlierRun(abs, [martian.asin, books.artemis.asin, books.phm.asin]);
+  const cleared = await clearEarlierRun(abs, [martian.asin, books.artemis.asin]);
   writeEvidence(`${DIR}/step0-run.json`, { run: RUN, names: NAME, clearedFromEarlierRun: cleared });
   expect((await admin.raw('PUT', '/api/admin/settings/registration', { enabled: true, requireAdminApproval: false })).status).toBe(200);
   const alice = await registerUser(admin, NAME.alice, true);
@@ -241,19 +242,19 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   writeEvidence(`${DIR}/step6-unapproved.json`, { carolReq, carolWaiting, deny, carolDenied, itemId: carolItem.id, delivered: s6Delivered, fullScan: s6Scan, backfill3, afterBackfill: s6Backfill });
 
   // 7. A book nobody requested, imported by the admin by ASIN: the import's own admin request is never tagged
-  const unrequested = await importUnrequested(admin, books.phm.asin);
+  const unrequested = await importUnrequested(admin, madeUpBook(madeUpAsin('A7'), `Adminwords${RUN}`));
   const owner = psql(`select concat_ws('|', u.role, (select count(*) from download_history d where d.request_id = r.id)) from requests r join users u on u.id = r.user_id where r.id = ${sqlStr(unrequested.requestId)}`);
-  const phmItem = await absItemFor(abs, unrequested.filePath);
+  const adminItem = await absItemFor(abs, unrequested.filePath);
   const s7Job = await runJob(admin, 'plex_recently_added_check');
-  const s7Delivered = { status: requestStatus(unrequested.requestId), owner, job: s7Job, ...(await itemTags(abs, phmItem.id)) };
+  const s7Delivered = { status: requestStatus(unrequested.requestId), owner, job: s7Job, ...(await itemTags(abs, adminItem.id)) };
   await runJob(admin, 'plex_library_scan');
-  const s7Scan = await itemTags(abs, phmItem.id);
+  const s7Scan = await itemTags(abs, adminItem.id);
   await setTagging(admin, false);
   t0 = dbNow();
   await setTagging(admin, true);
   const backfill4 = await backfillAfter(t0);
-  const s7Backfill = await itemTags(abs, phmItem.id);
-  writeEvidence(`${DIR}/step7-admin-import.json`, { requestId: unrequested.requestId, itemId: phmItem.id, delivered: s7Delivered, fullScan: s7Scan, backfill4, afterBackfill: s7Backfill });
+  const s7Backfill = await itemTags(abs, adminItem.id);
+  writeEvidence(`${DIR}/step7-admin-import.json`, { requestId: unrequested.requestId, itemId: adminItem.id, delivered: s7Delivered, fullScan: s7Scan, backfill4, afterBackfill: s7Backfill });
   const reqTags = (tags: string[]) => tags.filter((t) => t.startsWith('req:'));
 
   // Checks

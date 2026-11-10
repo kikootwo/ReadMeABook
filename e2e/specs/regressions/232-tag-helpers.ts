@@ -86,13 +86,17 @@ export async function importGenerated(admin: Rmab, requestId: string, label: str
   return psql(`select coalesce(file_path, '') from audiobooks where id = ${sqlStr(audiobookId)}`);
 }
 
-/** Manual import by ASIN of a book nobody requested: the import creates the admin's own request. */
-export async function importUnrequested(admin: Rmab, asin: string): Promise<{ requestId: string; filePath: string }> {
+/**
+ * Manual import of a book nobody requested: the import creates the admin's own request. The book row is
+ * inserted first (offline RMAB can't fetch a book by ASIN; ABS gets the fake metadata, RMAB does not).
+ */
+export async function importUnrequested(admin: Rmab, book: Book): Promise<{ requestId: string; filePath: string }> {
+  const audiobookId = psql(`insert into audiobooks (id, audible_asin, title, author, narrator, status, updated_at) values (gen_random_uuid()::text, ${sqlStr(book.asin)}, ${sqlStr(book.title)}, ${sqlStr(book.author)}, ${sqlStr(book.narrator)}, 'requested', now()) returning id`).split('\n')[0];
   const dir = generatedFolder('unrequested');
   const since = markJobs();
-  const res = await admin.raw('POST', '/api/admin/manual-import', { asin, folderPath: dir, cleanupSource: false });
+  const res = await admin.raw('POST', '/api/admin/manual-import', { audiobookId, folderPath: dir, cleanupSource: false });
   const body = await res.clone().json().catch(() => ({}));
-  expect(res.status, `manual import of ${asin}: ${JSON.stringify(body)}`).toBe(200);
+  expect(res.status, `manual import of ${book.asin}: ${JSON.stringify(body)}`).toBe(200);
   await waitOrganized(since, body.requestId);
   sh(`rm -rf ${q(dir)}`);
   return { requestId: body.requestId, filePath: psql(`select coalesce(a.file_path, '') from requests r join audiobooks a on a.id = r.audiobook_id where r.id = ${sqlStr(body.requestId)}`) };
