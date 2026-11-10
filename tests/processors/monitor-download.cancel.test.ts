@@ -69,6 +69,7 @@ const clientReporting = (status: 'completed' | 'failed', errorMessage?: string) 
 });
 
 const stubFailedRelease = () => {
+  prismaMock.downloadHistory.findFirst.mockResolvedValue({ id: 'dh-1' }); // the request's current download
   prismaMock.downloadHistory.findUnique.mockResolvedValue({
     id: 'dh-1',
     torrentName: 'Book - Author [M4B]',
@@ -182,7 +183,7 @@ describe('processMonitorDownload with a cancelled or deleted request', () => {
   it('still marks an active request failed and auto-blocks a local Transmission error', async () => {
     stubFailedRelease();
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
-      clientReporting('failed', 'No space left on device')
+      clientReporting('failed', 'File name too long')
     );
 
     const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
@@ -194,15 +195,33 @@ describe('processMonitorDownload with a cancelled or deleted request', () => {
     );
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({
       where: { id: 'dh-1' },
-      data: { downloadStatus: 'failed', downloadError: 'Download failed in transmission' },
+      data: { downloadStatus: 'failed', downloadError: 'Download failed in Transmission' },
     });
     expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ source: 'download_fail', reasonDetail: 'No space left on device' }),
+        create: expect.objectContaining({ source: 'download_fail', reasonDetail: 'File name too long' }),
       })
     );
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
-      'request_error', 'req-1', 'Book', 'Author', 'user', 'Download failed in transmission'
+      'request_error', 'req-1', 'Book', 'Author', 'user', 'Download failed in Transmission'
+    );
+  });
+
+  it('marks an active request failed without blocking when the disk is full (#332)', async () => {
+    stubFailedRelease();
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      clientReporting('failed', 'No space left on device')
+    );
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    await processMonitorDownload(payload);
+
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
+    );
+    expect(prismaMock.blockedRelease.upsert).not.toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
+      'request_error', 'req-1', 'Book', 'Author', 'user', expect.stringContaining('not the release')
     );
   });
 

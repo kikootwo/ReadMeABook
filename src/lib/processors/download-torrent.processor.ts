@@ -16,6 +16,7 @@ import { getRequestStopReason, markRequestFailedUnlessStopped, updateRequestUnle
 import { stopCancelledDownload } from '../services/cancelled-download';
 import { grabFailedMessage, grabFailureLogLine } from '../utils/grab-failure';
 import { addAutoBlock } from '../services/blocklist.service';
+import { isLastAttempt, notifyChainEndedFailed, type BullAttempt } from './client-failure';
 import {
   DownloadSourceError,
   UnusableDownloadSourceError,
@@ -24,9 +25,10 @@ import {
 } from '../interfaces/download-client.interface';
 
 /** Bull's view of this run: attemptsMade > 0 means an earlier attempt failed (a retry). */
-export interface DownloadAttempt {
-  attemptsMade?: number;
-}
+export type DownloadAttempt = BullAttempt;
+
+/** Closing notification when the grab of a chain's next release fails for good (#332) */
+const CHAIN_GRAB_FAILED = 'Download failed: the next release could not be added to the download client';
 
 /**
  * A held usenet job that waits paused (#329): resumed only when RMAB added that job for an
@@ -268,14 +270,13 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
         logger.error('Failed to queue grab notification', { error: error instanceof Error ? error.message : String(error) });
       });
 
-      // Trigger monitor download job with initial delay
-      await jobQueue.addMonitorJob(
-        requestId,
-        downloadHistory.id,
-        downloadClientId,
-        client.clientType,
-        3 // Wait 3 seconds before first check
-      );
+      // Trigger monitor download job with initial delay; an automatic grab carries its chain count (#332)
+      const monitorArgs = [requestId, downloadHistory.id, downloadClientId, client.clientType, 3] as const; // 3 s before the first check
+      if (payload.clientFailures !== undefined) {
+        await jobQueue.addMonitorJob(...monitorArgs, undefined, undefined, undefined, undefined, { clientFailures: payload.clientFailures });
+      } else {
+        await jobQueue.addMonitorJob(...monitorArgs);
+      }
 
       logger.info(`Started monitoring job for request ${requestId} (${client.clientType}, 3s initial delay)`);
 
@@ -307,12 +308,17 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
           ? `All ranked release grabs were temporarily unavailable for request ${requestId}, allowing Bull to retry`
           : `Download client unreachable for request ${requestId}, allowing Bull to retry`
       );
+      // The last attempt: the failed handler ends the request failed, so a chain ends here (#332)
+      if (isLastAttempt(attempt) && !(await getRequestStopReason(requestId))) {
+        await notifyChainEndedFailed(payload.clientFailures, requestId, CHAIN_GRAB_FAILED, logger);
+      }
     } else {
       // Permanent error — mark request as failed immediately (a cancel is left in place)
-      await markRequestFailedUnlessStopped(
+      const marked = await markRequestFailedUnlessStopped(
         requestId,
         error instanceof Error ? error.message : 'Failed to add download to client'
       );
+      if (marked && isLastAttempt(attempt)) await notifyChainEndedFailed(payload.clientFailures, requestId, CHAIN_GRAB_FAILED, logger);
     }
 
     throw error;

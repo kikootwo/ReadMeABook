@@ -15,7 +15,8 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { loadLinkedRows, withLibraryDisplay, type DisplayAudiobook, type DisplayRequest } from '@/lib/services/library/library-display';
 
-const LATEST_SELECTED_DOWNLOAD = { where: { selected: true }, take: 1 } as const;
+// Newest first: a request that moved on after a client failure keeps earlier selected rows (#332)
+const LATEST_SELECTED_DOWNLOAD = { where: { selected: true }, orderBy: { createdAt: 'desc' }, take: 1 } as const;
 const RECENT_JOBS = { orderBy: { createdAt: 'desc' }, take: 5 } as const;
 
 export const ADMIN_REQUEST_DETAIL_INCLUDE = {

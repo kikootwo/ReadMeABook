@@ -60,6 +60,20 @@ describe('filterBlockedResults', () => {
     expect(blockedCount).toBe(1);
   });
 
+  it('matches a torrent hash in any form: upper-case hex or base32 from another indexer (#332)', async () => {
+    const hex = 'd5d767f07e5d9027f7f9d9b50b877386dc92b177';
+    const { hexToBase32 } = await import('@/lib/integrations/torrent-ids');
+    getBlocklistForRequestMock.mockResolvedValueOnce([{ releaseKey: 'first title', releaseHash: hex }]);
+    const { filterBlockedResults } = await import('@/lib/utils/filter-blocked-results');
+    const { kept, blockedCount } = await filterBlockedResults('req-1', [
+      { title: 'Second Indexer Title', infoHash: hex.toUpperCase() },
+      { title: 'Third Indexer Title', infoHash: hexToBase32(hex) },
+      { title: 'Different Torrent', infoHash: 'a'.repeat(40) },
+    ]);
+    expect(kept).toEqual([{ title: 'Different Torrent', infoHash: 'a'.repeat(40) }]);
+    expect(blockedCount).toBe(2);
+  });
+
   it('does not filter by hash when the result has no infoHash', async () => {
     getBlocklistForRequestMock.mockResolvedValueOnce([
       { releaseKey: 'unrelated', releaseHash: 'abc123' },

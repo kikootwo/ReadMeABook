@@ -118,7 +118,8 @@ describe('processSearchIndexers', () => {
       'req-2',
       { id: 'a2', title: 'Book', author: 'Author' },
       expect.objectContaining({ title: 'Book - Author' }),
-      [expect.objectContaining({ title: 'Book - Author - Alternate' })]
+      [expect.objectContaining({ title: 'Book - Author - Alternate' })],
+      { clientFailures: 0 } // an automatic grab starts its chain at 0 (#332)
     );
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Book', 'Author', {
       categories: [3030],
@@ -187,7 +188,8 @@ describe('processSearchIndexers', () => {
       'req-rank-before-limit',
       expect.anything(),
       expect.objectContaining({ guid: 'guid-100' }),
-      expect.any(Array)
+      expect.any(Array),
+      { clientFailures: 0 }
     );
     const fallbackResults = jobQueueMock.addDownloadJob.mock.calls[0][3];
     expect(fallbackResults).toHaveLength(99);
@@ -373,7 +375,8 @@ describe('processSearchIndexers', () => {
       'req-filter-name',
       expect.objectContaining({ id: 'a-filter' }),
       expect.objectContaining({ title: 'Good Release - Author' }),
-      []
+      [],
+      { clientFailures: 0 }
     );
   });
 
@@ -430,7 +433,8 @@ describe('processSearchIndexers', () => {
       'req-filter-hash',
       expect.anything(),
       expect.objectContaining({ title: 'Good Release - Author' }),
-      []
+      [],
+      { clientFailures: 0 }
     );
   });
 

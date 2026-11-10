@@ -1230,6 +1230,9 @@ export class QBittorrentService implements IDownloadClient {
       seedingTime: torrent.seeding_time,
       ratio: torrent.ratio,
       addedAt: torrent.added_on > 0 ? new Date(torrent.added_on * 1000) : undefined,
+      // The Web API gives no error text; missingFiles (data gone from disk) is not the release's fault (#332)
+      errorMessage: torrent.state === 'missingFiles' ? 'qBittorrent reports the files are missing (missingFiles)'
+        : torrent.state === 'error' ? 'qBittorrent reported an error' : undefined,
     };
   }
 
