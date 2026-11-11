@@ -37,6 +37,7 @@ ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobook
 - **One-click requests.** Books you already have show "In Your Library", so they don't get requested twice.
 - **Watch a series or an author** and new releases are requested for you (checked daily).
 - **Reading lists:** link a Goodreads shelf (RSS feed) or a Hardcover list from your profile and the books on it are requested for you (synced every 6 hours). Mark a book as ignored to keep lists and watches from requesting it.
+- **Import lists:** an admin adds public Goodreads "Listopia" lists once (Admin → Settings → Lists) and RMAB requests the audiobooks that are not in the library yet (checked every 10 minutes). Filter profiles, a preview, a free-space guard and an hourly request limit keep it in check.
 - **BookDate:** swipe through personal picks based on your library, ratings and swipe history. Swipe right to request. An admin connects it to OpenAI, Claude, Gemini or any OpenAI-compatible endpoint.
 - **Ebooks:** when an ebook source is on, the ebook is fetched after the audiobook, and users can request the ebook for any book already in the library.
 - **Report an issue** with a book in the library. Admins can dismiss it or replace the files with another release.
@@ -68,7 +69,7 @@ ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobook
 
 ## How it works
 
-1. **Request.** A user requests a book, or a watched series, a synced reading list or a BookDate swipe does it for them. If the request needs approval, it waits for an admin.
+1. **Request.** A user requests a book, or a watched series, a synced reading list, an import list or a BookDate swipe does it for them. If the request needs approval, it waits for an admin.
 2. **Search.** RMAB searches your Prowlarr indexers and ranks what comes back. If nothing good turns up, it keeps watching RSS feeds and retries on a schedule.
 3. **Download.** The best release goes to your torrent or Usenet client, and RMAB follows its progress.
 4. **Import.** When the download finishes, RMAB copies the files into your media folder, tags them and merges chapters if you turned that on. Torrents keep seeding until your rules are met.
@@ -182,6 +183,7 @@ docker compose up -d
 | Book metadata | Audible (9 regions), Audnexus |
 | Ebook sources | Anna's Archive (optional FlareSolverr), Prowlarr ebook categories |
 | Reading lists | Goodreads shelves (RSS), Hardcover lists |
+| Import lists | Goodreads Listopia (public lists) |
 | Sign-in | Plex (with Plex Home profiles), OIDC, local accounts |
 | Notifications | Apprise, Discord, ntfy, Pushover |
 | BookDate | OpenAI, Claude, Google Gemini, OpenAI-compatible endpoints |

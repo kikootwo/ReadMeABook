@@ -9,6 +9,7 @@
 
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { automaticRequestsPausedForDisk } from '@/lib/services/import-lists/sync.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -41,7 +42,7 @@ export interface CreateRequestOptions {
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library'; message: string };
+  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library' | 'low_disk_space'; message: string };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -73,6 +74,12 @@ export async function createRequestForUser(
         ? 'This audiobook is already available in your library'
         : 'This audiobook is being processed and will be available soon',
     };
+  }
+
+  // Automatic sources (watches, shelves, lists) pause while free space is below the guard
+  if (automatic) {
+    const paused = await automaticRequestsPausedForDisk();
+    if (paused) return { success: false, reason: 'low_disk_space', message: paused };
   }
 
   // A book removed from the library comes back only through a manual request (#214)

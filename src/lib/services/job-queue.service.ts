@@ -35,6 +35,7 @@ export type JobType =
   | 'sync_reading_shelves'
   | 'check_watched_lists'
   | 'backfill_requester_tags'
+  | 'sync_import_lists'
   | 'send_notification'
   // Ebook-specific job types
   | 'search_ebook'
@@ -147,6 +148,12 @@ export interface FindMissingEbooksPayload extends JobPayload {
 
 export interface CleanupSeededTorrentsPayload extends JobPayload {
   scheduledJobId?: string;
+}
+
+export interface SyncImportListsPayload extends JobPayload {
+  scheduledJobId?: string;
+  /** Sync only this list now (manual "sync now") */
+  listId?: string;
 }
 
 export interface SyncShelvesPayload extends JobPayload {
@@ -450,6 +457,12 @@ export class JobQueueService {
       const { processBackfillRequesterTags } = await import('../processors/backfill-requester-tags.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'backfill_requester_tags');
       return await processBackfillRequesterTags(payloadWithJobId);
+    });
+
+    this.queue.process('sync_import_lists', 1, async (job: BullJob<SyncImportListsPayload>) => {
+      const { processSyncImportLists } = await import('../processors/sync-import-lists.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'sync_import_lists');
+      return await processSyncImportLists(payloadWithJobId);
     });
 
     this.queue.process('check_watched_lists', 1, async (job: BullJob<CheckWatchedListsPayload>) => {
@@ -872,6 +885,17 @@ export class JobQueueService {
       {
         priority: 10,
       }
+    );
+  }
+
+  /**
+   * Add sync import lists job (all due lists, or one list immediately)
+   */
+  async addSyncImportListsJob(scheduledJobId?: string, listId?: string): Promise<string> {
+    return await this.addJob(
+      'sync_import_lists',
+      { scheduledJobId, listId } as SyncImportListsPayload,
+      { priority: listId ? 5 : 8 }
     );
   }
 
