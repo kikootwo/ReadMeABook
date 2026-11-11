@@ -966,7 +966,7 @@ async function processEbookOrganization(
   const configService = getConfigService();
 
   // Email the ebook to its requesters' e-reader devices (Audiobookshelf only, when enabled)
-  await queueEreaderDelivery(requestId, logger);
+  await queueEreaderDelivery(requestId, logger, { ebookFolder: result.targetPath });
 
   // Remove a direct HTTP download file now that it is in the library
   if (!isIndexerDownload) {

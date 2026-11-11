@@ -222,6 +222,7 @@ export interface SendNotificationPayload extends JobPayload {
 export interface SendToEreaderPayload extends JobPayload {
   requestId: string; // The ebook request (sent devices are recorded on it)
   targetUserIds?: string[]; // Only these users' devices (a late requester); omitted = every requester of the book
+  ebookFolder?: string; // Library folder the organize put the ebook in (finds the ABS item by path)
 }
 
 export interface QueueStats {
@@ -1229,11 +1230,12 @@ export class JobQueueService {
    * @param ebookRequestId - The ebook request
    * @param targetUserIds - Only these users' devices (a late requester); omit for every requester
    * @param delaySeconds - Wait before the first attempt (0 when the ebook is already in ABS)
+   * @param ebookFolder - Library folder the ebook was put in (omitted: the request's placement record)
    */
-  async addSendToEreaderJob(ebookRequestId: string, targetUserIds?: string[], delaySeconds = 30): Promise<string> {
+  async addSendToEreaderJob(ebookRequestId: string, targetUserIds?: string[], delaySeconds = 30, ebookFolder?: string): Promise<string> {
     return await this.addJob(
       'send_to_ereader',
-      { requestId: ebookRequestId, targetUserIds } as SendToEreaderPayload,
+      { requestId: ebookRequestId, targetUserIds, ebookFolder } as SendToEreaderPayload,
       {
         priority: 4, // After notifications: a post-completion task
         delay: delaySeconds * 1000,

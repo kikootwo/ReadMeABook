@@ -11,10 +11,7 @@ const configMock = vi.hoisted(() => ({
   get: vi.fn(),
   getBackendMode: vi.fn(),
 }));
-const absApiMock = vi.hoisted(() => ({
-  getABSItem: vi.fn(),
-  searchABSItems: vi.fn(),
-}));
+const lookupMock = vi.hoisted(() => ({ findEbookItem: vi.fn() }));
 const ereaderMock = vi.hoisted(() => ({
   getEreaderDevices: vi.fn(),
   sendEbookToDevice: vi.fn(),
@@ -22,7 +19,7 @@ const ereaderMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
-vi.mock('@/lib/services/audiobookshelf/api', () => absApiMock);
+vi.mock('@/lib/services/audiobookshelf/ereader-item', () => lookupMock);
 vi.mock('@/lib/services/audiobookshelf/ereader', () => ereaderMock);
 
 const kindle = { name: 'Kindle', email: 'me@kindle.com', sendable: true };
@@ -36,13 +33,15 @@ function setup({
   requesters = [{ userId: 'u-1' }, { userId: 'u-2' }],
   users = [{ ereaderDeviceNames: ['Kindle'] }, { ereaderDeviceNames: ['Kobo', 'Kindle'] }] as { ereaderDeviceNames: unknown }[],
   devices = [kindle, kobo],
-  item = { media: { ebookFile: { metadata: { filename: 'book.epub' } } } } as any,
+  placedEbookFiles = null as unknown,
+  lookup = { found: true, itemId: 'item-1' } as { found: true; itemId: string } | { found: false; reason: string },
 } = {}) {
   configMock.get.mockImplementation(async (key: string) => config[key] ?? null);
   configMock.getBackendMode.mockResolvedValue(backendMode);
   prismaMock.request.findFirst.mockResolvedValue({
     id: 'ebook-req',
     ereaderSentDevices: sentDevices,
+    placedEbookFiles,
     audiobook: { id: 'ab-1', title: 'Red Rising', author: 'Pierce Brown', absItemId },
   });
   prismaMock.request.findMany.mockResolvedValue(requesters);
@@ -50,10 +49,10 @@ function setup({
   prismaMock.request.update.mockResolvedValue({});
   ereaderMock.getEreaderDevices.mockResolvedValue(devices);
   ereaderMock.sendEbookToDevice.mockResolvedValue(undefined);
-  absApiMock.getABSItem.mockResolvedValue(item);
+  lookupMock.findEbookItem.mockResolvedValue(lookup);
 }
 
-const run = async (payload: { requestId: string; targetUserIds?: string[] } = { requestId: 'ebook-req' }) => {
+const run = async (payload: { requestId: string; targetUserIds?: string[]; ebookFolder?: string } = { requestId: 'ebook-req' }) => {
   const { processSendToEreader } = await import('@/lib/processors/send-to-ereader.processor');
   return processSendToEreader({ ...payload, jobId: 'job-1' });
 };
@@ -128,11 +127,11 @@ describe('processSendToEreader', () => {
     await run();
 
     expect(ereaderMock.sendEbookToDevice).not.toHaveBeenCalled();
-    expect(absApiMock.getABSItem).not.toHaveBeenCalled();
+    expect(lookupMock.findEbookItem).not.toHaveBeenCalled();
   });
 
-  it('retries (throws) before sending anything while the ABS item has no ebook yet', async () => {
-    setup({ item: { media: { ebookFile: null } } });
+  it('retries (throws) with the lookup reason before sending anything while the ebook is not in ABS yet', async () => {
+    setup({ lookup: { found: false, reason: 'Audiobookshelf item item-1 has no ebook yet' } });
 
     await expect(run()).rejects.toThrow(/no ebook yet/);
     expect(ereaderMock.sendEbookToDevice).not.toHaveBeenCalled();
@@ -150,28 +149,41 @@ describe('processSendToEreader', () => {
     }));
   });
 
-  describe('without a matched ABS item', () => {
-    it('finds the item by exact title and author', async () => {
-      setup({ absItemId: null });
-      absApiMock.searchABSItems.mockResolvedValue([
-        { libraryItem: { id: 'wrong', media: { metadata: { title: 'Red Rising', authorName: 'Someone Else' } } } },
-        { libraryItem: { id: 'right', media: { metadata: { title: 'Red Rising', authorName: 'Pierce Brown' } } } },
-      ]);
+  describe('finding the ABS item', () => {
+    it('looks it up by the folder the organize job put the ebook in', async () => {
+      setup({ placedEbookFiles: [{ path: '/media/other/Book.epub', size: 1, sha256: 'c'.repeat(64), placedAt: '2026-11-11T00:00:00Z' }] });
+
+      await run({ requestId: 'ebook-req', ebookFolder: '/media/ebooks/Pierce Brown/Red Rising' });
+
+      expect(lookupMock.findEbookItem).toHaveBeenCalledWith(
+        { title: 'Red Rising', author: 'Pierce Brown', absItemId: 'item-1', folder: '/media/ebooks/Pierce Brown/Red Rising' },
+        expect.anything()
+      );
+    });
+
+    it("falls back to the folder of the request's newest placed ebook file", async () => {
+      setup({
+        placedEbookFiles: [
+          { path: '/media/old/Red Rising.epub', size: 1, sha256: 'a'.repeat(64), placedAt: '2026-11-01T00:00:00Z' },
+          { path: '/media/ebooks/Pierce Brown/Red Rising/Red Rising.epub', size: 1, sha256: 'b'.repeat(64), placedAt: '2026-11-11T00:00:00Z' },
+        ],
+      });
 
       await run();
 
-      expect(absApiMock.searchABSItems).toHaveBeenCalledWith('lib-1', 'Red Rising');
-      expect(ereaderMock.sendEbookToDevice).toHaveBeenCalledWith('right', 'Kindle');
+      expect(lookupMock.findEbookItem).toHaveBeenCalledWith(
+        expect.objectContaining({ folder: '/media/ebooks/Pierce Brown/Red Rising' }),
+        expect.anything()
+      );
     });
 
-    it('never settles for a fuzzy match, and retries instead', async () => {
-      setup({ absItemId: null });
-      absApiMock.searchABSItems.mockResolvedValue([
-        { libraryItem: { id: 'sequel', media: { metadata: { title: 'Red Rising: Golden Son', authorName: 'Pierce Brown' } } } },
-      ]);
+    it('passes no folder when there is no placement record', async () => {
+      setup({ placedEbookFiles: [] });
 
-      await expect(run()).rejects.toThrow(/isn't in Audiobookshelf yet/);
-      expect(ereaderMock.sendEbookToDevice).not.toHaveBeenCalled();
+      await run();
+
+      expect(lookupMock.findEbookItem).toHaveBeenCalledWith(expect.objectContaining({ folder: null }), expect.anything());
+      expect(ereaderMock.sendEbookToDevice).toHaveBeenCalledWith('item-1', 'Kindle');
     });
   });
 });

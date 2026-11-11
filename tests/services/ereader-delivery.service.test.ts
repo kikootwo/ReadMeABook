@@ -24,10 +24,10 @@ describe('queueEreaderDelivery', () => {
   it('queues the job with the given users and delay', async () => {
     const { queueEreaderDelivery } = await import('@/lib/services/ereader-delivery.service');
 
-    await queueEreaderDelivery('ebook-req', logger, { userIds: ['u-1'], delaySeconds: 0 });
+    await queueEreaderDelivery('ebook-req', logger, { userIds: ['u-1'], delaySeconds: 0, ebookFolder: '/media/ebooks/Book' });
 
     expect(configMock.get).toHaveBeenCalledWith('ebook_ereader_auto_send_enabled');
-    expect(jobQueueMock.addSendToEreaderJob).toHaveBeenCalledWith('ebook-req', ['u-1'], 0);
+    expect(jobQueueMock.addSendToEreaderJob).toHaveBeenCalledWith('ebook-req', ['u-1'], 0, '/media/ebooks/Book');
   });
 
   it('does nothing when delivery is off or the backend is Plex', async () => {

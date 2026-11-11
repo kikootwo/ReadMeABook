@@ -17,18 +17,19 @@ export const DELIVERABLE_EBOOK_STATUSES = ['downloaded', 'available'];
  * @param ebookRequestId - The ebook request
  * @param options.userIds - Only these users' devices (a late requester); omit for every requester
  * @param options.delaySeconds - Wait before the first attempt (default 30 s, for the ABS scan)
+ * @param options.ebookFolder - Library folder the ebook was just put in (the organize job)
  */
 export async function queueEreaderDelivery(
   ebookRequestId: string,
   logger: Pick<RMABLogger, 'info' | 'error'>,
-  options: { userIds?: string[]; delaySeconds?: number } = {}
+  options: { userIds?: string[]; delaySeconds?: number; ebookFolder?: string } = {}
 ): Promise<void> {
   try {
     const configService = getConfigService();
     if ((await configService.get('ebook_ereader_auto_send_enabled')) !== 'true') return;
     if ((await configService.getBackendMode()) !== 'audiobookshelf') return;
 
-    await getJobQueueService().addSendToEreaderJob(ebookRequestId, options.userIds, options.delaySeconds);
+    await getJobQueueService().addSendToEreaderJob(ebookRequestId, options.userIds, options.delaySeconds, options.ebookFolder);
     logger.info(`Queued e-reader delivery for ebook request ${ebookRequestId}`);
   } catch (error) {
     logger.error('Failed to queue e-reader delivery', { error: error instanceof Error ? error.message : String(error) });

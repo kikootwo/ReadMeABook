@@ -114,7 +114,7 @@ describe('ebook manual import organize', () => {
       data: expect.objectContaining({ status: 'downloaded' }),
     });
     // The organized ebook goes on to its requesters' e-readers (the helper checks the setting)
-    expect(queueEreaderDeliveryMock).toHaveBeenCalledWith('req-eb', expect.anything());
+    expect(queueEreaderDeliveryMock).toHaveBeenCalledWith('req-eb', expect.anything(), { ebookFolder: expect.any(String) });
   });
 
   it('of several selected ebook files imports the preferred format (epub first)', async () => {

@@ -83,16 +83,18 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 ### E-Reader Delivery (Audiobookshelf only)
 Emails an organized ebook to the e-reader devices of **everyone who requested the book** (audiobook or ebook; requests not `failed`/`cancelled`/`denied`/deleted), through ABS's send-to-device email.
 - **Setup:** email + e-reader devices in ABS (Settings → Email); per-user devices in RMAB Admin → Users → Permissions (`User.ereaderDeviceNames`, JSON string array, `[]` = none); toggle in E-book settings.
-- **Queueing:** `queueEreaderDelivery()` (`src/lib/services/ereader-delivery.service.ts`) checks the toggle + ABS mode, then `addSendToEreaderJob(ebookRequestId, userIds?, delaySeconds = 30)` (5 attempts, exponential backoff from 30 s). Never throws.
-  - **Ebook organized** (`organize-files.processor.ts`, after status `downloaded` + scan trigger): all requesters.
+- **Queueing:** `queueEreaderDelivery()` (`src/lib/services/ereader-delivery.service.ts`) checks the toggle + ABS mode, then `addSendToEreaderJob(ebookRequestId, userIds?, delaySeconds = 30, ebookFolder?)` (5 attempts, exponential backoff from 30 s). Never throws.
+  - **Ebook organized** (`organize-files.processor.ts`, after status `downloaded` + scan trigger): all requesters; payload `ebookFolder` = the organize's target folder.
   - **Late requester:** fetch-ebook routes, when the ebook request already exists in `downloaded`/`available` (`DELIVERABLE_EBOOK_STATUSES`): only that user (`[asin]` route: the caller; `[id]` route: the parent request's owner), no delay.
 - **Processor** (`send-to-ereader.processor.ts`):
   1. Re-checks toggle + ABS mode; loads the ebook request (not deleted) with its audiobook
   2. Recipients' devices minus `Request.ereaderSentDevices` (already emailed); none → done
   3. Drops devices ABS no longer has, or that RMAB's token user may not use (`sendable` false), with a warning each
-  4. ABS item: `Audiobook.absItemId`, else exact title (+ author when known) search in `audiobookshelf.library_id`; never a fuzzy hit. No item → throw (retry)
-  5. `GET /items/:id`: no `media.ebookFile` → throw (retry: scan still running; persistent = library set to "Audiobooks only", where ABS keeps no primary ebook)
-  6. Sends per device; a failed device is logged, never thrown (a retry would re-send the others); successes appended to `ereaderSentDevices`
+  4. ABS item: `findEbookItem()` (`src/lib/services/audiobookshelf/ereader-item.ts`). Folder = payload `ebookFolder`, else the folder of the newest `Request.placedEbookFiles` entry (#497), else none
+     - **Folder known:** only an item whose ABS `path` is the folder, or ends with its media_dir-relative path (another mount). `Audiobook.absItemId` first, then title search in `audiobookshelf.ebook_library_id` (when set), `audiobookshelf.library_id`, then every other ABS `book` library (`GET /libraries`; a failure = configured libraries only). A same-titled item elsewhere is never used
+     - **No folder:** `absItemId` when it has an ebook, else exact title (+ author when known) in the configured libraries only; never a fuzzy hit
+     - `absItemId` 404 → skipped; other ABS errors throw. No item, or no `media.ebookFile` on `GET /items/:id` → throw (retry: scan still running; persistent no-ebook = library set to "Audiobooks only", where ABS keeps no primary ebook)
+  5. Sends per device; a failed device is logged, never thrown (a retry would re-send the others); successes appended to `ereaderSentDevices`
 - **ABS rules** (checked against ABS 2.37): `POST /api/emails/send-ebook-to-device {libraryItemId, deviceName}` sends the item's primary ebook (`media.ebookFile`) and answers plain-text `OK` (hence `absRequest({ skipResponseBody })`). It runs as RMAB's token user, so a device set to "Specific users" must list that user (else 403). An ebook co-located with audio becomes the primary ebook unless the library is "Audiobooks only".
 - **Devices API:** `GET /api/admin/settings/ebook/ereader-devices` (admin) → `{ devices: [{ name, email, sendable }] }`; `[]` (+ `error`) when ABS is unreachable or not configured. `getEreaderDevices()` (`src/lib/services/audiobookshelf/ereader.ts`) reads `GET /api/emails/settings` + `GET /api/me` and mirrors ABS's access check (`adminOrUp` default, `userOrUp`, `guestOrUp`, `specificUsers`).
 - **User update:** `PUT /api/admin/users/[id]` accepts `ereaderDeviceNames: string[] | null` (deduped; null → `[]`). Self-updates are allowed unless the role changes, so an admin can choose their own devices.
@@ -275,6 +277,7 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/services/job-queue.service.ts` (ebook job types; `send_to_ereader`, `addSendToEreaderJob()`)
 - `src/lib/services/ereader-delivery.service.ts` (`queueEreaderDelivery()`)
 - `src/lib/services/audiobookshelf/ereader.ts` (`getEreaderDevices()`, `sendEbookToDevice()`)
+- `src/lib/services/audiobookshelf/ereader-item.ts` (`findEbookItem()`, the ABS item to send)
 
 **Utils:**
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)

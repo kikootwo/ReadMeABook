@@ -5,16 +5,20 @@
  * Emails an organized ebook to the e-reader devices of everyone who requested the book
  * (audiobook or ebook), through Audiobookshelf's send-to-device API.
  *
- * Runs delayed and retried so ABS can scan the new file first. Only problems that happen before
- * any email is sent throw (and so retry); per-device send failures are logged instead. Devices
+ * Runs delayed and retried so ABS can scan the new file first. The ABS item is found by the folder
+ * the ebook was put in, when known (ereader-item.ts), so a separate ebook library works too. Only
+ * problems that happen before any email is sent throw (and so retry); per-device send failures are
+ * logged instead. Devices
  * already emailed are recorded on the ebook request (`ereaderSentDevices`), so retries and
  * re-organizes never email a device twice, and someone who requests the book later still gets it.
  */
 
+import * as path from 'path';
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
-import { getABSItem, searchABSItems } from '../services/audiobookshelf/api';
 import { getEreaderDevices, sendEbookToDevice } from '../services/audiobookshelf/ereader';
+import { findEbookItem } from '../services/audiobookshelf/ereader-item';
+import { readPlacements } from '../utils/ebook-placement';
 import { RMABLogger } from '../utils/logger';
 import type { SendToEreaderPayload } from '../services/job-queue.service';
 
@@ -28,7 +32,7 @@ function parseStringArray(value: unknown): string[] {
 }
 
 export async function processSendToEreader(payload: SendToEreaderPayload): Promise<void> {
-  const { requestId, targetUserIds, jobId } = payload;
+  const { requestId, targetUserIds, ebookFolder, jobId } = payload;
   const logger = RMABLogger.forJob(jobId, 'SendToEreader');
   const configService = getConfigService();
 
@@ -92,18 +96,14 @@ export async function processSendToEreader(payload: SendToEreaderPayload): Promi
   if (deviceNames.length === 0) return;
 
   // 4. Find the ABS item that holds the ebook, and wait (retry) until ABS lists the ebook on it
-  const libraryItemId = audiobook.absItemId
-    ?? await findLibraryItemId(await configService.get('audiobookshelf.library_id'), audiobook.title, audiobook.author, logger);
-  if (!libraryItemId) {
-    throw new Error(`"${audiobook.title}" isn't in Audiobookshelf yet; the library scan may still be running`);
-  }
-  const item = await getABSItem(libraryItemId);
-  if (!item?.media?.ebookFile) {
-    throw new Error(
-      `Audiobookshelf item ${libraryItemId} has no ebook yet; the scan may still be running. If this keeps ` +
-      'happening, check that the library isn\'t set to "Audiobooks only"'
-    );
-  }
+  const lookup = await findEbookItem({
+    title: audiobook.title,
+    author: audiobook.author,
+    absItemId: audiobook.absItemId,
+    folder: ebookFolder ?? placedEbookFolder(ebookRequest.placedEbookFiles),
+  }, logger);
+  if (!lookup.found) throw new Error(lookup.reason);
+  const libraryItemId = lookup.itemId;
 
   // 5. Send, recording each device as it succeeds. Never throw from here: a retry would re-send.
   const newlySent: string[] = [];
@@ -125,30 +125,9 @@ export async function processSendToEreader(payload: SendToEreaderPayload): Promi
   }
 }
 
-/**
- * The ABS item for a book, by exact title (and author, when both are known). Never accepts a fuzzy
- * search hit: emailing the wrong book is worse than not delivering.
- */
-async function findLibraryItemId(
-  libraryId: string | null,
-  title: string,
-  author: string,
-  logger: RMABLogger
-): Promise<string | undefined> {
-  if (!libraryId) {
-    logger.warn('No Audiobookshelf library configured; cannot look up the ebook');
-    return undefined;
-  }
-
-  const items = (await searchABSItems(libraryId, title)).map((r: any) => r?.libraryItem ?? r).filter(Boolean);
-  const normalize = (value?: string) => (value || '').trim().toLowerCase();
-  const sameTitle = items.filter((it: any) => normalize(it?.media?.metadata?.title) === normalize(title));
-  const match = sameTitle.find((it: any) => !author || normalize(it?.media?.metadata?.authorName) === normalize(author))
-    ?? (author ? undefined : sameTitle[0]);
-
-  if (!match?.id) {
-    logger.warn(`No exact Audiobookshelf match for "${title}" by ${author || 'unknown author'}`);
-    return undefined;
-  }
-  return match.id as string;
+/** The folder of the newest ebook file this request's imports placed (#497), if any */
+function placedEbookFolder(value: unknown): string | null {
+  const entries = readPlacements(value)?.entries ?? [];
+  const newest = entries[entries.length - 1];
+  return newest ? path.dirname(newest.path) : null;
 }
