@@ -6,6 +6,7 @@
  */
 
 import { CANCELLABLE_STATUSES } from './request-statuses';
+import type { ApiTokenPermission } from '../services/api-token-approval';
 
 /** "a, b or c": the statuses a request can be cancelled from, for the cancel route's description */
 const CANCELLABLE_LIST = `${CANCELLABLE_STATUSES.slice(0, -1).join(', ')} or ${CANCELLABLE_STATUSES[CANCELLABLE_STATUSES.length - 1]}`;
@@ -34,6 +35,8 @@ export const MAX_TOKENS_PER_USER = 25;
 export interface AllowedEndpoint {
   method: string;
   path: string;
+  /** Opt-in right the token must also hold (checked by the auth middleware) */
+  permission?: ApiTokenPermission;
 }
 
 /** Extended metadata used by the interactive API docs page */
@@ -45,6 +48,8 @@ export interface EndpointDoc {
   requiresAdmin: boolean;
   /** True for endpoints that mutate state. Surfaced in the /api-docs UI. */
   isWrite?: boolean;
+  /** Opt-in right the token must also hold. Surfaced in the /api-docs UI. */
+  permission?: ApiTokenPermission;
 }
 
 /**
@@ -61,6 +66,7 @@ export const API_TOKEN_ALLOWED_ENDPOINTS: readonly AllowedEndpoint[] = [
   { method: 'GET', path: '/api/admin/metrics' },
   { method: 'GET', path: '/api/admin/downloads/active' },
   { method: 'GET', path: '/api/admin/requests/recent' },
+  { method: 'POST', path: '/api/admin/requests/:id/approve', permission: 'approve_requests' },
 ] as const;
 
 /**
@@ -142,6 +148,16 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
       'Returns the most recent audiobook requests across all users.',
     requiresAdmin: true,
   },
+  {
+    method: 'POST',
+    path: '/api/admin/requests/:id/approve',
+    title: 'Approve or deny request',
+    description:
+      'Approves or denies a request whose status is awaiting_approval. Body: `{ "action": "approve" | "deny" }`. Approving uses the release the requester picked (when it is still valid) or starts an automatic search; a token can never name a release (`selectedTorrent` in the body returns 400). Off unless an admin turns on "Allow API tokens to approve or deny requests" (Settings → API) AND the token was created with "Can approve requests" ticked, which only an admin can do, for their own account. List the requests waiting with `GET /api/requests?status=awaiting_approval`.',
+    requiresAdmin: true,
+    isWrite: true,
+    permission: 'approve_requests',
+  },
 ] as const;
 
 /**
@@ -153,16 +169,18 @@ interface CompiledEndpoint {
   method: string;
   literal: string | null;
   pattern: RegExp | null;
+  permission: ApiTokenPermission | null;
 }
 
 function compileEndpoint(ep: AllowedEndpoint): CompiledEndpoint {
   const method = ep.method.toUpperCase();
+  const permission = ep.permission ?? null;
   if (!ep.path.includes(':')) {
-    return { method, literal: ep.path, pattern: null };
+    return { method, literal: ep.path, pattern: null, permission };
   }
   const escaped = ep.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regexSource = escaped.replace(/:[A-Za-z_][A-Za-z0-9_]*/g, '[^/]+');
-  return { method, literal: null, pattern: new RegExp(`^${regexSource}$`) };
+  return { method, literal: null, pattern: new RegExp(`^${regexSource}$`), permission };
 }
 
 const COMPILED_ENDPOINTS: readonly CompiledEndpoint[] = API_TOKEN_ALLOWED_ENDPOINTS.map(compileEndpoint);
@@ -173,8 +191,17 @@ const COMPILED_ENDPOINTS: readonly CompiledEndpoint[] = API_TOKEN_ALLOWED_ENDPOI
  * placeholders (`:id`) compiled at module load.
  */
 export function isEndpointAllowed(method: string, path: string): boolean {
+  return findEndpoint(method, path) !== undefined;
+}
+
+/** The opt-in right an allowlisted endpoint needs, or null when the allowlist alone suffices */
+export function getEndpointPermission(method: string, path: string): ApiTokenPermission | null {
+  return findEndpoint(method, path)?.permission ?? null;
+}
+
+function findEndpoint(method: string, path: string): CompiledEndpoint | undefined {
   const upperMethod = method.toUpperCase();
-  return COMPILED_ENDPOINTS.some((ep) => {
+  return COMPILED_ENDPOINTS.find((ep) => {
     if (ep.method !== upperMethod) return false;
     if (ep.literal !== null) return ep.literal === path;
     return ep.pattern!.test(path);

@@ -8,7 +8,8 @@ import crypto from 'crypto';
 import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
-import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
+import { API_TOKEN_PREFIX, getEndpointPermission, isEndpointAllowed } from '../constants/api-tokens';
+import { tokenPermissionRefusal, type ApiTokenInfo } from '../services/api-token-approval';
 import {
   getRegistrationRefusal,
   getSessionRefusal,
@@ -19,6 +20,8 @@ const logger = RMABLogger.create('Auth');
 
 export interface AuthenticatedRequest extends NextRequest {
   user?: TokenPayload & { id: string };
+  /** Set only when the caller used an `rmab_` API token */
+  apiToken?: ApiTokenInfo;
 }
 
 /**
@@ -41,10 +44,10 @@ function extractToken(request: NextRequest): string | null {
 
 /**
  * Authenticate via static API token (rmab_ prefix).
- * Returns a synthetic TokenPayload if valid, null otherwise.
+ * Returns a synthetic TokenPayload and the token's details if valid, null otherwise.
  * Updates lastUsedAt asynchronously.
  */
-async function authenticateApiToken(token: string): Promise<TokenPayload | null> {
+async function authenticateApiToken(token: string): Promise<{ user: TokenPayload; token: ApiTokenInfo } | null> {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
   const apiToken = await prisma.apiToken.findUnique({
@@ -97,10 +100,18 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
   // Use the token's target user (userId), not the creator (createdById).
   // The token's role is an upper bound: it never exceeds the owner's current role.
   return {
-    sub: user.id,
-    plexId: user.plexId,
-    username: user.plexUsername,
-    role: apiToken.role === 'admin' && user.role === 'admin' ? 'admin' : 'user',
+    user: {
+      sub: user.id,
+      plexId: user.plexId,
+      username: user.plexUsername,
+      role: apiToken.role === 'admin' && user.role === 'admin' ? 'admin' : 'user',
+    },
+    token: {
+      id: apiToken.id,
+      name: apiToken.name,
+      tokenPrefix: apiToken.tokenPrefix,
+      canApproveRequests: apiToken.canApproveRequests,
+    },
   };
 }
 
@@ -159,8 +170,8 @@ export async function requireAuth(
 
   // Check if this is a static API token
   if (token.startsWith(API_TOKEN_PREFIX)) {
-    const apiUser = await authenticateApiToken(token);
-    if (!apiUser) {
+    const auth = await authenticateApiToken(token);
+    if (!auth) {
       logger.error('API token authentication failed');
       return NextResponse.json(
         {
@@ -188,8 +199,26 @@ export async function requireAuth(
       );
     }
 
+    // Some allowlisted endpoints also need an opt-in right on the token (e.g. approving requests)
+    const permission = getEndpointPermission(method, pathname);
+    if (permission) {
+      const refusal = await tokenPermissionRefusal(permission, auth.token, auth.user.role);
+      if (refusal) {
+        logger.warn('API token refused on a permission-gated endpoint', {
+          method,
+          path: pathname,
+          permission,
+          tokenPrefix: auth.token.tokenPrefix,
+          userId: auth.user.sub,
+          reason: refusal,
+        });
+        return NextResponse.json({ error: 'Forbidden', message: refusal }, { status: 403 });
+      }
+    }
+
     const authenticatedRequest = request as AuthenticatedRequest;
-    authenticatedRequest.user = { ...apiUser, id: apiUser.sub };
+    authenticatedRequest.user = { ...auth.user, id: auth.user.sub };
+    authenticatedRequest.apiToken = auth.token;
     return handler(authenticatedRequest);
   }
 
@@ -229,9 +258,14 @@ export async function getOptionalAuthUser(request: NextRequest): Promise<Authent
   if (!token) return null;
 
   if (token.startsWith(API_TOKEN_PREFIX)) {
-    if (!isEndpointAllowed(request.method, request.nextUrl.pathname)) return null;
-    const apiUser = await authenticateApiToken(token);
-    return apiUser ? { ...apiUser, id: apiUser.sub } : null;
+    const { method } = request;
+    const { pathname } = request.nextUrl;
+    if (!isEndpointAllowed(method, pathname)) return null;
+    const auth = await authenticateApiToken(token);
+    if (!auth) return null;
+    const permission = getEndpointPermission(method, pathname);
+    if (permission && (await tokenPermissionRefusal(permission, auth.token, auth.user.role))) return null;
+    return { ...auth.user, id: auth.user.sub };
   }
 
   const session = await checkAccessToken(token);

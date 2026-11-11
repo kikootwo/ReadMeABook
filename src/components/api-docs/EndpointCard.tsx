@@ -95,6 +95,14 @@ export function EndpointCard({ endpoint, token, useSession }: EndpointCardProps)
                   Write
                 </span>
               )}
+              {endpoint.permission && (
+                <span
+                  title="Needs an admin setting and a token created with this permission"
+                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+                >
+                  Opt-in
+                </span>
+              )}
             </div>
             <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1">
               {endpoint.title}

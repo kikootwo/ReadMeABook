@@ -57,6 +57,23 @@ export async function POST(
         // Validate action and optional admin-selected torrent
         const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
 
+        // An API token approves with the requester's own pick or an automatic search only: a leaked
+        // token must not be able to send a download link of its choosing to the download client.
+        if (req.apiToken && adminSelectedTorrent != null) {
+          logger.warn('API token tried to approve with its own release; refused', {
+            requestId: id,
+            tokenPrefix: req.apiToken.tokenPrefix,
+            userId: req.user.id,
+          });
+          return NextResponse.json(
+            {
+              error: 'ValidationError',
+              message: 'An API token cannot choose a release. Approve without selectedTorrent, or pick one in the web UI.',
+            },
+            { status: 400 }
+          );
+        }
+
         // Fetch the request; a deleted request answers 404
         const existingRequest = await prisma.request.findFirst({
           where: { id, deletedAt: null },
@@ -88,6 +105,18 @@ export async function POST(
             },
             { status: 400 }
           );
+        }
+
+        // Audit: every approve/deny made with an API token names the token and the admin it acts as
+        if (req.apiToken) {
+          logger.info(`API token "${req.apiToken.name}" (${req.apiToken.tokenPrefix}) ${action === 'approve' ? 'approving' : 'denying'} request ${id}`, {
+            requestId: id,
+            action,
+            tokenId: req.apiToken.id,
+            tokenPrefix: req.apiToken.tokenPrefix,
+            adminId: req.user.id,
+            adminUsername: req.user.username,
+          });
         }
 
         // Update request based on action
