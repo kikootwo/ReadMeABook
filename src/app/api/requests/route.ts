@@ -16,6 +16,7 @@ import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { withLibraryDisplayAll } from '@/lib/services/library/library-display';
 import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
+import { toJsonSafe } from '@/lib/utils/json-safe';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -227,7 +228,7 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        requests: enriched,
+        requests: toJsonSafe(enriched),
         nextCursor,
         counts: {
           all:       totalAll,
