@@ -180,6 +180,16 @@ export async function enrichAudiobooksWithMatches(
     }
   }
 
+  // Request access (requester tags on): the caller's access state for the books found in the library
+  if (userId) {
+    const { libraryAccessStates } = await import('@/lib/services/library-access.service');
+    const access = await libraryAccessStates(userId, results.filter((r) => r.isAvailable).map((r) => r.asin));
+    for (const result of results) {
+      const state = access.get(result.asin);
+      if (state) (result as any).libraryAccess = state; // absent when there is nothing to offer
+    }
+  }
+
   // Works-table sibling expansion: check if unmatched ASINs have siblings in the library
   try {
     const unmatchedAsins = results.filter(r => !r.isAvailable).map(r => r.asin);

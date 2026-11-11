@@ -30,6 +30,7 @@ export interface Audiobook {
   dbId?: string | null;
   isRequested?: boolean;  // Set if ANY user has requested this audiobook
   requestStatus?: string | null;  // Status of request (if any)
+  libraryAccess?: 'request' | 'requested' | 'denied' | null;  // In the library, requester tags on: the caller can request access / asked / was denied
   requestId?: string | null;  // ID of request (if any)
   requestedByUserId?: string | null;  // User id who requested (populated by audiobook-matcher; used to gate own-request interactive-search routing)
   requestedByUsername?: string | null;  // Username who requested (only if not current user)

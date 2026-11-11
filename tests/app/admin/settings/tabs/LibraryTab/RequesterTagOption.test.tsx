@@ -42,7 +42,7 @@ describe('RequesterTagOption (#232)', () => {
   it('says what it exposes and how a removed tag behaves, in two paragraphs', () => {
     render(<RequesterTagOption settings={settings(false)} onChange={() => {}} />);
 
-    expect(text()).toContain('When a requested audiobook becomes available, ReadMeABook adds req:<username> to its Audiobookshelf item, keeping its other tags, so Audiobookshelf can limit each user to their own books. Turning this on also tags books already available; turning it off removes no tags.');
+    expect(text()).toContain('When a requested audiobook becomes available, ReadMeABook adds req:<username> to its Audiobookshelf item, keeping its other tags, so Audiobookshelf can limit each user to their own books. Turning this on also tags books already available; turning it off removes no tags. A user who asks for a book already in the library requests access instead; approving it adds their tag.');
     expect(text()).toContain('Every user of this Audiobookshelf library can see all requesters\' usernames in its tag filter. OIDC users without a username are tagged with their email address (req:johnsmithexamplecom) or sign-in ID. While this is on, a removed req: tag comes back on the next scan; to hide a book from one user, change their access in Audiobookshelf.');
     expect(document.querySelectorAll('p')).toHaveLength(2);
   });

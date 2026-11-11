@@ -51,6 +51,9 @@ export function AudiobookCard({
   const [showModal, setShowModal] = useState(false);
   const [localRequestStatus, setLocalRequestStatus] = useState<string | undefined>(undefined);
   const [localIsIgnored, setLocalIsIgnored] = useState<boolean | undefined>(undefined);
+  // In the library while requester tags are on: the caller may request access (library-access)
+  const [localAccess, setLocalAccess] = useState<Audiobook['libraryAccess'] | undefined>(undefined);
+  const [toastText, setToastText] = useState('Request created!');
 
   // Build a display-only audiobook with local overrides
   const displayAudiobook = localRequestStatus !== undefined
@@ -58,6 +61,8 @@ export function AudiobookCard({
     : audiobook;
   const status = getStatusConfig(displayAudiobook);
   const isIgnored = localIsIgnored !== undefined ? localIsIgnored : audiobook.isIgnored;
+  const access = localAccess !== undefined ? localAccess : audiobook.libraryAccess ?? null;
+  const canRequestAccess = status?.type === 'available' && access === 'request';
 
   const handleRequest = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -68,8 +73,15 @@ export function AudiobookCard({
     }
 
     try {
-      await createRequest(audiobook);
-      setLocalRequestStatus('pending');
+      const created = await createRequest(audiobook);
+      if (canRequestAccess) {
+        const granted = created?.status === 'available';
+        setLocalAccess(granted ? null : 'requested');
+        setToastText(granted ? 'Access granted' : 'Access requested');
+      } else {
+        setLocalRequestStatus('pending');
+        setToastText('Request created!');
+      }
       setShowToast(true);
       setTimeout(() => setShowToast(false), 2500);
       onRequestSuccess?.();
@@ -112,7 +124,7 @@ export function AudiobookCard({
                 ">
                   <div className="absolute inset-x-0 bottom-0 p-4 flex flex-col gap-2">
                     {/* Quick Action Button */}
-                    {canRequest ? (
+                    {canRequest || canRequestAccess ? (
                       <button
                         onClick={handleRequest}
                         disabled={isLoading || !user}
@@ -136,8 +148,12 @@ export function AudiobookCard({
                         ) : !user ? 'Sign in to Request' : 'Request'}
                       </button>
                     ) : status?.type === 'available' ? (
-                      <div className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center bg-emerald-500 text-white backdrop-blur-md shadow-lg shadow-emerald-500/25">
-                        In Your Library
+                      <div className={
+                        access === 'requested' ? 'w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center bg-blue-500 text-white backdrop-blur-md shadow-lg shadow-blue-500/25'
+                        : access === 'denied' ? 'w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center bg-red-500 text-white backdrop-blur-md shadow-lg shadow-red-500/25'
+                        : 'w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center bg-emerald-500 text-white backdrop-blur-md shadow-lg shadow-emerald-500/25'
+                      }>
+                        {access === 'requested' ? 'Access Requested' : access === 'denied' ? 'Access Denied' : 'In Your Library'}
                       </div>
                     ) : (
                       <div className={`
@@ -210,7 +226,7 @@ export function AudiobookCard({
             ${showToast ? 'bg-emerald-500/95 text-white' : 'bg-red-500/95 text-white'}
           `}>
             <p className="text-sm font-medium">
-              {showToast ? 'Request created!' : error}
+              {showToast ? toastText : error}
             </p>
           </div>
         )}
@@ -231,6 +247,8 @@ export function AudiobookCard({
         requestId={audiobook.requestId}
         requestedByUserId={audiobook.requestedByUserId}
         hasReportedIssue={audiobook.hasReportedIssue}
+        libraryAccess={access}
+        onLibraryAccessChange={setLocalAccess}
       />
     </>
   );

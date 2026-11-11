@@ -45,7 +45,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Book details: the body's `title`/`author`/`narrator`/`description` are used only for a new book the Audible lookup knows nothing of; an existing book's saved title and author are not changed by a request. The body's `coverArtUrl` is used only when the lookup has no cover and it is an Audible image (https on `COVER_ART_HOSTS`) or a cached thumbnail path; else the book gets no cover from it ([goodreads-sync.md](goodreads-sync.md#shared-sync-core)).
 - Side effects (identical to UI): duplicate detection, library check, Audnexus enrichment, audiobook upsert, ignore-list check (bypassed), per-user dedup, auto-approve gating, release-date gate, notification queue, search-job queue.
 - Auto-approve: follows the token owner's per-user `autoApproveRequests` setting, then global. No bypass.
-- Response: `201 { success: true, request }` (`request.audiobook` is stored values, no `libraryAsin` or `fileSizeBytes`) or named error: `{ error: "AlreadyAvailable" | "BeingProcessed" | "DuplicateRequest" | "Ignored" | "UserNotFound" | "ValidationError", message }`
+- Response: `201 { success: true, request }` (`request.audiobook` is stored values, no `libraryAsin` or `fileSizeBytes`) or named error: `{ error: "AlreadyAvailable" | "AccessUnavailable" | "BeingProcessed" | "DuplicateRequest" | "Ignored" | "UserNotFound" | "ValidationError", message }`
 
 ## GET `/api/requests`
 - Query: `status` (group `active`|`waiting`|`completed`|`failed`|`cancelled`, or one status), `cursor`, `take` (default 20, max 100; legacy `limit`), `myOnly`, `type` (`audiobook`|`ebook`). Response: `{ requests, nextCursor, counts }`; users see their own, admins all (`myOnly=true` for their own).

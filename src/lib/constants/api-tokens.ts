@@ -97,7 +97,7 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     path: '/api/requests',
     title: 'Create request',
     description:
-      'Create a new audiobook request on behalf of the token owner. Body: `{ "audiobook": { "asin", "title", "author", "narrator?", "description?", "coverArtUrl?" } }`. Follows the user\'s normal auto-approve rules; returns named error codes (`already_available`, `being_processed`, `duplicate`, `ignored`, `user_not_found`) on rejection.',
+      'Create a new audiobook request on behalf of the token owner. Body: `{ "audiobook": { "asin", "title", "author", "narrator?", "description?", "coverArtUrl?" } }`. Follows the user\'s normal auto-approve rules. A book already in the library becomes an access request (no download) while Audiobookshelf requester tags are on and the owner is not an admin. Returns named error codes (`already_available`, `access_unavailable`, `being_processed`, `duplicate`, `ignored`, `user_not_found`) on rejection.',
     requiresAdmin: false,
     isWrite: true,
   },

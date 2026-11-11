@@ -15,6 +15,7 @@ import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { ReportedIssuesSection } from './components/ReportedIssuesSection';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
+import { AccessRequestPill } from '@/components/requests/AccessRequestPill';
 import { BulkImportWizard } from '@/components/admin/BulkImportWizard';
 import { TorrentResult } from '@/lib/utils/ranking-algorithm';
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
@@ -39,6 +40,7 @@ interface PendingApprovalRequest {
   createdAt: string;
   type: 'audiobook' | 'ebook';
   selectedTorrent: SelectedTorrentData | null;
+  accessRequest?: boolean; // book already in the library: Approve grants access, no download
   audiobook: {
     title: string;
     author: string;
@@ -266,6 +268,7 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
                       <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
                         {request.audiobook.title}
                       </h3>
+                      {request.accessRequest && <AccessRequestPill />}
                       {request.type === 'ebook' && (
                         <span
                           className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0"

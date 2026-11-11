@@ -50,6 +50,7 @@ Allows admins to review and approve/deny user requests before they are processed
   - If no `selectedTorrent` → Trigger automatic search job (status: 'pending')
   - Unreleased audiobook with no usable pick + `indexer.skip_unreleased` ON → status `awaiting_release`, no search queued; `retry_missing_torrents` searches on release day (#556). Same check as request creation (`shouldWaitForRelease`, `src/lib/services/release-gate.ts`) on `Request.releaseDate`; undated, released, setting OFF or a failed setting read → search now. Ebook requests always search now (creation never holds them either)
   - Send approved notification (once; nothing more is sent when the search later starts)
+- **Access request** (`Request.accessRequest`, book already in the library, requester tags on): Approve grants it with no search or download (`available` + the user's `req:` tag, `request_available` notification); 400 `InvalidStatus` if it is no longer waiting; if the book left the library it is approved as a normal request. See [requester-tags.md](../features/requester-tags.md#access-requests)
 - **Deny:** → Change status to 'denied', no further processing. A denied request stays denied for its user: `select-torrent` and `interactive-search` answer a non-admin 403 `RequestDenied` (#232)
 - **Approve** also writes `Request.approvalBypassedBy = NULL` (clears an earlier record of a completion without approval, [database.md](../backend/database.md#requests)); deny leaves it
 
@@ -71,7 +72,7 @@ Create request with pre-selected torrent (book detail page interactive search)
 **Existing requests (409, nothing created; checked in this order):**
 | Existing audiobook request | `error` | `message` |
 |---|---|---|
-| any user, `available` (or library match) | `AlreadyAvailable` | This audiobook is already in your library |
+| any user, `available` (or library match) | `AlreadyAvailable` | This audiobook is already in your library (never an access request here) |
 | any user, `downloaded` / `downloading` / `processing` / `awaiting_import` | `BeingProcessed` | This audiobook is being processed and will be available soon |
 | any user, `awaiting_approval` | `AwaitingApproval` | A request for this audiobook is already awaiting admin approval |
 | own, any other status except failed/warn/cancelled | `DuplicateRequest` | You have already requested this audiobook |

@@ -21,6 +21,7 @@ import { SelectPageCheckbox, SelectRowCheckbox } from './SelectionCheckbox';
 import { useRequestSelection } from './useRequestSelection';
 import { useBulkRun } from './useBulkRun';
 import { requestPhase, requestPhaseText } from '@/lib/constants/request-statuses';
+import { AccessRequestPill } from '@/components/requests/AccessRequestPill';
 
 interface RecentRequest {
   requestId: string;
@@ -43,6 +44,7 @@ interface RecentRequest {
   customSearchTerms?: string | null;
   blockedCount?: number;
   explicit?: boolean; // #542
+  accessRequest?: boolean; // approval grants access to a book already in the library
   inLibrary?: boolean; // bulk delete leaves these alone (#212)
 }
 
@@ -772,6 +774,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                               Custom Search
                             </span>
                           )}
+                          {request.accessRequest && <AccessRequestPill />}
                           {explicitMarkOn && request.explicit && request.type !== 'ebook' && (
                             <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
                               Explicit

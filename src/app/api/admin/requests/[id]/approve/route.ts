@@ -16,6 +16,7 @@ import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { shouldWaitForRelease } from '@/lib/services/release-gate';
+import { grantLibraryAccess } from '@/lib/services/library-access.service';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -88,6 +89,21 @@ export async function POST(
             },
             { status: 400 }
           );
+        }
+
+        // Access request (book already in the library): approval grants it without a search. With an
+        // admin-picked release, or when the book left the library, it is approved as a normal request below.
+        if (action === 'approve' && existingRequest.accessRequest) {
+          const grant = adminSelectedTorrent ? null : await grantLibraryAccess(id, logger);
+          if (grant?.granted) {
+            logger.info(`Access request ${id} approved by admin ${req.user.sub}`, { requestId: id, userId: existingRequest.userId });
+            return NextResponse.json({ success: true, message: 'Access granted: the book is already in the library', request: hidePlacementRecord(grant.request) });
+          }
+          if (grant?.reason === 'changed') {
+            return NextResponse.json({ error: 'InvalidStatus', message: 'Request is no longer awaiting approval' }, { status: 400 });
+          }
+          await prisma.request.update({ where: { id }, data: { accessRequest: false } });
+          logger.info(`Access request ${id}: ${grant ? 'the book is no longer in the library' : 'the admin picked a release'}; approving it as a normal request`);
         }
 
         // Update request based on action

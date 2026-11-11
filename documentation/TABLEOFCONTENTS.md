@@ -42,6 +42,7 @@
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)
 - **Requester tags `req:<username>` on ABS items (#232), backfill job, eligibility, shared-name warnings** → [features/requester-tags.md](features/requester-tags.md)
+- **Access requests (a second user asks for a book already in the library; the usual Request button, grant on approval, `requests.access_request`)** → [features/requester-tags.md](features/requester-tags.md#access-requests)
 - **Explicit mark on requests → ABS item Explicit flag (#542), admin setting (off by default), API-key access guard, mark/clear rules, `requests.explicit`** → [features/explicit-flag.md](features/explicit-flag.md)
 - **Delivered request stuck in `downloaded` when ABS holds another ASIN (#284), library link by path / files hash** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-link-to-the-library-item-284)
 - **Request card and details window show the edition ABS matched (#325a, #325), `audiobooks.library_asin`, follow on rematch** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)
@@ -230,6 +231,7 @@
 **"How does logging work?"** → [backend/services/logging.md](backend/services/logging.md)
 **"How do BookDate card stack animations work?"** → [features/bookdate-animations.md](features/bookdate-animations.md)
 **"How do I limit each Audiobookshelf user to the books they requested?"** → [features/requester-tags.md](features/requester-tags.md)
+**"A user wants a book that's already in the library but hidden from them"** → [features/requester-tags.md](features/requester-tags.md#access-requests) (they press Request; approval adds their `req:` tag)
 **"How do I hide adult books from kids in Audiobookshelf?"** → [features/explicit-flag.md](features/explicit-flag.md)
 **"How does Audiobookshelf integration work?"** → `src/lib/services/audiobookshelf/api.ts`, `src/lib/services/library/AudiobookshelfLibraryService.ts`
 **"How do I use OIDC/Authentik/Keycloak?"** → [backend/services/auth.md](backend/services/auth.md)

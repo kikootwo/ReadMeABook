@@ -30,6 +30,8 @@ import { ExplicitCheckbox } from '@/components/requests/ExplicitCheckbox';
 import { useExplicitMarkEnabled, useSetExplicit } from '@/lib/hooks/useExplicitMark';
 import { useLibraryEdition } from '@/lib/hooks/useLibraryEdition';
 import { RequestedEditionLine } from '@/components/audiobooks/RequestedEditionLine';
+import { LibraryAccessButton } from '@/components/audiobooks/LibraryAccessButton';
+import type { Audiobook } from '@/lib/hooks/useAudiobooks';
 
 interface AudiobookDetailsModalProps {
   asin: string;
@@ -57,6 +59,9 @@ interface AudiobookDetailsModalProps {
   aiReason?: string | null;
   /** Optional admin action buttons (Approve / Search / Deny) rendered as a second row in the action bar */
   adminActions?: React.ReactNode;
+  /** In the library while requester tags are on: the caller's access state (search cards only) */
+  libraryAccess?: Audiobook['libraryAccess'];
+  onLibraryAccessChange?: (access: Audiobook['libraryAccess']) => void;
 }
 
 // Status helper
@@ -108,6 +113,8 @@ export function AudiobookDetailsModal({
   hasReportedIssue = false,
   aiReason = null,
   adminActions,
+  libraryAccess = null,
+  onLibraryAccessChange,
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { squareCovers } = usePreferences();
@@ -218,6 +225,19 @@ export function AudiobookDetailsModal({
       onRequestSuccess?.();
     } catch (err) {
       showNotification(err instanceof Error ? err.message : 'Failed to create request', 'error');
+    }
+  };
+
+  const handleRequestAccess = async () => {
+    if (!user || !audiobook) return;
+    try {
+      const created = await createRequest(audiobook);
+      const granted = created?.status === 'available';
+      onLibraryAccessChange?.(granted ? null : 'requested');
+      showNotification(granted ? 'Access granted' : 'Access requested');
+      onRequestSuccess?.();
+    } catch (err) {
+      showNotification(err instanceof Error ? err.message : 'Failed to request access', 'error');
     }
   };
 
@@ -703,12 +723,7 @@ export function AudiobookDetailsModal({
               {/* Main Action */}
               <div className="flex-1">
                 {status.type === 'available' ? (
-                  <button
-                    disabled
-                    className="w-full py-3 px-4 rounded-xl font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30"
-                  >
-                    In Your Library
-                  </button>
+                  <LibraryAccessButton access={libraryAccess} onRequest={handleRequestAccess} isRequesting={isRequesting} />
                 ) : status.canRequest ? (
                   <button
                     onClick={handleRequest}
