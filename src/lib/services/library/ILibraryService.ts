@@ -57,6 +57,6 @@ export interface ILibraryService {
   getItem(itemId: string): Promise<LibraryItem | null>;
   searchItems(libraryId: string, query: string): Promise<LibraryItem[]>;
 
-  // Scanning
-  triggerLibraryScan(libraryId: string): Promise<void>;
+  // Scanning. `path` (relative to the library root) names a just-imported book for backends that can refresh one book.
+  triggerLibraryScan(libraryId: string, path?: string): Promise<void>;
 }

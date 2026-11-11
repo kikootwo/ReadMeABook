@@ -261,7 +261,7 @@ function AdminSettingsContent() {
           )}
 
           {/* Auth Tab (only in Audiobookshelf mode) */}
-          {activeTab === 'auth' && settings?.backendMode === 'audiobookshelf' && (
+          {activeTab === 'auth' && settings?.backendMode !== 'plex' && (
             <AuthTab
               settings={settings}
               onChange={setSettings}

@@ -360,7 +360,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     await createEbookRequestIfEnabled(requestId, audiobook, request.userId, result.targetPath, logger);
 
     // Trigger filesystem scan if enabled (Plex or Audiobookshelf)
-    await triggerScanAfterImport('audiobook', logger);
+    await triggerScanAfterImport('audiobook', logger, result.targetPath);
 
     const configService = getConfigService();
 
@@ -960,7 +960,8 @@ async function processEbookOrganization(
   });
 
   // Trigger filesystem scan if enabled (the ebook library on Audiobookshelf, when set)
-  await triggerScanAfterImport('ebook', logger);
+  // The ebook sits in the book's folder
+  await triggerScanAfterImport('ebook', logger, path.dirname(result.targetPath));
 
   const configService = getConfigService();
 

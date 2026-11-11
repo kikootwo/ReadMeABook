@@ -23,6 +23,7 @@ export function useSettings() {
   const [validated, setValidated] = useState<ValidationState>({
     plex: false,
     audiobookshelf: false,
+    audiosilo: false,
     oidc: false,
     registration: false,
     prowlarr: false,

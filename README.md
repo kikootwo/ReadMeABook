@@ -2,7 +2,7 @@
 
 ![RMAB_hero.png](screenshots/RMAB_hero.png)
 
-### Audiobook automation for Plex and Audiobookshelf
+### Audiobook automation for Plex, Audiobookshelf and AudioSilo
 
 <div align="center">
 
@@ -26,7 +26,7 @@
 
 ## What is ReadMeABook?
 
-ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobooks. Your users find books in an Audible-backed catalog and request them. RMAB searches your indexers through Prowlarr, sends the best release to your torrent or Usenet client, copies the finished files into your Plex or Audiobookshelf library with clean folders and tags, and marks the request available once your server has the book. It runs as a single Docker image with its own PostgreSQL and Redis.
+ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobooks. Your users find books in an Audible-backed catalog and request them. RMAB searches your indexers through Prowlarr, sends the best release to your torrent or Usenet client, copies the finished files into your Plex, Audiobookshelf or AudioSilo library with clean folders and tags, and marks the request available once your server has the book. It runs as a single Docker image with its own PostgreSQL and Redis.
 
 ## Features
 
@@ -58,6 +58,7 @@ ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobook
 
 - **Plex mode:** users sign in with their Plex account (only accounts with access to your server), and Plex Home profiles count as separate users. The admin account created during setup signs in with a username and password.
 - **Audiobookshelf mode:** sign in with OIDC (for example Authentik or Keycloak), with local accounts, or both. OIDC access can be open, limited to a group or an allow list, or need admin approval, and admin rights can come from a group claim. Local accounts can self-register, optionally with admin approval for new accounts.
+- **AudioSilo mode:** sign-in works as in Audiobookshelf mode: OIDC, local accounts, or both.
 - **Approvals and permissions:** a global auto-approve setting with per-user overrides, plus per-user interactive search and file download permissions. Admins can also create a personal sign-in link for a user.
 - **Admin dashboard:** request and download counts, active downloads with progress, requests awaiting approval, and a searchable list of every request.
 - **Safe deletes:** deleting a request removes only the library files that request imported, and follows your seeding rules for the torrent.
@@ -72,14 +73,14 @@ ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobook
 2. **Search.** RMAB searches your Prowlarr indexers and ranks what comes back. If nothing good turns up, it keeps watching RSS feeds and retries on a schedule.
 3. **Download.** The best release goes to your torrent or Usenet client, and RMAB follows its progress.
 4. **Import.** When the download finishes, RMAB copies the files into your media folder, tags them and merges chapters if you turned that on. Torrents keep seeding until your rules are met.
-5. **Available.** Plex or Audiobookshelf picks up the new folder (or RMAB asks it to scan, if you enable that). RMAB checks for new library items every 5 minutes, marks the request available and sends your notifications. If an ebook source is on, the ebook follows.
+5. **Available.** Plex, Audiobookshelf or AudioSilo picks up the new folder (or RMAB asks it to scan, if you enable that). RMAB checks for new library items every 5 minutes, marks the request available and sends your notifications. If an ebook source is on, the ebook follows.
 
 ## Setup
 
 ### Requirements
 
 - Docker on amd64 or arm64
-- Plex Media Server or Audiobookshelf, with an audiobook library
+- Plex Media Server, Audiobookshelf or AudioSilo, with an audiobook library
 - Prowlarr
 - A download client: qBittorrent, Transmission or Deluge for torrents, SABnzbd or NZBGet for Usenet. You can run one of each side by side.
 
@@ -144,13 +145,14 @@ An Unraid template is in [`unraid.xml`](unraid.xml).
 
 The wizard walks you through it, testing each connection as you go:
 
-1. **Backend:** choose Plex or Audiobookshelf, and your Audible region.
+1. **Backend:** choose Plex, Audiobookshelf or AudioSilo, and your Audible region.
 2. **Accounts and library:**
    - Plex: create the admin account, then connect Plex and pick your audiobook library.
    - Audiobookshelf: connect with an API token and pick the library, then choose how people sign in (OIDC, local accounts or both).
+   - AudioSilo: connect with a personal API key (an admin account lets RMAB trigger scans) and pick the library, then choose how people sign in (OIDC, local accounts or both).
 3. **Prowlarr:** URL and API key, then choose indexers with a priority, seeding time and RSS setting for each.
 4. **Download clients:** add your torrent and/or Usenet client.
-5. **Paths:** the download and media folders as RMAB sees them (defaults `/downloads` and `/media/audiobooks`), the folder template, and the tagging, Plex rename and chapter merge options. The media folder has to be the one your Plex or Audiobookshelf library reads from.
+5. **Paths:** the download and media folders as RMAB sees them (defaults `/downloads` and `/media/audiobooks`), the folder template, and the tagging, Plex rename and chapter merge options. The media folder has to be the one your Plex, Audiobookshelf or AudioSilo library reads from.
 6. **BookDate:** optional, can be skipped.
 7. **Review and finish.** RMAB runs the first Audible refresh and library scan, then turns on its scheduled jobs.
 
@@ -175,7 +177,7 @@ docker compose up -d
 
 | Area | Supported |
 |---|---|
-| Media server | Plex Media Server, Audiobookshelf |
+| Media server | Plex Media Server, Audiobookshelf, AudioSilo |
 | Indexers | Prowlarr (torrent and Usenet indexers) |
 | Torrent clients | qBittorrent, Transmission, Deluge |
 | Usenet clients | SABnzbd, NZBGet |

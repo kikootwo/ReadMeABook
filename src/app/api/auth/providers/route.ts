@@ -28,8 +28,8 @@ export async function GET() {
     const prowlarrUrl = await configService.get('indexer.prowlarr_url');
     const automationEnabled = !!(indexerType || prowlarrUrl);
 
-    if (backendMode === 'audiobookshelf') {
-      // Audiobookshelf mode - check which auth methods are enabled
+    if (backendMode === 'audiobookshelf' || backendMode === 'audiosilo') {
+      // Audiobookshelf and AudioSilo modes - check which auth methods are enabled
       const oidcEnabled = (await configService.get('oidc.enabled')) === 'true';
       const registrationEnabled = (await configService.get('auth.registration_enabled')) === 'true';
       const oidcProviderName = await configService.get('oidc.provider_name') || 'SSO';
@@ -49,7 +49,7 @@ export async function GET() {
       if (localLoginEnabled && (hasLocalUsers || registrationEnabled)) providers.push('local');
 
       return NextResponse.json({
-        backendMode: 'audiobookshelf',
+        backendMode,
         // The pages show the Explicit mark only when this is true (#542; off by default)
         explicitMarkEnabled: (await configService.get(EXPLICIT_MARK_SETTING_KEY)) === 'true',
         providers,

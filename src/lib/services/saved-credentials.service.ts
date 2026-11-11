@@ -30,6 +30,14 @@ export async function savedAudiobookshelfCredential(): Promise<SavedCredential> 
   };
 }
 
+export async function savedAudioSiloCredential(): Promise<SavedCredential> {
+  const config = getConfigService();
+  return {
+    secret: await config.get('audiosilo.api_token'),
+    url: await config.get('audiosilo.server_url'),
+  };
+}
+
 /** A saved download client's password/API key and URL (null-safe). */
 export function savedClientCredential(client: { password?: string | null; url?: string | null } | null | undefined): SavedCredential {
   return { secret: client?.password, url: client?.url };

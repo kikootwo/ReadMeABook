@@ -37,7 +37,7 @@
 - **ABS API client, library scanning** → `src/lib/services/audiobookshelf/api.ts`
 - **ABS library service** → `src/lib/services/library/AudiobookshelfLibraryService.ts`
 - **ABS connection test, fetch failure reasons (#221)** → [setup-wizard.md](setup-wizard.md) (API Endpoints, Fixed Issues 8)
-- **Backend mode selection (Plex vs ABS)** → [backend/services/config.md](backend/services/config.md)
+- **Backend mode selection (Plex vs ABS vs AudioSilo)** → [backend/services/config.md](backend/services/config.md)
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)
 - **Requester tags `req:<username>` on ABS items (#232), backfill job, eligibility, shared-name warnings** → [features/requester-tags.md](features/requester-tags.md)
@@ -45,6 +45,11 @@
 - **Delivered request stuck in `downloaded` when ABS holds another ASIN (#284), library link by path / files hash** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-link-to-the-library-item-284)
 - **Request card shows the edition ABS matched (#325a), `audiobooks.library_asin`, follow on rematch** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
+
+## AudioSilo Integration
+- **AudioSilo backend: setup, API calls, book identity, matching, scanning, limits** → [features/audiosilo-integration.md](features/audiosilo-integration.md)
+- **AudioSilo API client, library service** → `src/lib/services/audiosilo/api.ts`, `src/lib/services/library/AudioSiloLibraryService.ts`
+- **Backend modes, per-backend config keys** → `src/lib/constants/backend-mode.ts`
 
 ## Reading Shelves (Goodreads, Hardcover)
 - **Goodreads shelf sync (RSS feeds)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
@@ -230,6 +235,7 @@
 **"How do I limit each Audiobookshelf user to the books they requested?"** → [features/requester-tags.md](features/requester-tags.md)
 **"How do I hide adult books from kids in Audiobookshelf?"** → [features/explicit-flag.md](features/explicit-flag.md)
 **"How does Audiobookshelf integration work?"** → `src/lib/services/audiobookshelf/api.ts`, `src/lib/services/library/AudiobookshelfLibraryService.ts`
+**"How does AudioSilo integration work?"** → [features/audiosilo-integration.md](features/audiosilo-integration.md)
 **"How do I use OIDC/Authentik/Keycloak?"** → [backend/services/auth.md](backend/services/auth.md)
 **"How do I switch from Plex to Audiobookshelf?"** → Setup wizard (re-run setup with different backend mode)
 **"How does library thumbnail caching work?"** → [features/library-thumbnail-cache.md](features/library-thumbnail-cache.md)

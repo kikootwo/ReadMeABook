@@ -58,6 +58,12 @@ export async function GET(request: NextRequest) {
         libraryId: configMap.get('plex_audiobook_library_id') || '',
         triggerScanAfterImport: configMap.get('plex.trigger_scan_after_import') === 'true',
       },
+      audiosilo: {
+        serverUrl: configMap.get('audiosilo.server_url') || '',
+        apiToken: maskValue('api_token', configMap.get('audiosilo.api_token')),
+        libraryId: configMap.get('audiosilo.library_id') || '',
+        triggerScanAfterImport: configMap.get('audiosilo.trigger_scan_after_import') === 'true',
+      },
       audiobookshelf: {
         serverUrl: configMap.get('audiobookshelf.server_url') || '',
         apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),

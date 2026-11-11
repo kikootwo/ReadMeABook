@@ -13,6 +13,7 @@ import { BackendSelectionStep } from './steps/BackendSelectionStep';
 import { AdminAccountStep } from './steps/AdminAccountStep';
 import { PlexStep } from './steps/PlexStep';
 import { AudiobookshelfStep } from './steps/AudiobookshelfStep';
+import { AudioSiloStep } from './steps/AudioSiloStep';
 import { AuthMethodStep } from './steps/AuthMethodStep';
 import { OIDCConfigStep } from './steps/OIDCConfigStep';
 import { RegistrationSettingsStep } from './steps/RegistrationSettingsStep';
@@ -41,7 +42,7 @@ interface SetupState {
   currentStep: number;
 
   // Backend selection
-  backendMode: 'plex' | 'audiobookshelf';
+  backendMode: 'plex' | 'audiobookshelf' | 'audiosilo';
   audibleRegion: AudibleRegion;
 
   // Admin account (for Plex mode and ABS + Manual mode)
@@ -59,6 +60,12 @@ interface SetupState {
   absApiToken: string;
   absLibraryId: string;
   absTriggerScanAfterImport: boolean;
+
+  // AudioSilo config (if mode=audiosilo)
+  siloUrl: string;
+  siloApiToken: string;
+  siloLibraryId: string;
+  siloTriggerScanAfterImport: boolean;
 
   // Auth config (if mode=audiobookshelf)
   authMethod: 'oidc' | 'manual' | 'both';
@@ -98,6 +105,7 @@ interface SetupState {
   // Cached UI state for back-navigation persistence
   plexLibraries: { id: string; title: string; type: string }[];
   absLibraries: { id: string; name: string; itemCount: number }[];
+  siloLibraries: { id: string; name: string; itemCount: number }[];
   oidcTested: boolean;
   pathsTested: boolean;
   bookdateModels: { id: string; name: string }[];
@@ -134,6 +142,12 @@ export default function SetupWizard() {
     absApiToken: '',
     absLibraryId: '',
     absTriggerScanAfterImport: false,
+
+    // AudioSilo config (no filesystem watcher, so scanning after import is on by default)
+    siloUrl: '',
+    siloApiToken: '',
+    siloLibraryId: '',
+    siloTriggerScanAfterImport: true,
 
     // Auth config
     authMethod: 'oidc',
@@ -173,6 +187,7 @@ export default function SetupWizard() {
     // Cached UI state for back-navigation persistence
     plexLibraries: [],
     absLibraries: [],
+    siloLibraries: [],
     oidcTested: false,
     pathsTested: false,
     bookdateModels: [],
@@ -262,12 +277,22 @@ export default function SetupWizard() {
           audiobook_library_id: state.plexLibraryId,
         };
       } else {
-        // Audiobookshelf mode configuration
-        payload.audiobookshelf = {
-          server_url: state.absUrl,
-          api_token: state.absApiToken,
-          library_id: state.absLibraryId,
-        };
+        if (state.backendMode === 'audiosilo') {
+          // AudioSilo mode configuration
+          payload.audiosilo = {
+            server_url: state.siloUrl,
+            api_token: state.siloApiToken,
+            library_id: state.siloLibraryId,
+            trigger_scan_after_import: state.siloTriggerScanAfterImport,
+          };
+        } else {
+          // Audiobookshelf mode configuration
+          payload.audiobookshelf = {
+            server_url: state.absUrl,
+            api_token: state.absApiToken,
+            library_id: state.absLibraryId,
+          };
+        }
 
         payload.authMethod = state.authMethod;
 
@@ -416,8 +441,22 @@ export default function SetupWizard() {
     } else {
       // Audiobookshelf Mode: ABS → Auth Method → [OIDC Config] → [Registration Settings] → [Admin Account] → Prowlarr → ...
 
-      // Step 3: Audiobookshelf
+      // Step 3: Audiobookshelf or AudioSilo
       if (state.currentStep === currentStepNumber) {
+        if (state.backendMode === 'audiosilo') {
+          return (
+            <AudioSiloStep
+              siloUrl={state.siloUrl}
+              siloApiToken={state.siloApiToken}
+              siloLibraryId={state.siloLibraryId}
+              siloTriggerScanAfterImport={state.siloTriggerScanAfterImport}
+              siloLibraries={state.siloLibraries}
+              onUpdate={updateField}
+              onNext={() => goToStep(currentStepNumber + 1)}
+              onBack={() => goToStep(currentStepNumber - 1)}
+            />
+          );
+        }
         return (
           <AudiobookshelfStep
             absUrl={state.absUrl}

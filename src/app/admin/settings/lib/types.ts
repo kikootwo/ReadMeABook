@@ -10,7 +10,7 @@ import type { FilePlacement, LinkFallbackNote } from '@/lib/utils/library-placem
  * Main settings object structure
  */
 export interface Settings {
-  backendMode: 'plex' | 'audiobookshelf';
+  backendMode: 'plex' | 'audiobookshelf' | 'audiosilo';
   hasLocalUsers: boolean;
   hasLocalAdmins: boolean;
   audibleRegion: string;
@@ -18,6 +18,7 @@ export interface Settings {
   audibleLanguageFilter: boolean;
   plex: PlexSettings;
   audiobookshelf: AudiobookshelfSettings;
+  audiosilo: AudioSiloSettings;
   oidc: OIDCSettings;
   registration: RegistrationSettings;
   prowlarr: ProwlarrSettings;
@@ -53,6 +54,16 @@ export interface AudiobookshelfSettings {
   explicitMarkEnabled: boolean;
   /** Read-only, from the settings GET: names that share, lack or overlap a tag */
   requesterTagWarnings?: RequesterTagWarnings;
+}
+
+/**
+ * AudioSilo library configuration
+ */
+export interface AudioSiloSettings {
+  serverUrl: string;
+  apiToken: string;
+  libraryId: string;
+  triggerScanAfterImport: boolean;
 }
 
 /**
@@ -229,6 +240,7 @@ export interface PendingUser {
 export interface ValidationState {
   plex?: boolean;
   audiobookshelf?: boolean;
+  audiosilo?: boolean;
   oidc?: boolean;
   registration?: boolean;
   prowlarr?: boolean;

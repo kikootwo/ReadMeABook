@@ -144,7 +144,7 @@ export class ThumbnailCacheService {
    * @param coverUrl - URL of the cover (full URL or relative path)
    * @param backendBaseUrl - Base URL of backend (Plex or ABS server)
    * @param authToken - Authentication token
-   * @param backendMode - 'plex' or 'audiobookshelf'
+   * @param backendMode - 'plex', 'audiobookshelf' or 'audiosilo'
    * @param options - variant: file name suffix (ABS item ASIN, #325a); refresh: download even if the file exists
    * @returns Local file path of cached thumbnail, or null if failed
    */
@@ -153,7 +153,7 @@ export class ThumbnailCacheService {
     coverUrl: string,
     backendBaseUrl: string,
     authToken: string,
-    backendMode: 'plex' | 'audiobookshelf',
+    backendMode: 'plex' | 'audiobookshelf' | 'audiosilo',
     options: { variant?: string; refresh?: boolean } = {}
   ): Promise<string | null> {
     if (!coverUrl || !plexGuid || !backendBaseUrl || !authToken) {
@@ -195,7 +195,7 @@ export class ThumbnailCacheService {
         maxContentLength: MAX_FILE_SIZE,
         headers: {
           'User-Agent': RMAB_USER_AGENT,
-          ...(backendMode === 'audiobookshelf' && { Authorization: `Bearer ${authToken}` }),
+          ...(backendMode !== 'plex' && { Authorization: `Bearer ${authToken}` }),
         },
       });
 

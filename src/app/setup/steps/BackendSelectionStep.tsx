@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/Button';
 import { AudibleRegion, AUDIBLE_REGIONS } from '@/lib/types/audible';
 
 interface BackendSelectionStepProps {
-  value: 'plex' | 'audiobookshelf';
-  onChange: (value: 'plex' | 'audiobookshelf') => void;
+  value: 'plex' | 'audiobookshelf' | 'audiosilo';
+  onChange: (value: 'plex' | 'audiobookshelf' | 'audiosilo') => void;
   audibleRegion: AudibleRegion;
   onAudibleRegionChange: (region: AudibleRegion) => void;
   onNext: () => void;
@@ -97,6 +97,37 @@ export function BackendSelectionStep({
             </div>
           </div>
         </label>
+
+        <label
+          className={`block p-4 border-2 rounded-lg cursor-pointer transition ${
+            value === 'audiosilo'
+              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+          }`}
+        >
+          <input
+            type="radio"
+            name="backend"
+            value="audiosilo"
+            checked={value === 'audiosilo'}
+            onChange={() => onChange('audiosilo')}
+            className="sr-only"
+          />
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-2xl font-bold">S</span>
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                AudioSilo
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Use AudioSilo for library management. Choose OIDC or password
+                authentication.
+              </p>
+            </div>
+          </div>
+        </label>
       </div>
 
       {/* Audible Region Selection */}
@@ -147,8 +178,9 @@ export function BackendSelectionStep({
           </div>
         )}
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Select the Audible region that matches your metadata engine (Audnexus/Audible Agent)
-          configuration in {value === 'plex' ? 'Plex' : 'Audiobookshelf'}. This ensures accurate book matching and metadata.
+          {value === 'audiosilo'
+            ? 'Select the Audible region your books come from. This ensures accurate book matching and metadata.'
+            : `Select the Audible region that matches your metadata engine (Audnexus/Audible Agent) configuration in ${value === 'plex' ? 'Plex' : 'Audiobookshelf'}. This ensures accurate book matching and metadata.`}
         </p>
       </div>
 

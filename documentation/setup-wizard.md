@@ -17,7 +17,7 @@
 
 1. Welcome - Intro screen
 2. Admin Account - Create admin user
-3. Plex (or Audiobookshelf) - Server URL, auth, library selection, filesystem scan trigger toggle
+3. Plex (or Audiobookshelf, or AudioSilo) - Server URL, auth, library selection, filesystem scan trigger toggle
 4. Prowlarr - URL, API key, indexer selection with priorities (1-25), seeding time, RSS monitoring
 5. Download Client - qBittorrent/Transmission config
 6. Paths - Download + media directories with validation
@@ -36,6 +36,11 @@
 
 **POST /api/setup/test-download-client**
 - Tests qBittorrent/Transmission, returns client version
+
+**POST /api/setup/test-audiosilo** (also used by Settings > Library on AudioSilo installs)
+- Body `{serverUrl, apiToken}`; a masked or empty key reuses the saved one, only for the saved URL
+- Checks the key with `GET /api/v1/libraries` (audiobook libraries only) and reads name/version from the public `GET /api/v1/server`
+- 400 on a bad URL or key; unreachable host → 500 `{error}` from `describeFetchError`
 
 **POST /api/setup/test-abs** (also used by Settings > Library)
 - Body `{serverUrl, apiToken}` (masked/empty token reuses the saved one for the saved URL) → `{success, libraries}`

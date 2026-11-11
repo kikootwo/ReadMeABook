@@ -2,13 +2,17 @@
  * Component: Post-Import Library Scan
  * Documentation: documentation/phase3/file-organization.md
  *
- * After a successful import, asks Plex or Audiobookshelf to scan the library the
- * files landed in, when the backend's scan-after-import setting is on.
+ * After a successful import, asks the active backend (Plex, Audiobookshelf or
+ * AudioSilo) to scan the library the files landed in, when the backend's
+ * scan-after-import setting is on.
  */
 
 import { RMABLogger } from '../utils/logger';
 import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
+import { getMediaDir } from '../utils/media-dir';
+import { libraryRelativePath } from '../utils/library-relative-path';
+import { triggerScanConfigKey, libraryIdConfigKey, type BackendMode } from '../constants/backend-mode';
 
 export type ImportedMediaKind = 'audiobook' | 'ebook';
 
@@ -23,7 +27,8 @@ async function resolveScanLibraryId(
 ): Promise<string | null> {
   const configService = getConfigService();
   if (backendMode !== 'audiobookshelf') {
-    return configService.get('plex_audiobook_library_id');
+    // Plex and AudioSilo have a single library each
+    return configService.get(libraryIdConfigKey(backendMode as BackendMode));
   }
   if (kind === 'ebook') {
     const ebookLibraryId = await configService.get('audiobookshelf.ebook_library_id');
@@ -34,18 +39,19 @@ async function resolveScanLibraryId(
 
 /**
  * Trigger a library scan after import if enabled for the active backend.
+ * `importedPath` is the absolute path of the imported book folder; AudioSilo
+ * uses it to refresh just that book, the other backends scan the whole library.
  * Non-fatal: logs on failure but does not fail the job (scheduled scans will
  * eventually detect the book).
  */
 export async function triggerScanAfterImport(
   kind: ImportedMediaKind,
-  logger: RMABLogger
+  logger: RMABLogger,
+  importedPath?: string
 ): Promise<void> {
   const configService = getConfigService();
   const backendMode = await configService.getBackendMode();
-  const configKey = backendMode === 'audiobookshelf'
-    ? 'audiobookshelf.trigger_scan_after_import'
-    : 'plex.trigger_scan_after_import';
+  const configKey = triggerScanConfigKey(backendMode);
 
   if (await configService.get(configKey) !== 'true') {
     logger.info(`${backendMode} filesystem scan trigger disabled (relying on filesystem watcher)`);
@@ -59,10 +65,19 @@ export async function triggerScanAfterImport(
       return;
     }
 
-    // Get library service (returns PlexLibraryService or AudiobookshelfLibraryService)
+    // Get library service (Plex, Audiobookshelf or AudioSilo)
     const libraryService = await getLibraryService();
-    await libraryService.triggerLibraryScan(libraryId);
-    logger.info(`Triggered ${backendMode} filesystem scan for library ${libraryId}`);
+    const bookPath = backendMode === 'audiosilo' && importedPath
+      ? libraryRelativePath(importedPath, await getMediaDir())
+      : undefined;
+    if (bookPath) {
+      await libraryService.triggerLibraryScan(libraryId, bookPath);
+    } else {
+      await libraryService.triggerLibraryScan(libraryId);
+    }
+    logger.info(
+      `Triggered ${backendMode} filesystem scan for library ${libraryId}${bookPath ? ` (book: ${bookPath})` : ''}`
+    );
   } catch (error) {
     logger.error(
       `Failed to trigger filesystem scan: ${error instanceof Error ? error.message : 'Unknown error'}`,

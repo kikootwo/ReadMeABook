@@ -3,6 +3,7 @@
  * Documentation: documentation/features/bookdate.md
  */
 
+import { backendLabel, libraryIdConfigKey } from '@/lib/constants/backend-mode';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
@@ -25,11 +26,11 @@ async function getLibraryBooks(req: AuthenticatedRequest) {
     const backendMode = await configService.getBackendMode();
 
     let libraryId: string;
-    if (backendMode === 'audiobookshelf') {
-      const absLibraryId = await configService.get('audiobookshelf.library_id');
+    if (backendMode !== 'plex') {
+      const absLibraryId = await configService.get(libraryIdConfigKey(backendMode));
       if (!absLibraryId) {
         return NextResponse.json(
-          { error: 'No Audiobookshelf library ID configured' },
+          { error: `No ${backendLabel(backendMode)} library ID configured` },
           { status: 400 }
         );
       }

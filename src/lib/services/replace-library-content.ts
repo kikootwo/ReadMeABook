@@ -94,6 +94,9 @@ async function deleteFromLibrary(audiobook: ReplaceBook): Promise<string | null>
     } else {
       logger.warn(`No ABS item ID found for "${audiobook.title}" (ASIN: ${audiobook.audibleAsin}) — skipping ABS deletion`);
     }
+  } else if (backendMode === 'audiosilo') {
+    // AudioSilo has no delete endpoint, so content added outside RMAB cannot be removed from here
+    logger.warn(`AudioSilo cannot delete library content; "${audiobook.title}" must be removed from disk by hand`);
   } else if (backendMode === 'plex' && audiobook.plexGuid) {
     try {
       const plexLibraryRecord = await prisma.plexLibrary.findUnique({

@@ -3,6 +3,7 @@
  * Documentation: documentation/backend/services/config.md
  */
 
+import { BackendMode, isBackendMode } from '@/lib/constants/backend-mode';
 import { prisma } from '@/lib/db';
 import { getEncryptionService } from './encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -246,11 +247,18 @@ export class ConfigurationService {
   }
 
   /**
-   * Get backend mode (Plex or Audiobookshelf)
+   * Get backend mode (Plex, Audiobookshelf or AudioSilo)
    */
-  async getBackendMode(): Promise<'plex' | 'audiobookshelf'> {
+  async getBackendMode(): Promise<BackendMode> {
     const mode = await this.get('system.backend_mode');
-    return (mode as 'plex' | 'audiobookshelf') || 'plex';
+    return isBackendMode(mode) ? mode : 'plex';
+  }
+
+  /**
+   * Check if AudioSilo mode is enabled
+   */
+  async isAudioSiloMode(): Promise<boolean> {
+    return (await this.getBackendMode()) === 'audiosilo';
   }
 
   /**

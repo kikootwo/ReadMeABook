@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/Button';
 
 interface ReviewStepProps {
   config: {
-    backendMode: 'plex' | 'audiobookshelf';
+    backendMode: 'plex' | 'audiobookshelf' | 'audiosilo';
 
     // Plex config
     plexUrl: string;
@@ -18,6 +18,10 @@ interface ReviewStepProps {
     // Audiobookshelf config
     absUrl: string;
     absLibraryId: string;
+
+    // AudioSilo config
+    siloUrl?: string;
+    siloLibraryId?: string;
 
     // Auth config (ABS mode)
     authMethod: 'oidc' | 'manual' | 'both';
@@ -99,22 +103,22 @@ export function ReviewStep({ config, loading, error, onComplete, onBack }: Revie
           </div>
         ) : (
           <>
-            {/* Audiobookshelf Configuration */}
+            {/* Audiobookshelf / AudioSilo Configuration */}
             <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                Audiobookshelf
+                {config.backendMode === 'audiosilo' ? 'AudioSilo' : 'Audiobookshelf'}
               </h3>
               <dl className="space-y-2">
                 <div className="flex justify-between">
                   <dt className="text-sm text-gray-600 dark:text-gray-400">Server URL:</dt>
                   <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {config.absUrl}
+                    {config.backendMode === 'audiosilo' ? config.siloUrl : config.absUrl}
                   </dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-sm text-gray-600 dark:text-gray-400">Library ID:</dt>
                   <dd className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {config.absLibraryId}
+                    {config.backendMode === 'audiosilo' ? config.siloLibraryId : config.absLibraryId}
                   </dd>
                 </div>
               </dl>

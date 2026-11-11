@@ -5,6 +5,7 @@
  * Handles soft deletion of requests with intelligent torrent/file cleanup
  */
 
+import { usesItemIdColumn } from '../constants/backend-mode';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import {
@@ -236,7 +237,7 @@ export async function deleteRequest(
           data: {
             status: 'requested',
             updatedAt: new Date(),
-            ...(backendMode === 'audiobookshelf' ? { absItemId: null } : { plexGuid: null }),
+            ...(usesItemIdColumn(backendMode) ? { absItemId: null } : { plexGuid: null }),
             ...storedPath,
           },
         });

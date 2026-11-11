@@ -104,5 +104,6 @@ export async function createLocalAccount(
 export async function isLocalLoginEnabled(backendMode?: string | null): Promise<boolean> {
   if (process.env.DISABLE_LOCAL_LOGIN === 'true') return false;
   const mode = backendMode === undefined ? await getConfigService().getBackendMode() : backendMode;
-  return mode === 'audiobookshelf';
+  // Plex signs in through Plex; Audiobookshelf and AudioSilo installs use local accounts
+  return mode === 'audiobookshelf' || mode === 'audiosilo';
 }

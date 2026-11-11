@@ -19,6 +19,7 @@
 import { prisma } from '@/lib/db';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { approvalBypassMark } from '@/lib/constants/request-statuses';
+import { usesItemIdColumn, type BackendMode } from '@/lib/constants/backend-mode';
 import type { RMABLogger } from '@/lib/utils/logger';
 import type { LibraryItem } from './ILibraryService';
 import {
@@ -128,7 +129,7 @@ async function completeLinked(request: MatchableRequest, plexGuid: string, via: 
  * item id is written only when it won and this run did not link the book (`keepItem`).
  * Returns the matched item id when this job completed the request.
  */
-async function matchByAsin(request: MatchableRequest, backendMode: string, keepItem: boolean, logger: RMABLogger): Promise<string | null> {
+async function matchByAsin(request: MatchableRequest, backendMode: BackendMode, keepItem: boolean, logger: RMABLogger): Promise<string | null> {
   const audiobook = request.audiobook;
   const match = await findPlexMatch({
     asin: audiobook.audibleAsin || '',
@@ -158,8 +159,8 @@ async function matchByAsin(request: MatchableRequest, backendMode: string, keepI
     return null;
   }
   if (!keepItem) {
-    // plexGuid field stores the externalId from either backend
-    await recordItem(audiobook, backendMode === 'audiobookshelf' ? { absItemId: match.plexGuid } : { plexGuid: match.plexGuid }, logger);
+    // plexGuid field stores the externalId from any backend
+    await recordItem(audiobook, usesItemIdColumn(backendMode) ? { absItemId: match.plexGuid } : { plexGuid: match.plexGuid }, logger);
   }
   await notifyAvailable(request, logger);
   return match.plexGuid;
@@ -170,7 +171,7 @@ async function matchByAsin(request: MatchableRequest, backendMode: string, keepI
  * item fetches); `libraryId` limits the link to rows of this library.
  */
 export async function matchRequestsToLibrary(opts: {
-  backendMode: string;
+  backendMode: BackendMode;
   libraryId: string | null | undefined;
   listedItems: LibraryItem[];
   logger: RMABLogger;

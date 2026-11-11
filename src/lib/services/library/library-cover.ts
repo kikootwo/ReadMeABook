@@ -13,13 +13,14 @@
  * unchanged.
  */
 
+import type { BackendMode } from '@/lib/constants/backend-mode';
 import type { ThumbnailCacheService } from '../thumbnail-cache.service';
 import { asinShaped, sameAsin } from '@/lib/utils/asin';
 
 export interface CoverCachingParams {
   backendBaseUrl: string;
   authToken: string;
-  backendMode: 'plex' | 'audiobookshelf';
+  backendMode: BackendMode;
 }
 
 /** What a scan knew about the item before this scan (its plex_library row), if anything. */

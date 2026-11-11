@@ -22,6 +22,13 @@ interface UseLibrarySettingsReturn {
   absTestResult: { success: boolean; message: string } | null;
   testABSConnection: (serverUrl: string, apiToken: string) => Promise<boolean>;
 
+  // AudioSilo state
+  siloLibraries: ABSLibrary[];
+  setSiloLibraries: (libraries: ABSLibrary[]) => void;
+  testingSilo: boolean;
+  siloTestResult: { success: boolean; message: string } | null;
+  testAudioSiloConnection: (serverUrl: string, apiToken: string) => Promise<boolean>;
+
   // Shared state
   loadingLibraries: boolean;
 }
@@ -40,6 +47,11 @@ export function useLibrarySettings(
   const [absLibraries, setAbsLibraries] = useState<ABSLibrary[]>([]);
   const [testingAbs, setTestingAbs] = useState(false);
   const [absTestResult, setAbsTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // AudioSilo state
+  const [siloLibraries, setSiloLibraries] = useState<ABSLibrary[]>([]);
+  const [testingSilo, setTestingSilo] = useState(false);
+  const [siloTestResult, setSiloTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Shared state
   const [loadingLibraries, setLoadingLibraries] = useState(false);
@@ -128,6 +140,47 @@ export function useLibrarySettings(
     }
   }, [onSuccess, onError, onValidationChange]);
 
+  const testAudioSiloConnection = useCallback(async (serverUrl: string, apiToken: string): Promise<boolean> => {
+    setTestingSilo(true);
+    setSiloTestResult(null);
+
+    try {
+      const response = await fetchWithAuth('/api/setup/test-audiosilo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverUrl, apiToken }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSiloTestResult({ success: true, message: 'Connected to AudioSilo' });
+        onSuccess('Connected to AudioSilo. You can now save.');
+        onValidationChange('audiosilo', true);
+
+        if (data.libraries) {
+          setSiloLibraries(data.libraries);
+        }
+
+        return true;
+      } else {
+        const errorMsg = data.error || 'Connection failed';
+        setSiloTestResult({ success: false, message: errorMsg });
+        onError(errorMsg);
+        onValidationChange('audiosilo', false);
+        return false;
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test connection';
+      setSiloTestResult({ success: false, message: errorMsg });
+      onError(errorMsg);
+      onValidationChange('audiosilo', false);
+      return false;
+    } finally {
+      setTestingSilo(false);
+    }
+  }, [onSuccess, onError, onValidationChange]);
+
   return {
     plexLibraries,
     setPlexLibraries,
@@ -140,6 +193,12 @@ export function useLibrarySettings(
     testingAbs,
     absTestResult,
     testABSConnection,
+
+    siloLibraries,
+    setSiloLibraries,
+    testingSilo,
+    siloTestResult,
+    testAudioSiloConnection,
 
     loadingLibraries,
   };

@@ -10,6 +10,7 @@
 /** Where to find each credential, shown when it must be re-entered */
 export const CREDENTIAL_HELP = {
   audiobookshelf: 'Audiobookshelf API token (in Audiobookshelf: Settings → API Keys, or Settings → Users → your user → API Token on older versions)',
+  audiosilo: 'AudioSilo API key (in AudioSilo: account menu → Account → Personal API keys → Create API key)',
   plex: 'Plex token (X-Plex-Token: in Plex Web, open any item → ⋯ → Get Info → View XML; the token is at the end of the URL)',
   prowlarr: 'Prowlarr API key (in Prowlarr: Settings → General → Security → API Key)',
   downloadClient: 'download client password or API key (SABnzbd: Config → General → API Key; qBittorrent/Transmission/Deluge/NZBGet: the Web UI password)',

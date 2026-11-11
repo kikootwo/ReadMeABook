@@ -3,6 +3,7 @@
  * Documentation: documentation/features/audiobookshelf-integration.md
  */
 
+import { isBackendMode } from '@/lib/constants/backend-mode';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { ConfigurationService } from '@/lib/services/config.service';
@@ -19,7 +20,8 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         backendMode,
-        isAudiobookshelf: backendMode === 'audiobookshelf'
+        isAudiobookshelf: backendMode === 'audiobookshelf',
+        isAudioSilo: backendMode === 'audiosilo'
       });
     } catch (error) {
       logger.error('Failed to get backend mode', { error: error instanceof Error ? error.message : String(error) });
@@ -40,9 +42,9 @@ export async function PUT(request: NextRequest) {
         const body = bodyResult.data;
         const { mode } = body;
 
-        if (!mode || (mode !== 'plex' && mode !== 'audiobookshelf')) {
+        if (!isBackendMode(mode)) {
           return NextResponse.json(
-            { error: 'Invalid backend mode. Must be "plex" or "audiobookshelf"' },
+            { error: 'Invalid backend mode. Must be "plex", "audiobookshelf" or "audiosilo"' },
             { status: 400 }
           );
         }

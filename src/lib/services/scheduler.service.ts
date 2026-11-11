@@ -547,6 +547,30 @@ export class SchedulerService {
       }
 
       libraryId = job.payload?.libraryId || absConfig['audiobookshelf.library_id'];
+    } else if (backendMode === 'audiosilo') {
+      const siloConfig = await configService.getMany([
+        'audiosilo.server_url',
+        'audiosilo.api_token',
+        'audiosilo.library_id',
+      ]);
+
+      if (!siloConfig['audiosilo.server_url']) {
+        missingFields.push('AudioSilo server URL');
+      }
+      if (!siloConfig['audiosilo.api_token']) {
+        missingFields.push('AudioSilo API key');
+      }
+      if (!siloConfig['audiosilo.library_id']) {
+        missingFields.push('AudioSilo library ID');
+      }
+
+      if (missingFields.length > 0) {
+        const errorMsg = `AudioSilo is not configured. Missing: ${missingFields.join(', ')}. Please configure AudioSilo in the admin settings before running library scans.`;
+        logger.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      libraryId = job.payload?.libraryId || siloConfig['audiosilo.library_id'];
     } else {
       const plexConfig = await configService.getMany([
         'plex_url',

@@ -12,6 +12,7 @@
 import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
+import { libraryIdConfigKey, type BackendMode } from '@/lib/constants/backend-mode';
 import {
   LIVE_ALWAYS_STATUSES,
   LIVE_RECENT_STATUSES,
@@ -72,7 +73,7 @@ export const LIBRARY_REQUEST_SELECT = {
 } as const;
 
 export interface ActiveLibrary {
-  backend: 'plex' | 'audiobookshelf';
+  backend: BackendMode;
   libraryId: string | null;
 }
 
@@ -80,8 +81,8 @@ export interface ActiveLibrary {
 export async function resolveActiveLibrary(): Promise<ActiveLibrary> {
   const config = getConfigService();
   const backend = await config.getBackendMode();
-  if (backend === 'audiobookshelf') {
-    return { backend, libraryId: (await config.get('audiobookshelf.library_id')) || null };
+  if (backend !== 'plex') {
+    return { backend, libraryId: (await config.get(libraryIdConfigKey(backend))) || null };
   }
   const plex = await config.getPlexConfig();
   return { backend: 'plex', libraryId: plex.libraryId || null };

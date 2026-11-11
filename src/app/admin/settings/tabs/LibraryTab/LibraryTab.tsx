@@ -7,6 +7,7 @@ import { Settings } from '../../lib/types';
 import { useLibrarySettings } from './useLibrarySettings';
 import { PlexSection } from './PlexSection';
 import { AudiobookshelfSection } from './AudiobookshelfSection';
+import { AudioSiloSection } from './AudioSiloSection';
 
 interface LibraryTabProps {
   settings: Settings;
@@ -32,6 +33,10 @@ export function LibraryTab({
     testingAbs,
     absTestResult,
     testABSConnection,
+    siloLibraries,
+    testingSilo,
+    siloTestResult,
+    testAudioSiloConnection,
   } = useLibrarySettings(onSuccess, onError, onValidationChange);
 
   const handleTestPlexConnection = () => {
@@ -40,6 +45,10 @@ export function LibraryTab({
 
   const handleTestABSConnection = () => {
     testABSConnection(settings.audiobookshelf.serverUrl, settings.audiobookshelf.apiToken);
+  };
+
+  const handleTestAudioSiloConnection = () => {
+    testAudioSiloConnection(settings.audiosilo.serverUrl, settings.audiosilo.apiToken);
   };
 
   // Render appropriate section based on backend mode
@@ -67,6 +76,20 @@ export function LibraryTab({
         testing={testingAbs}
         testResult={absTestResult}
         onTestConnection={handleTestABSConnection}
+      />
+    );
+  }
+
+  if (settings.backendMode === 'audiosilo') {
+    return (
+      <AudioSiloSection
+        settings={settings}
+        onChange={onChange}
+        onValidationChange={onValidationChange}
+        libraries={siloLibraries}
+        testing={testingSilo}
+        testResult={siloTestResult}
+        onTestConnection={handleTestAudioSiloConnection}
       />
     );
   }

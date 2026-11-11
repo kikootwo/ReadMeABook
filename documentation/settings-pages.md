@@ -20,11 +20,12 @@ src/app/admin/settings/
 │   ├── useSettings.ts            # Global settings hook
 │   └── useSettingsTabUrlState.ts # Active tab <-> ?tab=
 └── tabs/                         # Feature modules
-    ├── LibraryTab/               # Plex/Audiobookshelf config
+    ├── LibraryTab/               # Plex/Audiobookshelf/AudioSilo config
     │   ├── LibraryTab.tsx
     │   ├── useLibrarySettings.ts
     │   ├── PlexSection.tsx
     │   ├── AudiobookshelfSection.tsx
+    │   ├── AudioSiloSection.tsx
     │   └── index.ts
     ├── AuthTab/                  # Authentication (OIDC + Manual)
     │   ├── AuthTab.tsx
@@ -67,6 +68,7 @@ src/app/admin/settings/
 
 1. **Plex** - URL, token (masked), library ID, Audible region, filesystem scan trigger toggle
 2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, filesystem scan trigger toggle, requester tags toggle (`audiobookshelf.tag_requester`, `RequesterTagOption.tsx`; amber box of names that share, lack or overlap a tag while ticked; [requester-tags.md](features/requester-tags.md)), Explicit mark switch (`audiobookshelf.explicit_mark_enabled`, off by default, `ExplicitMarkOption.tsx`, field `explicitMarkEnabled`; [explicit-flag.md](features/explicit-flag.md))
+   - On an AudioSilo install this tab is **AudioSilo**: URL, API key (masked), library ID, Audible region, scan-after-import toggle
 3. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle, **audiobook/ebook categories per indexer**
 4. **Download Client** - Type (qBittorrent, Transmission, SABnzbd), URL, credentials (masked), custom download path (per-client relative sub-path with live preview)
 5. **Paths** - Download + media directories, audiobook organization template, metadata tagging toggle, chapter merging toggle, Plex format coercion toggle. Audiobookshelf mode: the tagging toggle is replaced by the Library files section (`LibraryFilesSection.tsx`: File placement + Metadata radios, chapter merge moved in; guards both ways, stored conflict blocks Save via `pathsPlacementConflict()`) → [features/library-placement.md](features/library-placement.md)
@@ -226,6 +228,7 @@ src/app/admin/settings/
 - Plex: `plex.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.ebook_library_id` (string, default: empty = audiobook library) — library scanned after an ebook import
+- AudioSilo: `audiosilo.trigger_scan_after_import` (boolean; AudioSilo has no filesystem watcher, so the setup wizard defaults it on)
 
 **UI:**
 - Checkbox toggle in both Plex and Audiobookshelf settings tabs
@@ -286,8 +289,8 @@ src/app/admin/settings/
 **Saved credentials in test and save routes** (`resolveSecretForUrl`, `src/lib/utils/saved-credential.ts`; loaders in `src/lib/services/saved-credentials.service.ts`):
 - A masked secret (`••••…`; `********` for download clients; empty for ABS test / download clients with a saved password) means "use the saved one"
 - Reused only when the URL being tested or saved equals the saved URL (`isSameServiceUrl`: same origin + path, trailing slash ignored) → else 400 "re-enter … for the new address" naming where to find it (`CREDENTIAL_HELP`); nothing is saved or contacted
-- Test routes: `setup/test-abs` (`audiobookshelf.server_url`), `admin/settings/test-plex` (`plex_url`), `admin/settings/test-prowlarr` (`prowlarr_url` → `PROWLARR_URL`), `admin/settings/download-clients/{test,categories}` (client by `clientId`), legacy `test-download-client` (the same-type client saved at that URL)
-- Save routes: `PUT admin/settings/plex`, `prowlarr`, `audiobookshelf`, `download-clients/[id]`, legacy `download-client` (checked before anything is written)
+- Test routes: `setup/test-abs` (`audiobookshelf.server_url`), `setup/test-audiosilo` (`audiosilo.server_url`), `admin/settings/test-plex` (`plex_url`), `admin/settings/test-prowlarr` (`prowlarr_url` → `PROWLARR_URL`), `admin/settings/download-clients/{test,categories}` (client by `clientId`), legacy `test-download-client` (the same-type client saved at that URL)
+- Save routes: `PUT admin/settings/plex`, `prowlarr`, `audiobookshelf`, `audiosilo`, `download-clients/[id]`, legacy `download-client` (checked before anything is written)
 - OIDC (`PUT admin/settings/oidc`): masked or empty `clientSecret` keeps the saved secret only for the saved `oidc.issuer_url`; empty issuer = OIDC disabled (`oidc.enabled` saved false), no secret needed; all OIDC keys written in one transaction (`ConfigurationService.setManyAtomic`). Settings UI shows the route's `error` text and saves registration settings even if the OIDC save is refused
 - Notifications (`PUT admin/notifications/[id]`): Apprise/ntfy masked secrets kept only while `serverUrl` is unchanged (ntfy: empty = `https://ntfy.sh`) → else 400 listing the fields to re-enter; Discord/Pushover unchanged (see notifications.md)
 - BookDate (`POST bookdate/config`) without a new `apiKey`: saved key kept only for the same provider and, for custom, the same `baseUrl`. Other built-in provider → 400; switching to custom → stored empty; new custom `baseUrl` with a non-empty saved key → 400 re-enter. `clearApiKey: true` (custom only; UI checkbox "This endpoint needs no API key") stores an empty key. Built-in provider with no saved key → 400 "There is no saved API key for this provider. Enter one."

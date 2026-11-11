@@ -66,19 +66,20 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
 9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
 10. Update request status to `downloaded` and store file hash in `audiobooks.files_hash`
-11. **Trigger filesystem scan** (if enabled) - tells Plex/ABS to scan for new files
+11. **Trigger filesystem scan** (if enabled) - tells Plex/ABS/AudioSilo to scan for new files (AudioSilo: refreshes just the imported book)
 12. Originals remain until seeding requirements met
 
 ## Filesystem Scan Triggering
 
 **Status:** ✅ Implemented (Both Backends)
 
-**Purpose:** Trigger Plex/Audiobookshelf to scan filesystem after organizing files, ensuring new books appear immediately for users with disabled filesystem watchers.
+**Purpose:** Trigger Plex/Audiobookshelf/AudioSilo to scan filesystem after organizing files, ensuring new books appear immediately for users with disabled filesystem watchers.
 
 **Configuration:**
 - Plex: `plex.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.ebook_library_id` (optional) — library scanned after an ebook import; empty scans the audiobook library (for ebook templates that place ebooks outside the audiobook library's folders)
+- AudioSilo: `audiosilo.trigger_scan_after_import` (boolean, default: false; the setup wizard sets it on)
 
 **Flow:**
 1. Files organized to media directory
@@ -93,6 +94,7 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 - Uses existing `ILibraryService` abstraction
 - `PlexLibraryService.triggerLibraryScan()` → `POST /library/sections/{id}/refresh`
 - `AudiobookshelfLibraryService.triggerLibraryScan()` → `POST /api/libraries/{id}/scan` (`triggerABSScan`: id URL-encoded as one path segment; empty, `.`, `..` refused before any request)
+- `AudioSiloLibraryService.triggerLibraryScan(libraryId, path?)` → with the imported book's path: `POST /api/v1/admin/libraries/{id}/book/rescan?path=`; no path, or a 404 (book not indexed yet): `POST /api/v1/admin/libraries/{id}/scan`
 - Called from `organize-files.processor.ts` after status update
 - Backend-agnostic using factory pattern
 

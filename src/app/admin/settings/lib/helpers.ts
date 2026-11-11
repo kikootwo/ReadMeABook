@@ -87,6 +87,14 @@ export const saveTabSettings = async (
         }).then(res => {
           if (!res.ok) throw new Error('Failed to save Plex settings');
         });
+      } else if (settings.backendMode === 'audiosilo') {
+        await fetchWithAuth('/api/admin/settings/audiosilo', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings.audiosilo),
+        }).then(res => {
+          if (!res.ok) throw new Error('Failed to save AudioSilo settings');
+        });
       } else {
         await fetchWithAuth('/api/admin/settings/audiobookshelf', {
           method: 'PUT',
@@ -211,10 +219,10 @@ export const pathsPlacementConflict = (settings: Settings): string | null =>
   });
 
 /**
- * Validates that authentication is properly configured in Audiobookshelf mode
+ * Validates that authentication is properly configured in Audiobookshelf and AudioSilo modes
  */
 export const validateAuthSettings = (settings: Settings): { valid: boolean; message?: string } => {
-  if (settings.backendMode === 'audiobookshelf') {
+  if (settings.backendMode !== 'plex') {
     // Case 1: No auth methods enabled and no local users - complete lockout
     if (!settings.oidc.enabled && !settings.registration.enabled && !settings.hasLocalUsers) {
       return {
@@ -245,6 +253,7 @@ export const getTabValidation = (
   validated: {
     plex: boolean;
     audiobookshelf: boolean;
+    audiosilo?: boolean;
     oidc: boolean;
     registration: boolean;
     prowlarr: boolean;
@@ -254,7 +263,8 @@ export const getTabValidation = (
 ): boolean => {
   switch (activeTab) {
     case 'library':
-      return settings.backendMode === 'plex' ? validated.plex : validated.audiobookshelf;
+      if (settings.backendMode === 'plex') return validated.plex;
+      return settings.backendMode === 'audiosilo' ? !!validated.audiosilo : validated.audiobookshelf;
     case 'auth':
       // If OIDC is enabled, it must be validated
       // If OIDC is disabled, we don't require validation for it
@@ -290,9 +300,9 @@ export const getTabValidation = (
 /**
  * Gets tab configuration based on backend mode
  */
-export const getTabs = (backendMode: 'plex' | 'audiobookshelf') => [
-  { id: 'library' as const, label: backendMode === 'plex' ? 'Plex' : 'Audiobookshelf', icon: '📺' },
-  ...(backendMode === 'audiobookshelf' ? [{ id: 'auth' as const, label: 'Authentication', icon: '🔐' }] : []),
+export const getTabs = (backendMode: 'plex' | 'audiobookshelf' | 'audiosilo') => [
+  { id: 'library' as const, label: backendMode === 'plex' ? 'Plex' : backendMode === 'audiosilo' ? 'AudioSilo' : 'Audiobookshelf', icon: '📺' },
+  ...(backendMode !== 'plex' ? [{ id: 'auth' as const, label: 'Authentication', icon: '🔐' }] : []),
   { id: 'prowlarr' as const, label: 'Indexers', icon: '🔍' },
   { id: 'download' as const, label: 'Download Client', icon: '⬇️' },
   { id: 'paths' as const, label: 'Paths', icon: '📁' },

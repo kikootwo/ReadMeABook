@@ -281,6 +281,12 @@ export async function deleteBackendItem(
     return;
   }
 
+  if (backendMode === 'audiosilo') {
+    // AudioSilo has no delete endpoint: its next library scan drops an item whose files are gone
+    logger.info(`AudioSilo drops "${book.title}" on its next library scan; nothing to delete`);
+    return;
+  }
+
   if (backendMode === 'plex' && book.plexGuid) {
     if (outcome.kind === 'gone') {
       // RMAB did not remove anything, so there is no evidence the Plex item's files are gone:
