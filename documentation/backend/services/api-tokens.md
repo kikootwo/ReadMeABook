@@ -64,7 +64,8 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - BigInt columns (`downloadHistory[].torrentSizeBytes`, `audiobook.fileSizeBytes`) go out as JSON numbers via `toJsonSafe()` (`src/lib/utils/json-safe.ts`).
 
 ## Fixed Issues
-- **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which nothing writes yet (always null), so they serialize today.
+- **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which can hold a value (rows written by an older release or by hand), so they convert it too.
+- **GET `/api/requests` 500 `FetchError` when a listed request's audiobook has a `fileSizeBytes` value:** the list returns the whole `audiobook` row, and the BigInt made `NextResponse.json` throw `Do not know how to serialize a BigInt`. Fix: the `requests` array passes through `toJsonSafe()`, like the by-ID route.
 
 ## POST `/api/requests/:id/cancel` (Write, #228)
 - Route: `src/app/api/requests/[id]/cancel/route.ts` → `cancelLoadedRequest()` ([request-cancel.md](../../admin-features/request-cancel.md)).
@@ -105,6 +106,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403.
 - `tests/api/requests-cancel.route.test.ts` — cancel route: owner 200 minimal body, cross-user 403, admin any, 404, 400.
 - `tests/api/requests-id.bigint.route.test.ts` — owner/admin GET 200 with BigInt sizes as numbers (#261).
+- `tests/api/requests-list.bigint.route.test.ts` — GET `/api/requests` 200 with a BigInt `audiobook.fileSizeBytes` as a number.
 - `tests/utils/json-safe.test.ts` — `toJsonSafe()` BigInt conversion, Date/Decimal passthrough.
 
 ## Related
