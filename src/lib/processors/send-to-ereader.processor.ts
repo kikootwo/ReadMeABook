@@ -121,7 +121,7 @@ export async function processSendToEreader(payload: SendToEreaderPayload): Promi
       where: { id: ebookRequest.id },
       data: { ereaderSentDevices: [...new Set([...alreadySent, ...newlySent])] },
     });
-    logger.info(`Sent "${audiobook.title}" to ${newlySent.length} device(s): ${newlySent.join(', ')}`);
+    logger.info(`Sent "${audiobook.title}" (Audiobookshelf item ${libraryItemId}) to ${newlySent.length} device(s): ${newlySent.join(', ')}`);
   }
 }
 
