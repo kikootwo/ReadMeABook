@@ -28,7 +28,8 @@ export const USAGE = `usage:
        [--stop-specs <a,b> [--stop-cycles <n>] [--stop-time <s>]]  (timed docker stop/start between phases)
   node e2e/run.mjs unit --slug <s> --worktree <dir> (--trusted | --tainted) [--evidence <dir>]
   (--tainted and --pr-dockerfile are currently disabled)
-  node e2e/run.mjs preview --image <ref> [--replace-image <ref>] [--evidence <dir>]
+  node e2e/run.mjs preview --image <ref> [--replace-image <ref>] [--evidence <dir>] [--overrides <name,name>]
+       [--specs <a,b>]             (run after the preview seed, on the same stack; nothing is torn down)
   node e2e/run.mjs down --slug <s> [--force-reserved]`;
 
 const FLAGS = new Set(['offline-fixtures', 'rm-image', 'help', 'trusted', 'tainted', 'pr-dockerfile', 'allow-log-canary', 'force-reserved', 'isolation-check', 'allow-untracked', 'isolate-specs']);
@@ -78,6 +79,8 @@ export function parseArgs(argv) {
     if (opts.slug) throw new Error('preview always uses the reserved slug "preview"');
     opts.slug = 'preview';
     opts.port = '3400';
+    // Extra specs only when asked for (opts.specs defaults to the smoke spec for stack runs)
+    opts.previewSpecs = argv.includes('--specs') ? opts.specs : '';
   } else if (opts.slug && isReservedSlug(opts.slug) && !opts['force-reserved']) {
     throw new Error(`slug "${opts.slug}" is reserved (preview stack / unit runs); pass --force-reserved to operate on it`);
   }
