@@ -22,6 +22,7 @@ const processorsMock = vi.hoisted(() => ({
   processRetryFailedImports: vi.fn().mockResolvedValue('ok'),
   processCleanupSeededTorrents: vi.fn().mockResolvedValue('ok'),
   processSyncShelves: vi.fn().mockResolvedValue('ok'),
+  processSyncImportLists: vi.fn().mockResolvedValue('ok'),
   processCheckWatchedLists: vi.fn().mockResolvedValue('ok'),
   // Ebook processors
   processSearchEbook: vi.fn().mockResolvedValue('ok'),
@@ -119,6 +120,10 @@ vi.mock('@/lib/processors/cleanup-seeded-torrents.processor', () => ({
 
 vi.mock('@/lib/processors/sync-shelves.processor', () => ({
   processSyncShelves: processorsMock.processSyncShelves,
+}));
+
+vi.mock('@/lib/processors/sync-import-lists.processor', () => ({
+  processSyncImportLists: processorsMock.processSyncImportLists,
 }));
 
 vi.mock('@/lib/processors/check-watched-lists.processor', () => ({
@@ -681,6 +686,7 @@ describe('JobQueueService', () => {
     expect(processorsMock.processCleanupSeededTorrents).toHaveBeenCalled();
     expect(processorsMock.processSyncShelves).toHaveBeenCalled();
     expect(processorsMock.processCheckWatchedLists).toHaveBeenCalled();
+    expect(processorsMock.processSyncImportLists).toHaveBeenCalled();
   });
 
   it('hands Bull\'s attempt counts to the search and download processors (#332 closing notification)', async () => {

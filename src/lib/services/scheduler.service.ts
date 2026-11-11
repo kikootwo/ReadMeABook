@@ -26,7 +26,7 @@ const STALE_NAME_REWRITES: ReadonlyArray<{
   { type: 'plex_recently_added_check', staleName: 'Plex Recently Added Check', neutralName: 'Recently Added Check' },
 ];
 
-export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'find_missing_ebooks' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
+export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'find_missing_ebooks' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists' | 'sync_import_lists';
 
 export interface ScheduledJob {
   id: string;
@@ -165,6 +165,13 @@ export class SchedulerService {
         type: 'monitor_rss_feeds' as ScheduledJobType,
         schedule: '*/15 * * * *', // Every 15 minutes
         enabled: true, // Enable by default
+        payload: {},
+      },
+      {
+        name: 'Sync Import Lists',
+        type: 'sync_import_lists' as ScheduledJobType,
+        schedule: '*/10 * * * *', // Every 10 minutes: starts any list that is due
+        enabled: true,
         payload: {},
       },
       {
@@ -488,6 +495,9 @@ export class SchedulerService {
       case 'sync_reading_shelves':
         bullJobId = await this.triggerSyncShelves(job);
         break;
+      case 'sync_import_lists':
+        bullJobId = await this.triggerSyncImportLists(job);
+        break;
       case 'check_watched_lists':
         bullJobId = await this.triggerCheckWatchedLists(job);
         break;
@@ -769,6 +779,10 @@ export class SchedulerService {
   /**
    * Trigger Reading shelves sync
    */
+  private async triggerSyncImportLists(job: any): Promise<string> {
+    return await this.jobQueue.addSyncImportListsJob(job.id);
+  }
+
   private async triggerSyncShelves(job: any): Promise<string> {
     return await this.jobQueue.addSyncShelvesJob(job.id);
   }

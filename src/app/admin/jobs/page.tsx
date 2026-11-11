@@ -41,6 +41,7 @@ const JOB_DESCRIPTIONS: Record<string, string> = {
   cleanup_seeded_torrents: "Removes torrents once they've met your seeding requirements.",
   monitor_rss_feeds: 'Watches indexer RSS feeds for matches against pending requests.',
   sync_reading_shelves: 'Pulls new books from your Goodreads/Hardcover shelves.',
+  sync_import_lists: 'Checks the public lists you added (Settings → Lists) and requests the books you are missing.',
   check_watched_lists: 'Checks watched series & authors for new releases.',
 };
 

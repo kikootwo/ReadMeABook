@@ -283,4 +283,4 @@ export interface BookDateModel {
 /**
  * Tab identifier type
  */
-export type SettingsTab = 'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'ebook' | 'bookdate' | 'notifications' | 'api';
+export type SettingsTab = 'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'ebook' | 'bookdate' | 'notifications' | 'api' | 'lists';

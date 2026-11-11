@@ -55,6 +55,7 @@
 - **Hook factory (createShelfHooks)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#hook-factory)
 - **Adding a new shelf provider** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
 - **Watched authors & series (auto-request, Entire catalog vs New releases only, release cutoff, undated books, targeted check)** → [features/watched-lists.md](features/watched-lists.md)
+- **Import lists (system-wide Goodreads Listopia lists: sync, filter profiles, preview, owned check, free-space guard, hourly allowance, import-time completeness check)** → [backend/services/list-sync.md](backend/services/list-sync.md)
 
 ## Audible Integration
 - **Web scraping (popular, new releases)** → [integrations/audible.md](integrations/audible.md)

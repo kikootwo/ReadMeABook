@@ -23,6 +23,7 @@ import { EbookTab } from './tabs/EbookTab/EbookTab';
 import { BookDateTab } from './tabs/BookDateTab/BookDateTab';
 import { NotificationsTab } from './tabs/NotificationsTab';
 import { ApiTab } from './tabs/ApiTab/ApiTab';
+import { ListsTab } from './tabs/ListsTab/ListsTab';
 
 // Types and Helpers
 import type { Settings, Message } from './lib/types';
@@ -340,8 +341,11 @@ function AdminSettingsContent() {
           {/* API Tab */}
           {activeTab === 'api' && <ApiTab />}
 
+          {/* Lists Tab */}
+          {activeTab === 'lists' && <ListsTab />}
+
           {/* Save Button (only for tabs that save through main page) */}
-          {activeTab !== 'ebook' && activeTab !== 'bookdate' && activeTab !== 'notifications' && activeTab !== 'api' && (
+          {activeTab !== 'ebook' && activeTab !== 'bookdate' && activeTab !== 'notifications' && activeTab !== 'api' && activeTab !== 'lists' && (
             <div className="mt-8 flex gap-4">
               <Button
                 onClick={saveSettings}

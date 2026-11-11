@@ -26,6 +26,13 @@ import {
 } from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
+import {
+  audioBytes,
+  DEFAULT_IMPORT_MIN_MB_PER_MINUTE,
+  IMPORT_MIN_MB_PER_MINUTE_KEY,
+  MAX_BYTES_TO_CHECK_COMPLETENESS,
+  truncatedDownloadReason,
+} from '../utils/download-completeness';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createMergeProgressReporter } from '../utils/merge-progress';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
@@ -227,6 +234,20 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       enabled: fileRenameEnabledConfig?.value === 'true',
       template: fileRenameTemplateConfig?.value || '{title}',
     };
+
+    // Refuse audio far too small for the book's runtime (for example one part of a multi-file release)
+    if (!selectedFiles || selectedFiles.length === 0) {
+      const floorConfig = await prisma.configuration.findUnique({ where: { key: IMPORT_MIN_MB_PER_MINUTE_KEY } });
+      const configuredFloor = floorConfig ? Number(floorConfig.value) : NaN;
+      const minMbPerMinute = Number.isFinite(configuredFloor) ? configuredFloor : DEFAULT_IMPORT_MIN_MB_PER_MINUTE;
+      const downloadedBytes = await audioBytes(downloadPath);
+      // A large download cannot be a stray part, so only small ones need the runtime lookup
+      if (downloadedBytes > 0 && downloadedBytes < MAX_BYTES_TO_CHECK_COMPLETENESS) {
+        const runtimeDetails = await loadAudibleDetails().catch(() => null);
+        const incomplete = truncatedDownloadReason(downloadedBytes, runtimeDetails?.durationMinutes, minMbPerMinute);
+        if (incomplete) throw new Error(incomplete);
+      }
+    }
 
     const tagDetails = await tagDetailsPending;
 
@@ -550,7 +571,9 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
           orderBy: { createdAt: 'desc' },
         });
         if (selectedDownload?.torrentName) {
-          const blockReason = errorMessage.includes('No audiobook files found')
+          const blockReason = errorMessage.includes('Incomplete download')
+            ? 'Incomplete download'
+            : errorMessage.includes('No audiobook files found')
             ? 'No audiobook files found'
             : errorMessage.includes('No ebook files found')
               ? 'No ebook files found'

@@ -22,6 +22,7 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   monitor_rss_feeds: 'Monitor RSS Feeds',
   find_missing_ebooks: 'Find Missing Ebooks',
   sync_reading_shelves: 'Sync Reading Shelves',
+  sync_import_lists: 'Sync Import Lists',
   check_watched_lists: 'Check Watched Lists',
   backfill_requester_tags: 'Requester Tag Backfill',
 };

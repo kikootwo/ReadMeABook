@@ -828,3 +828,118 @@ model DataMigration {
 
   @@map("_data_migrations")
 }
+
+// ---------------------------------------------------------------------------
+// Import Lists (system-wide public lists, e.g. Goodreads Listopia)
+// ---------------------------------------------------------------------------
+
+/// Reusable rules that decide which list books are requested.
+model ImportListFilterProfile {
+  id                    String   @id @default(uuid())
+  name                  String   @unique
+  /// Stable key for built-in profiles so renaming does not re-seed them
+  seedSlug              String?  @unique @map("seed_slug")
+  skipPartsAndSets      Boolean  @default(true) @map("skip_parts_and_sets")
+  /// JSON array of regex strings
+  titleExcludePatterns  String   @default("[]") @map("title_exclude_patterns") @db.Text
+  authorExcludePatterns String   @default("[]") @map("author_exclude_patterns") @db.Text
+  requireAudibleAsin    Boolean  @default(true) @map("require_audible_asin")
+  allowAbridged         Boolean  @default(false) @map("allow_abridged")
+  minRuntimeMinutes     Int      @default(0) @map("min_runtime_minutes")
+  maxRuntimeMinutes     Int      @default(0) @map("max_runtime_minutes")
+  minPublicationYear    Int      @default(0) @map("min_publication_year")
+  maxPublicationYear    Int      @default(0) @map("max_publication_year")
+  /// JSON arrays of strings (lower-case compare)
+  allowedLanguages      String   @default("[]") @map("allowed_languages") @db.Text
+  excludedPublishers    String   @default("[]") @map("excluded_publishers") @db.Text
+  excludedNarrators     String   @default("[]") @map("excluded_narrators") @db.Text
+  excludedGenres        String   @default("[]") @map("excluded_genres") @db.Text
+  includedGenres        String   @default("[]") @map("included_genres") @db.Text
+  minAudibleRating      Float    @default(0) @map("min_audible_rating")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  lists ImportList[]
+
+  @@map("import_list_filter_profiles")
+}
+
+/// A subscription to a public book list that is synced on a schedule.
+model ImportList {
+  id                    String    @id @default(uuid())
+  name                  String    @unique
+  /// Provider key. Only "goodreads-list" (Goodreads Listopia) is implemented.
+  provider              String    @default("goodreads-list")
+  /// Numeric Goodreads Listopia id
+  listId                Int       @map("list_id")
+  enabled               Boolean   @default(true)
+  /// Create requests for matching books (false = track the list only)
+  autoRequest           Boolean   @default(true) @map("auto_request")
+  syncIntervalHours     Int       @default(24) @map("sync_interval_hours")
+  /// How many books to read from the top of the list
+  topN                  Int       @default(100) @map("top_n")
+  /// Max requests created per sync (0 = no cap)
+  maxRequestsPerSync    Int       @default(0) @map("max_requests_per_sync")
+  filterProfileId       String?   @map("filter_profile_id")
+  /// Size reported by the source when the list was last read
+  sourceSize            Int?      @map("source_size")
+  lastSyncedAt          DateTime? @map("last_synced_at")
+  lastSuccessfulSyncAt  DateTime? @map("last_successful_sync_at")
+  lastError             String?   @map("last_error") @db.Text
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  filterProfile ImportListFilterProfile? @relation(fields: [filterProfileId], references: [id], onDelete: SetNull)
+  logs          ImportListSyncLog[]
+
+  @@unique([provider, listId])
+  @@map("import_lists")
+}
+
+/// One row per sync run.
+model ImportListSyncLog {
+  id            String    @id @default(uuid())
+  importListId  String    @map("import_list_id")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  /// Books read from the list
+  fetched       Int       @default(0)
+  /// New on the list since the previous sync
+  newOnList     Int       @default(0) @map("new_on_list")
+  /// Dropped by the filter profile
+  filtered      Int       @default(0)
+  /// No Audible match
+  missed        Int       @default(0)
+  /// Already in the library or already requested/in progress
+  alreadyHave   Int       @default(0) @map("already_have")
+  /// Skipped because on the ignore list, removed from library, or backing off
+  skipped       Int       @default(0)
+  requested     Int       @default(0)
+  /// Why the run stopped early, if it did (e.g. "low disk space")
+  stoppedReason String?   @map("stopped_reason")
+  errorMessage  String?   @map("error_message") @db.Text
+  /// JSON: a few example titles per outcome, for the log window
+  details       String?   @db.Text
+
+  importList ImportList @relation(fields: [importListId], references: [id], onDelete: Cascade)
+
+  @@index([importListId, startedAt])
+  @@map("import_list_sync_logs")
+}
+
+/// Cached Goodreads-book -> Audible match (with the Audible data the filters need).
+model ImportListBookMatch {
+  id             String    @id @default(uuid())
+  externalBookId String    @unique @map("external_book_id")
+  title          String
+  author         String
+  asin           String?
+  /// JSON snapshot of the Audible search result used for filtering
+  metaJson       String?   @map("meta_json") @db.Text
+  noMatch        Boolean   @default(false) @map("no_match")
+  lastSearchAt   DateTime  @default(now()) @map("last_search_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([asin])
+  @@map("import_list_book_matches")
+}
