@@ -3,6 +3,7 @@
  * Documentation: documentation/features/bookdate-prd.md
  */
 
+import { backendLabel, libraryIdConfigKey } from '../constants/backend-mode';
 import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { getConfigService } from '@/lib/services/config.service';
@@ -253,9 +254,9 @@ export async function getUserLibraryBooks(
     const configService = getConfigService();
     const backendMode = await configService.getBackendMode();
 
-    // Early validation: audiobookshelf doesn't support ratings
-    if (backendMode === 'audiobookshelf' && scope === 'rated') {
-      logger.warn('Audiobookshelf does not support ratings, falling back to full library');
+    // Early validation: only Plex supports ratings
+    if (backendMode !== 'plex' && scope === 'rated') {
+      logger.warn(`${backendLabel(backendMode)} does not support ratings, falling back to full library`);
       scope = 'full';
     }
 
@@ -276,10 +277,10 @@ export async function getUserLibraryBooks(
       } else {
         // Get library ID for filtering
         let libraryId: string;
-        if (backendMode === 'audiobookshelf') {
-          const absLibraryId = await configService.get('audiobookshelf.library_id');
+        if (backendMode !== 'plex') {
+          const absLibraryId = await configService.get(libraryIdConfigKey(backendMode));
           if (!absLibraryId) {
-            logger.warn('No Audiobookshelf library ID configured');
+            logger.warn(`No ${backendLabel(backendMode)} library ID configured`);
             return [];
           }
           libraryId = absLibraryId;
@@ -329,10 +330,10 @@ export async function getUserLibraryBooks(
 
     // Get library ID based on backend mode
     let libraryId: string;
-    if (backendMode === 'audiobookshelf') {
-      const absLibraryId = await configService.get('audiobookshelf.library_id');
+    if (backendMode !== 'plex') {
+      const absLibraryId = await configService.get(libraryIdConfigKey(backendMode));
       if (!absLibraryId) {
-        logger.warn('No Audiobookshelf library ID configured');
+        logger.warn(`No ${backendLabel(backendMode)} library ID configured`);
         return [];
       }
       libraryId = absLibraryId;

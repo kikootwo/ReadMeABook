@@ -6,14 +6,16 @@
 import { ILibraryService } from './ILibraryService';
 import { PlexLibraryService } from './PlexLibraryService';
 import { AudiobookshelfLibraryService } from './AudiobookshelfLibraryService';
+import { AudioSiloLibraryService } from './AudioSiloLibraryService';
+import type { BackendMode } from '@/lib/constants/backend-mode';
 
 import { getConfigService } from '@/lib/services/config.service';
 
 let cachedService: ILibraryService | null = null;
-let cachedMode: 'plex' | 'audiobookshelf' | null = null;
+let cachedMode: BackendMode | null = null;
 
 /**
- * Get the appropriate library service based on backend mode
+ * Get the appropriate library service (Plex, Audiobookshelf or AudioSilo) based on backend mode
  * Returns cached instance if mode hasn't changed
  */
 export async function getLibraryService(): Promise<ILibraryService> {
@@ -28,6 +30,8 @@ export async function getLibraryService(): Promise<ILibraryService> {
   // Create new instance based on mode
   if (mode === 'audiobookshelf') {
     cachedService = new AudiobookshelfLibraryService();
+  } else if (mode === 'audiosilo') {
+    cachedService = new AudioSiloLibraryService();
   } else {
     cachedService = new PlexLibraryService();
   }
@@ -48,3 +52,4 @@ export function clearLibraryServiceCache(): void {
 export * from './ILibraryService';
 export { PlexLibraryService } from './PlexLibraryService';
 export { AudiobookshelfLibraryService } from './AudiobookshelfLibraryService';
+export { AudioSiloLibraryService } from './AudioSiloLibraryService';

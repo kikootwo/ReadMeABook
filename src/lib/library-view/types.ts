@@ -4,6 +4,7 @@
  */
 
 import type { GROUP_MODES, SORT_KEYS, SORT_ORDERS, SOURCES, STATUS_GROUPS } from './constants';
+import type { BackendMode } from '@/lib/constants/backend-mode';
 
 export type StatusGroup = (typeof STATUS_GROUPS)[number];
 export type LibrarySource = (typeof SOURCES)[number];
@@ -79,7 +80,7 @@ export interface LibraryResponse {
   /** group=author only. */
   groups: { key: string; label: string; count: number }[] | null;
   viewer: { isAdmin: boolean; canFetchEbook?: boolean };
-  backend: 'plex' | 'audiobookshelf';
+  backend: BackendMode;
   libraryConfigured: boolean;
 }
 

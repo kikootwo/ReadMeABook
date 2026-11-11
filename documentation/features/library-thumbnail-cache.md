@@ -3,7 +3,7 @@
 **Status:** ✅ Implemented | Cache library covers during scans, serve in BookDate
 
 ## Overview
-Caches book covers from Plex/Audiobookshelf during library scans. Stores cached files in `/app/cache/library/` with SHA-256 hashed filenames. Dramatically improves BookDate user experience by showing real covers instead of placeholders.
+Caches book covers from Plex/Audiobookshelf/AudioSilo during library scans. Stores cached files in `/app/cache/library/` with SHA-256 hashed filenames. Dramatically improves BookDate user experience by showing real covers instead of placeholders.
 
 ## Key Details
 
@@ -21,6 +21,7 @@ Caches book covers from Plex/Audiobookshelf during library scans. Stores cached 
 ### URL Construction (Backend-Specific)
 - **Plex:** `{serverUrl}{thumbUrl}?X-Plex-Token={token}`
 - **Audiobookshelf:** `{serverUrl}{coverPath}` with `Authorization: Bearer {token}` header
+- **AudioSilo:** `{serverUrl}/api/v1/libraries/{id}/cover?path={relPath}&size=320` with `Authorization: Bearer {key}` header
 
 ### Cover Priority (BookDate Library Picker)
 1. **Library cached cover** (`cachedLibraryCoverPath`) → `/api/cache/library/{filename}`
@@ -71,7 +72,7 @@ Located: `src/lib/services/thumbnail-cache.service.ts`
 ### Library Services
 Located: `src/lib/services/library/`
 
-**Both PlexLibraryService and AudiobookshelfLibraryService provide:**
+**PlexLibraryService, AudiobookshelfLibraryService and AudioSiloLibraryService provide:**
 - `getCoverCachingParams()` → Returns `{ backendBaseUrl, authToken, backendMode }`
 
 ## Performance

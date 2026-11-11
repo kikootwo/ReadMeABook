@@ -2,7 +2,7 @@
 
 **Status:** ✅ Implemented | Real floating book covers with professional animations
 
-Stylized entry point with Plex/Audiobookshelf authentication, animated floating popular audiobook covers, and dynamic description based on backend configuration.
+Stylized entry point with Plex/Audiobookshelf/AudioSilo authentication, animated floating popular audiobook covers, and dynamic description based on backend configuration.
 
 ## Design
 
@@ -13,7 +13,7 @@ Stylized entry point with Plex/Audiobookshelf authentication, animated floating 
 - Multi-layer depth effect with z-index layering (0-20)
 - Dark theme optimized with glassmorphism card
 - Professional streaming service aesthetic
-- **Dynamic description** based on backend mode (Plex/Audiobookshelf) and automation status
+- **Dynamic description** based on backend mode (Plex/Audiobookshelf/AudioSilo) and automation status
 
 ## Authentication Flow
 
@@ -62,6 +62,8 @@ Description text adapts to backend configuration:
 **Plex + No Automation:** "Request audiobooks for your Plex library"
 **Audiobookshelf + Automation:** "Request audiobooks and they'll automatically download and appear in your Audiobookshelf library"
 **Audiobookshelf + No Automation:** "Request audiobooks for your Audiobookshelf library"
+**AudioSilo + Automation:** "Request audiobooks and they'll automatically download and appear in your AudioSilo library"
+**AudioSilo + No Automation:** "Request audiobooks for your AudioSilo library"
 **Loading State:** "Your Personal Audiobook Library Manager"
 
 Automation is detected by checking for configured indexer (Prowlarr) via `/api/auth/providers` endpoint.

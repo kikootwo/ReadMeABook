@@ -34,13 +34,13 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - **Purpose:** Cached Audible metadata (popular/new releases), thumbnails stored locally in `/app/cache/thumbnails`
 
 ### Plex_Library (Library Cache)
-- `id` (UUID PK), `plex_guid` (unique, external ID from Plex or Audiobookshelf), `plex_rating_key`
+- `id` (UUID PK), `plex_guid` (unique, external ID from Plex, Audiobookshelf or AudioSilo; AudioSilo: the library-relative path), `plex_rating_key`
 - `title`, `author`, `narrator`, `summary`, `duration` (BigInt, milliseconds), `year`, `user_rating` (0-10 scale)
 - **Universal identifiers:** `asin` (Audible ASIN), `isbn` (ISBN-10 or ISBN-13)
 - `file_path` (ABS: the item's folder as ABS sees it, `item.path`, written by both scan jobs, read by the delivered-request link #284; Plex: null), `thumb_url`, `cached_library_cover_path` (local cached cover path), `plex_library_id`, `added_at`
 - `last_scanned_at`, `created_at`, `updated_at`
 - Indexes: `plex_guid`, `title`, `author`, `plex_library_id`, `asin`, `isbn`
-- **Purpose:** Universal library cache for both Plex and Audiobookshelf backends
+- **Purpose:** Universal library cache for the Plex, Audiobookshelf and AudioSilo backends
 - **ASIN/ISBN fields:** Enable accurate matching across backends
   - **Plex:** ASIN extracted from Plex GUID (e.g., `com.plexapp.agents.audible://B00ABC123`) + stored in dedicated field
   - **Audiobookshelf:** ASIN/ISBN retrieved directly from ABS metadata + stored in dedicated fields
@@ -51,7 +51,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `audible_asin` (nullable), `title`, `author`, `narrator`, `description`
 - `cover_art_url`, `file_path`, `file_format`, `file_size_bytes`
   - **File fields:** the audiobook organize writes `file_path` and `file_format` (organize-files.processor.ts ~301); the ebook organize overwrites both on the same row with the ebook's folder and format (~899-908), so neither is reliable for an audiobook once an ebook was organized. `file_size_bytes` is never written. The Library view never reads `file_format` and withholds the admin path after an ebook organize ([features/library-view.md](../features/library-view.md))
-- `plex_guid` (nullable), `plex_library_id` (nullable), `abs_item_id` (nullable)
+- `plex_guid` (nullable), `plex_library_id` (nullable), `abs_item_id` (nullable; Audiobookshelf item id, or the library-relative path for AudioSilo)
 - `library_asin` (nullable, #325a) - ASIN of the linked ABS item when it differs from `audible_asin`; written only by the library scans' follow ([fixes/file-hash-matching.md](../fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)); display only; the Prisma client omits it from every audiobook result unless a query selects it (`src/lib/db.ts`)
 - `files_hash` (nullable) - SHA256 hash of sorted audio filenames for library matching
 - `status` ('requested'|'downloading'|'processing'|'completed'|'failed')

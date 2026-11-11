@@ -57,7 +57,7 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
               />
             </svg>
             <div>
-              <strong className="text-gray-900 dark:text-gray-100">Plex or Audiobookshelf</strong>
+              <strong className="text-gray-900 dark:text-gray-100">Plex, Audiobookshelf or AudioSilo</strong>
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Your media server URL and authentication credentials
               </p>

@@ -11,7 +11,7 @@ interface WizardLayoutProps {
   currentStep: number;
   totalSteps: number;
   children: React.ReactNode;
-  backendMode?: 'plex' | 'audiobookshelf';
+  backendMode?: 'plex' | 'audiobookshelf' | 'audiosilo';
   authMethod?: 'oidc' | 'manual' | 'both';
 }
 
@@ -35,9 +35,9 @@ export function WizardLayout({ currentStep, totalSteps, children, backendMode = 
         { number: 10, title: 'Finalize' }
       );
     } else {
-      // Audiobookshelf mode
+      // Audiobookshelf and AudioSilo modes
       let stepNumber = 3;
-      steps.push({ number: stepNumber++, title: 'ABS' });
+      steps.push({ number: stepNumber++, title: backendMode === 'audiosilo' ? 'AudioSilo' : 'ABS' });
       steps.push({ number: stepNumber++, title: 'Auth' });
 
       if (authMethod === 'oidc' || authMethod === 'both') {

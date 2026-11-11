@@ -5,6 +5,7 @@
  * Lightweight polling for new library items (Plex or Audiobookshelf)
  */
 
+import { libraryIdConfigKey, usesItemIdColumn } from '../constants/backend-mode';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { getLibraryService } from '../services/library';
@@ -48,6 +49,23 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
       logger.warn(errorMsg);
       return { success: false, message: errorMsg, skipped: true };
     }
+  } else if (backendMode === 'audiosilo') {
+    const siloConfig = await configService.getMany([
+      'audiosilo.server_url',
+      'audiosilo.api_token',
+      'audiosilo.library_id',
+    ]);
+
+    const missingFields: string[] = [];
+    if (!siloConfig['audiosilo.server_url']) missingFields.push('AudioSilo server URL');
+    if (!siloConfig['audiosilo.api_token']) missingFields.push('AudioSilo API key');
+    if (!siloConfig['audiosilo.library_id']) missingFields.push('AudioSilo library ID');
+
+    if (missingFields.length > 0) {
+      const errorMsg = `AudioSilo is not configured. Missing: ${missingFields.join(', ')}`;
+      logger.warn(errorMsg);
+      return { success: false, message: errorMsg, skipped: true };
+    }
   } else {
     const plexConfig = await configService.getMany([
       'plex_url',
@@ -75,9 +93,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
 
   try {
     // Get configured library ID
-    const libraryId = backendMode === 'audiobookshelf'
-      ? await configService.get('audiobookshelf.library_id')
-      : await configService.get('plex_audiobook_library_id');
+    const libraryId = await configService.get(libraryIdConfigKey(backendMode));
 
     // Get cover caching parameters (needed for thumbnail caching)
     const coverCachingParams = await (libraryService as any).getCoverCachingParams();

@@ -542,6 +542,14 @@ function LoginContent() {
                     return "Request audiobooks for your Audiobookshelf library";
                   }
 
+                  // AudioSilo mode
+                  if (backendMode === 'audiosilo') {
+                    if (automationEnabled) {
+                      return "Request audiobooks and they'll automatically download and appear in your AudioSilo library";
+                    }
+                    return "Request audiobooks for your AudioSilo library";
+                  }
+
                   // Plex mode (default)
                   if (automationEnabled) {
                     return "Request audiobooks and they'll automatically download and appear in your Plex library";

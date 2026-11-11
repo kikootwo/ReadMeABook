@@ -6,6 +6,7 @@
  * Works with both Plex and Audiobookshelf backends via abstraction layer.
  */
 
+import { backendLabel, libraryIdConfigKey, usesItemIdColumn } from '../constants/backend-mode';
 import { ScanPlexPayload } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getLibraryService } from '../services/library';
@@ -42,10 +43,10 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     let targetLibraryId = libraryId;
 
     if (!targetLibraryId) {
-      if (backendMode === 'audiobookshelf') {
-        const absLibraryId = await configService.get('audiobookshelf.library_id');
+      if (backendMode !== 'plex') {
+        const absLibraryId = await configService.get(libraryIdConfigKey(backendMode));
         if (!absLibraryId) {
-          throw new Error('Audiobookshelf library not configured');
+          throw new Error(`${backendLabel(backendMode)} library not configured`);
         }
         targetLibraryId = absLibraryId;
       } else {

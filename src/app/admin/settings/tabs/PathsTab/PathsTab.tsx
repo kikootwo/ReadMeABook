@@ -12,13 +12,14 @@ import { usePathsSettings } from './usePathsSettings';
 import { LibraryFilesSection } from './LibraryFilesSection';
 import type { PathsSettings } from '../../lib/types';
 import { validateTemplate, generateMockPreviews, validateFilenameTemplate, generateMockFilenamePreviews } from '@/lib/utils/path-template.util';
+import type { BackendMode } from '@/lib/constants/backend-mode';
 
 interface PathsTabProps {
   paths: PathsSettings;
   onChange: (paths: PathsSettings) => void;
   onValidationChange: (isValid: boolean) => void;
   /** Audiobookshelf mode shows File placement and Metadata (Library files) instead of the tagging checkbox. */
-  backendMode?: 'plex' | 'audiobookshelf';
+  backendMode?: BackendMode;
 }
 
 interface TemplatePreview {

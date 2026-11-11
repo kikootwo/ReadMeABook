@@ -3,6 +3,7 @@
  * Documentation: documentation/setup-wizard.md
  */
 
+import { backendLabel, isBackendMode } from '@/lib/constants/backend-mode';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
       admin,
       plex,
       audiobookshelf,
+      audiosilo,
       authMethod,
       oidc,
       registration,
@@ -73,12 +75,16 @@ export async function POST(request: NextRequest) {
     } = bodyResult.data;
 
     // Validate backend mode
-    if (!backendMode || !['plex', 'audiobookshelf'].includes(backendMode)) {
+    if (!isBackendMode(backendMode)) {
       return NextResponse.json(
         { success: false, error: 'Invalid or missing backend mode' },
         { status: 400 }
       );
     }
+
+    // Audiobookshelf and AudioSilo share one shape: server_url, api_token, library_id, trigger_scan_after_import
+    const mediaCfg = backendMode === 'audiosilo' ? audiosilo : audiobookshelf;
+    const mediaPrefix = backendMode === 'audiosilo' ? 'audiosilo' : 'audiobookshelf';
 
     // Validate required fields based on backend mode
     if (backendMode === 'plex') {
@@ -95,14 +101,14 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // Audiobookshelf mode
+      // Audiobookshelf or AudioSilo mode
       if (
-        !audiobookshelf?.server_url ||
-        !audiobookshelf?.api_token ||
-        !audiobookshelf?.library_id
+        !mediaCfg?.server_url ||
+        !mediaCfg?.api_token ||
+        !mediaCfg?.library_id
       ) {
         return NextResponse.json(
-          { success: false, error: 'Missing required Audiobookshelf configuration fields' },
+          { success: false, error: `Missing required ${backendLabel(backendMode)} configuration fields` },
           { status: 400 }
         );
       }
@@ -178,7 +184,7 @@ export async function POST(request: NextRequest) {
     let accessToken: string | null = null;
     let refreshToken: string | null = null;
 
-    if (backendMode === 'plex' || (backendMode === 'audiobookshelf' && admin)) {
+    if (backendMode === 'plex' || admin) {
       if (!admin?.username || !admin?.password) {
         return NextResponse.json(
           { success: false, error: 'Admin credentials required' },
@@ -289,31 +295,31 @@ export async function POST(request: NextRequest) {
         create: { key: 'plex.trigger_scan_after_import', value: plex.trigger_scan_after_import === true ? 'true' : 'false' },
       });
     } else {
-      // Audiobookshelf configuration
+      // Audiobookshelf / AudioSilo configuration
       await prisma.configuration.upsert({
-        where: { key: 'audiobookshelf.server_url' },
-        update: { value: audiobookshelf.server_url },
-        create: { key: 'audiobookshelf.server_url', value: audiobookshelf.server_url },
+        where: { key: `${mediaPrefix}.server_url` },
+        update: { value: mediaCfg.server_url },
+        create: { key: `${mediaPrefix}.server_url`, value: mediaCfg.server_url },
       });
 
-      const encryptedAbsToken = encryptionService.encrypt(audiobookshelf.api_token);
+      const encryptedAbsToken = encryptionService.encrypt(mediaCfg.api_token);
       await prisma.configuration.upsert({
-        where: { key: 'audiobookshelf.api_token' },
+        where: { key: `${mediaPrefix}.api_token` },
         update: { value: encryptedAbsToken, encrypted: true },
-        create: { key: 'audiobookshelf.api_token', value: encryptedAbsToken, encrypted: true },
+        create: { key: `${mediaPrefix}.api_token`, value: encryptedAbsToken, encrypted: true },
       });
 
       await prisma.configuration.upsert({
-        where: { key: 'audiobookshelf.library_id' },
-        update: { value: audiobookshelf.library_id },
-        create: { key: 'audiobookshelf.library_id', value: audiobookshelf.library_id },
+        where: { key: `${mediaPrefix}.library_id` },
+        update: { value: mediaCfg.library_id },
+        create: { key: `${mediaPrefix}.library_id`, value: mediaCfg.library_id },
       });
 
       // Save trigger_scan_after_import setting
       await prisma.configuration.upsert({
-        where: { key: 'audiobookshelf.trigger_scan_after_import' },
-        update: { value: audiobookshelf.trigger_scan_after_import === true ? 'true' : 'false' },
-        create: { key: 'audiobookshelf.trigger_scan_after_import', value: audiobookshelf.trigger_scan_after_import === true ? 'true' : 'false' },
+        where: { key: `${mediaPrefix}.trigger_scan_after_import` },
+        update: { value: mediaCfg.trigger_scan_after_import === true ? 'true' : 'false' },
+        create: { key: `${mediaPrefix}.trigger_scan_after_import`, value: mediaCfg.trigger_scan_after_import === true ? 'true' : 'false' },
       });
 
       // OIDC configuration (if enabled)

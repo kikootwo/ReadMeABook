@@ -221,7 +221,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Separate "My Requests" per family member
 - Accurate logs and analytics
 
-## OIDC Authentication (Audiobookshelf Mode)
+## OIDC Authentication (Audiobookshelf and AudioSilo Mode)
 
 **Status:** ✅ Implemented | OpenID Connect support with comprehensive access control and admin role mapping
 

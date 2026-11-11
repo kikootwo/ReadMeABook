@@ -69,19 +69,19 @@ export function AuthTab({
   };
 
   // Check if no auth methods are enabled and no local users exist
-  const showNoAuthWarning = settings.backendMode === 'audiobookshelf' &&
+  const showNoAuthWarning = settings.backendMode !== 'plex' &&
     !settings.oidc.enabled &&
     !settings.registration.enabled &&
     !settings.hasLocalUsers;
 
   // Check if only manual registration is enabled but no admin users exist
-  const showNoAdminWarning = settings.backendMode === 'audiobookshelf' &&
+  const showNoAdminWarning = settings.backendMode !== 'plex' &&
     !settings.oidc.enabled &&
     settings.registration.enabled &&
     !settings.hasLocalAdmins;
 
   // Check if registration is disabled but local users can still log in
-  const showRegistrationDisabledInfo = settings.backendMode === 'audiobookshelf' &&
+  const showRegistrationDisabledInfo = settings.backendMode !== 'plex' &&
     !settings.oidc.enabled &&
     !settings.registration.enabled &&
     settings.hasLocalUsers;
