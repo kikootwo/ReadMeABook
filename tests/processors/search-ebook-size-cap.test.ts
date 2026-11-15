@@ -70,6 +70,7 @@ function downloadedGuid(): string | undefined {
 describe('processSearchEbook size cap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // start-of-job guard (#601)
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'pdf';

@@ -291,6 +291,30 @@ describe('JobQueueService', () => {
     expect(calls[1][2]).not.toHaveProperty('jobId');
   });
 
+  it('maps an optional search delay to the Bull delay, and adds none by default (#601)', async () => {
+    prismaMock.job.create.mockResolvedValue({ id: 'job-d' });
+    queueMock.add.mockResolvedValue({ id: 'bull-d' });
+    prismaMock.job.update.mockResolvedValue({});
+    const book = { id: 'ab-1', title: 'Title', author: 'Author' };
+
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    const service = new JobQueueService();
+    await service.addSearchJob('req-1', book, { delay: 120000 });
+    await service.addSearchJob('req-1', book);
+    await service.addSearchJob('req-1', book, { delay: 0 });
+    await service.addSearchEbookJob('req-1', book, 'epub', { delay: 60000 });
+    await service.addSearchEbookJob('req-1', book, 'epub');
+
+    const options = queueMock.add.mock.calls.map(([, , opts]) => opts);
+    expect(options[0]).toEqual({ priority: 10, delay: 120000 });
+    expect(options[1]).toEqual({ priority: 10 });
+    expect(options[2]).toEqual({ priority: 10 });
+    expect(options[3]).toEqual({ priority: 10, delay: 60000 });
+    expect(options[4]).toEqual({ priority: 10 });
+    // The delay is a queue option, never part of the job payload
+    expect(queueMock.add.mock.calls.every(([, payload]) => !('delay' in payload))).toBe(true);
+  });
+
   it('adds organize jobs with target path payload', async () => {
     prismaMock.job.create.mockResolvedValue({ id: 'job-4' });
     queueMock.add.mockResolvedValue({ id: 'bull-4' });

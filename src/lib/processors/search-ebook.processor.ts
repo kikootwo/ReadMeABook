@@ -11,6 +11,7 @@ import { SearchEbookPayload, EbookSearchResult, getJobQueueService } from '../se
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
+import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { buildEbookDownloadName } from '../utils/ebook-download-name';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { EBOOK_MAX_SIZE_MB, rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
@@ -39,14 +40,13 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
   logger.info(`Processing ebook request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching and fetch custom search terms
-    const requestRecord = await prisma.request.update({
+    // Update request status to searching, unless cancelled or deleted while queued (a paced search waits, #601)
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, skipping search`);
+      return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };
+    }
+    const requestRecord = await prisma.request.findUnique({
       where: { id: requestId },
-      data: {
-        status: 'searching',
-        searchAttempts: { increment: 1 },
-        updatedAt: new Date(),
-      },
       select: { customSearchTerms: true },
     });
 

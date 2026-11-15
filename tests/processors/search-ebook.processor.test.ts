@@ -40,6 +40,7 @@ vi.mock('@/lib/services/ebook-scraper', () => ebookScraperMock);
 describe('processSearchEbook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // start-of-job guard (#601)
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
@@ -189,6 +190,28 @@ describe('processSearchEbook', () => {
       }),
     });
     expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
+  });
+
+  it('leaves a request cancelled while its paced search waited untouched (#601)', async () => {
+    // The guarded write finds the request cancelled: no row matches
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+    const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
+    const result = await processSearchEbook({
+      requestId: 'req-c',
+      audiobook: { id: 'ab-c', title: 'Cancelled Book', author: 'Author', asin: 'B00CANCEL' },
+      jobId: 'job-c',
+    });
+
+    expect(result).toEqual(expect.objectContaining({ success: true, requestId: 'req-c' }));
+    expect(result.message).toContain('search skipped');
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-c', deletedAt: null, status: { not: 'cancelled' } },
+      data: expect.objectContaining({ status: 'searching' }),
+    });
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(ebookScraperMock.searchByAsin).not.toHaveBeenCalled();
+    expect(ebookScraperMock.searchByTitle).not.toHaveBeenCalled();
   });
 
   it('marks request as awaiting_search when no download links available', async () => {

@@ -90,7 +90,7 @@ A query that throws is counted, never taken for "nothing found". Helpers: `src/l
 - 401: Invalid API key
 - 429: Rate limit (exponential backoff, max 3 retries)
 - 503: Service unavailable
-- Timeout: 30s per search
+- Timeout: 180s per search (`PROWLARR_SEARCH_TIMEOUT`, #601: one search waits on every indexer), on the `/search` GET used by every automatic and interactive search; `/indexer`, `/health`, `/indexerstats` and RSS keep the 60s `DOWNLOAD_CLIENT_TIMEOUT`
 
 ## Manual & Interactive Search
 

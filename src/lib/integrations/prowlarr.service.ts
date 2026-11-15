@@ -6,7 +6,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { RMAB_USER_AGENT } from '../utils/user-agent';
 import { XMLParser } from 'fast-xml-parser';
-import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
+import { DOWNLOAD_CLIENT_TIMEOUT, PROWLARR_SEARCH_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
 import { foreignProxyLinkOrigins, parseProwlarrBase, urlForLog } from '../utils/prowlarr-url';
@@ -167,7 +167,7 @@ export class ProwlarrService {
         params.indexerIds = filters.indexerIds;
       }
 
-      const response = await this.client.get('/search', { params });
+      const response = await this.client.get('/search', { params, timeout: PROWLARR_SEARCH_TIMEOUT });
       logger.info(` Raw API response: ${response.data.length} results`);
 
       // Debug: Log first raw result to see structure and protocol field

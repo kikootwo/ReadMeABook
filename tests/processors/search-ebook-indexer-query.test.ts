@@ -41,6 +41,7 @@ vi.mock('@/lib/integrations/prowlarr.service', () => ({
 describe('processSearchEbook indexer search query', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // start-of-job guard (#601)
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
@@ -97,7 +98,7 @@ describe('processSearchEbook indexer search query', () => {
   });
 
   it('uses custom search terms in place of the title and keeps the author', async () => {
-    prismaMock.request.update.mockResolvedValue({ customSearchTerms: 'Custom Terms' });
+    prismaMock.request.findUnique.mockResolvedValue({ customSearchTerms: 'Custom Terms' });
     prowlarrMock.searchWithVariations.mockResolvedValue([]);
 
     const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');

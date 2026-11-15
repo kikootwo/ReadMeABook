@@ -14,6 +14,17 @@ import { getJobQueueService } from '../services/job-queue.service';
 import { getConfigService } from '../services/config.service';
 import { shouldSkipAutoSearch } from '../utils/release-date';
 
+/**
+ * The sweep starts at most this many searches a minute (#601): each Prowlarr
+ * search hits every indexer, and up to 50 at once timed out on slow indexers.
+ */
+const SEARCHES_PER_MINUTE = 2;
+
+/** Bull delay for the nth search this sweep queues (0-based): 0, 0, 60 s, 60 s, 120 s, ... */
+function searchDelay(queued: number): number {
+  return Math.floor(queued / SEARCHES_PER_MINUTE) * 60_000;
+}
+
 export interface RetryMissingTorrentsPayload {
   jobId?: string;
   scheduledJobId?: string;
@@ -114,14 +125,14 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
               title: request.audiobook.title,
               author: request.audiobook.author,
               asin: request.audiobook.audibleAsin || undefined,
-            });
+            }, undefined, { delay: searchDelay(triggered) });
           } else {
             await jobQueue.addSearchJob(request.id, {
               id: request.audiobook.id,
               title: request.audiobook.title,
               author: request.audiobook.author,
               asin: request.audiobook.audibleAsin || undefined,
-            });
+            }, { delay: searchDelay(triggered) });
           }
           triggered++;
           transitioned++;
@@ -150,7 +161,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
               title: request.audiobook.title,
               author: request.audiobook.author,
               asin: request.audiobook.audibleAsin || undefined,
-            });
+            }, undefined, { delay: searchDelay(triggered) });
             triggered++;
             logger.info(`Triggered ebook search for request ${request.id}: ${request.audiobook.title}`);
           } else {
@@ -159,7 +170,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
               title: request.audiobook.title,
               author: request.audiobook.author,
               asin: request.audiobook.audibleAsin || undefined,
-            });
+            }, { delay: searchDelay(triggered) });
             triggered++;
             logger.info(`Triggered audiobook search for request ${request.id}: ${request.audiobook.title}`);
           }
