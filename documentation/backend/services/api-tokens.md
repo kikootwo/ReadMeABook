@@ -64,7 +64,8 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - BigInt columns (`downloadHistory[].torrentSizeBytes`, `audiobook.fileSizeBytes`) go out as JSON numbers via `toJsonSafe()` (`src/lib/utils/json-safe.ts`).
 
 ## Fixed Issues
-- **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which nothing writes yet (always null), so they serialize today.
+- **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; nothing writes `Audiobook.fileSizeBytes` yet (always null).
+  - **#600 omit:** the Prisma client omits `fileSizeBytes` from every audiobook result (`src/lib/db.ts`), so a full `audiobook` include (GET `/api/requests` and the rest) never carries a BigInt into `NextResponse.json`; GET `/api/requests/:id` still returns it through `toJsonSafe()` (owner `select`, admin `omit: { fileSizeBytes: false }`).
 
 ## POST `/api/requests/:id/cancel` (Write, #228)
 - Route: `src/app/api/requests/[id]/cancel/route.ts` → `cancelLoadedRequest()` ([request-cancel.md](../../admin-features/request-cancel.md)).

@@ -165,7 +165,7 @@ describe('followed requests are shown as the library holds them (#325a)', () => 
     prismaMock.request.findFirst.mockResolvedValueOnce(request({ audiobook: { ...BOOK, filePath: undefined } }));
     const owner = await (await GET({} as never, params)).json();
     expect(owner.request.audiobook).toMatchObject({ title: 'Artemis', audibleAsin: X, libraryAsin: Y });
-    expect(prismaMock.request.findFirst.mock.calls[0][0].include.audiobook).toEqual({ omit: { libraryAsin: false } });
+    expect(prismaMock.request.findFirst.mock.calls[0][0].include.audiobook).toEqual({ omit: { libraryAsin: false, fileSizeBytes: false } });
     const select = prismaMock.request.findFirst.mock.calls[1][0].select;
     expect(select.audiobook.select).toMatchObject({ libraryAsin: true, absItemId: true });
   });
