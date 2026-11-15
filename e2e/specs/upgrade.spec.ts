@@ -140,6 +140,20 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
     expect(set, 'explicit false on every seeded row').toBe('0');
     expect(listed.length > 0 && listed.every((v) => v === false), 'GET /api/requests rows carry explicit: false').toBe(true);
   }
+  // #231: the startup schema sync added users.discord_user_id (nullable, unique), NULL on every
+  // seeded row. Required like the checks above.
+  expect.soft(execBridgeAvailable(), `discord_user_id: ${EXEC_BRIDGE_SKIP}`).toBe(true);
+  if (execBridgeAvailable()) {
+    const column = psql("select is_nullable from information_schema.columns where table_name = 'users' and column_name = 'discord_user_id'");
+    const users = psql('select count(*) from users');
+    const set = psql('select count(*) from users where discord_user_id is not null');
+    const index = psql("select indexdef from pg_indexes where tablename = 'users' and indexdef like '%UNIQUE%(discord_user_id)%'");
+    writeEvidence('upgrade/231-discord-user-id.json', { column, users, set, index });
+    expect(column, 'users.discord_user_id exists, nullable').toBe('YES');
+    expect(Number(users), 'seeded users').toBeGreaterThanOrEqual(1);
+    expect(set, 'discord_user_id NULL on every seeded row').toBe('0');
+    expect(index, 'unique index on users.discord_user_id').toMatch(/^CREATE UNIQUE INDEX \S+ ON public\.users USING btree \(discord_user_id\)$/);
+  }
 
   const search = await rmab.post<any>(`/api/requests/${failed.id}/interactive-search`, {});
   writeEvidence('upgrade/interactive-search.json', search);

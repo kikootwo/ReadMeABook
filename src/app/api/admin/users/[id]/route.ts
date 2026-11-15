@@ -246,6 +246,7 @@ export async function DELETE(
             oidcSubject: freedKeys.oidcSubject,
             loginTokenHash: null,
             authToken: null,
+            discordUserId: null, // frees the Discord ID for another user
           },
         });
 

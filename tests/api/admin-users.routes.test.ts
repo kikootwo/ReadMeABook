@@ -354,6 +354,23 @@ describe('Admin users routes', () => {
     expect(first.data.plexId).not.toBe(second.data.plexId);
   });
 
+  it('clears the Discord link on delete, so another user can take that Discord ID', async () => {
+    const { status, data } = await deleteRow({ authProvider: 'plex', plexId: '1001' });
+
+    expect(status).toBe(200);
+    expect(data).toHaveProperty('discordUserId', null);
+  });
+
+  it('lists each user\'s Discord link', async () => {
+    prismaMock.user.findMany.mockResolvedValueOnce([{ id: 'u1', discordUserId: '123456789012345678', loginTokenHash: null }]);
+
+    const { GET } = await import('@/app/api/admin/users/route');
+    const payload = await (await GET({} as never)).json();
+
+    expect(prismaMock.user.findMany.mock.calls[0][0].select).toMatchObject({ discordUserId: true });
+    expect(payload.users[0].discordUserId).toBe('123456789012345678');
+  });
+
   it('answers as already deleted when a concurrent delete got there first', async () => {
     prismaMock.user.findUnique.mockResolvedValueOnce({
       id: 'p1', plexId: '1001', plexUsername: 'pat', oidcSubject: null, isSetupAdmin: false, authProvider: 'plex', deletedAt: null, _count: { requests: 0 },

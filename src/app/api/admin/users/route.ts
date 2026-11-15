@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
             autoApproveRequests: true,
             interactiveSearchAccess: true,
             downloadAccess: true,
+            discordUserId: true,
             loginTokenHash: true,
             _count: {
               select: {
