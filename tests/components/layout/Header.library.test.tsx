@@ -6,7 +6,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../helpers/render';
 
@@ -34,6 +34,9 @@ describe('Header: Library link, nav breakpoint, update dot', () => {
   });
 
   afterEach(() => {
+    // Unmount while the fetch stub is still in place. This hook runs before the setup file's
+    // cleanup, so a pending VersionBadge effect would otherwise reach the unmocked fetch.
+    cleanup();
     vi.unstubAllGlobals();
   });
 
@@ -101,9 +104,12 @@ describe('Header: Library link, nav breakpoint, update dot', () => {
   });
 
   it('with no update, the badge steps aside from 1024 to 1279 px', async () => {
-    vi.stubGlobal('fetch', versions('1.0.0'));
+    const fetchMock = versions('1.0.0');
+    vi.stubGlobal('fetch', fetchMock);
     renderWithProviders(<Header />, { auth: { user: ADMIN, isLoading: false } });
     const version = await screen.findByText('v1.0.0');
+    // The update check runs after the version shows; wait for it so "no update" is a real answer
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/raw\.githubusercontent\.com\//)));
     const link = version.closest('a')!;
     expect(link.className).toContain('lg:hidden xl:inline-flex');
     expect(link).not.toHaveAttribute('data-update-available');
