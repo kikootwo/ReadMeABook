@@ -16,26 +16,28 @@ import { compose } from './docker.mjs';
 import { tableRowCounts } from './runner.mjs';
 
 /** Swap the rmab service to `ref` (same volumes, image-generated secrets as in the upgrade flow). */
-function swapTo(ctx, up, ref) {
-  compose(ctx.project, ['stop', 'rmab'], ctx.env);
-  compose(ctx.project, ['rm', '-f', 'rmab'], ctx.env);
+function swapTo(ctx, up, ref, docker) {
+  docker.compose(ctx.project, ['stop', 'rmab'], ctx.env);
+  docker.compose(ctx.project, ['rm', '-f', 'rmab'], ctx.env);
   up(ctx, ref, { generatedSecrets: true });
 }
 
 /**
  * Runs the `downgrade` and `reupgrade` phases; returns the worse of the two statuses (0 pass, 1 fail).
- * Harness errors (no bootstrap) throw from `playwright` as in the other flows.
+ * Harness errors (no bootstrap) throw from `playwright` as in the other flows. The upgrade-verify
+ * container's log joins ctx.priorLogs, so the end-of-run canary scan covers the branch in that phase.
+ * `docker` (compose, tableRowCounts) is replaceable for the selftest.
  */
-export async function downgradeFlow(ctx, image, { up, playwright, saveLogs, specs, releaseRef }) {
+export async function downgradeFlow(ctx, image, { up, playwright, saveLogs, specs, releaseRef, docker = { compose, tableRowCounts } }) {
   const dir = path.join(ctx.evidence, 'downgrade');
   fs.mkdirSync(dir, { recursive: true });
   ctx.summary.downgradeTo = releaseRef;
   const results = {};
-  saveLogs(ctx, 'compose-phase2.log'); // the upgrade-verify container's log, before it is removed
+  ctx.priorLogs.push(saveLogs(ctx, 'compose-phase2.log')); // the upgrade-verify container's log, before it is removed
   for (const [phase, ref] of [['downgrade', releaseRef], ['reupgrade', image]]) {
-    swapTo(ctx, up, ref);
+    swapTo(ctx, up, ref, docker);
     const status = await playwright(ctx, specs, phase);
-    fs.writeFileSync(path.join(dir, `${phase}-counts.json`), JSON.stringify(tableRowCounts(ctx), null, 2));
+    fs.writeFileSync(path.join(dir, `${phase}-counts.json`), JSON.stringify(docker.tableRowCounts(ctx), null, 2));
     if (phase === 'downgrade') saveLogs(ctx, 'compose-downgrade.log');
     results[phase] = status === 0 ? 'passed' : 'failed';
   }
