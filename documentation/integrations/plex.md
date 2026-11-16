@@ -4,6 +4,12 @@
 
 Connectivity to Plex for OAuth, library management, content detection, and automatic scanning. Database stores all audiobooks from Plex as source of truth for availability.
 
+## Key Details
+
+- **Audnexus agent required (#298):** the Plex audiobook library must use the Audnexus metadata agent, with the same Audible region as RMAB. Requests match Plex items only by the Audible ID (ASIN) in the item's guid (e.g. `com.plexapp.agents.audnexus://B08G9PRS1K_us?lang=en`); other agents (Personal Media `com.plexapp.agents.none://...`, Plex's `plex://album/...`) carry none, so requests stay `downloaded`
+- **Scan warning:** each full scan (`scan-plex.processor.ts`, not the recently-added poll) logs one `warn` line when items lack an Audible ID: `N of M Plex items have no Audible ID in their metadata, ...`. Check: `hasAudibleId()` in `src/lib/services/library/plex-audible-id-check.ts` (item `asin`, or a 10-character ASIN right after `://` in the guid)
+- **UI:** the Audible region hint (setup wizard backend step, Admin > Settings > Library) states the requirement
+
 ## Data Flow
 
 1. **Plex Scan Job** → Fetches all audiobooks → Populates DB with `availabilityStatus: 'available'`
@@ -61,7 +67,8 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 3. Match downloaded requests (status: 'downloaded'):
    - Uses centralized `audiobook-matcher.ts` (ASIN matching, title normalization, narrator support)
    - Matched → Update request status to 'available' + link plexGuid
-4. Return summary (total, new count, updated count, matched downloads)
+4. Items with no Audible ID in their guid → one `warn` line with the count (#298, see Key Details)
+5. Return summary (total, new count, updated count, matched downloads)
 
 **Trigger:** Scheduled (every 6 hours default) or manual admin action
 **Note:** Heavy operation, scans entire library
@@ -258,6 +265,16 @@ interface PlexLibrary {
   - Consistent with BookDate and other user operations
   - testConnection() only used for: testing connections, initial fetching during setup/settings
 - Result: Faster authentication, no unnecessary API calls, consistent architecture
+
+**11. Request Stuck at Downloaded on Plex (#298)**
+- Issue: book is in Plex, but the request stays `downloaded` after every library scan; no error
+- Cause: the Plex library uses another metadata agent (e.g. Personal Media), so the item's guid has no Audible ID and the ASIN-only match never hits
+- Fix: docs and the region hint now state the Audnexus requirement; full scans log the count of items without an Audible ID
+- Troubleshooting:
+  1. Check the item's guid: Plex > book > ⋯ > Get Info > View XML > `guid="..."` (the XML page URL holds the Plex token; share only the guid)
+  2. Switch the library to the Audnexus agent, with the region matching RMAB's Audible region
+  3. Refresh metadata for the library in Plex
+  4. Run a library scan in RMAB (Admin > Jobs, or wait for the scheduled scan)
 
 ## Library Item Deletion
 

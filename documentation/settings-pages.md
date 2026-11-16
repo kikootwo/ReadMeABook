@@ -174,6 +174,7 @@ src/app/admin/settings/
 
 **Help Text:**
 "Select the Audible region that matches your metadata engine (Audnexus/Audible Agent) configuration in [Plex/Audiobookshelf]. This ensures accurate book matching and metadata."
+- Plex only (Library tab and setup wizard backend step): the parenthesis reads "(Audnexus)", and the text appends: "Your Plex audiobook library must use the Audnexus agent: ReadMeABook matches books by the Audible ID it adds." (#298, see [integrations/plex.md](integrations/plex.md))
 
 **Implementation:**
 - Affects all Audible API calls (base URL changes per region)

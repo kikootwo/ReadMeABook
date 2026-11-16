@@ -197,8 +197,10 @@ export function PlexSection({
           </div>
         )}
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Select the Audible region that matches your metadata engine (Audnexus/Audible Agent)
-          configuration in Plex. This ensures accurate book matching and metadata.
+          Select the Audible region that matches your metadata engine (Audnexus)
+          configuration in Plex. This ensures accurate book matching and metadata. Your Plex
+          audiobook library must use the Audnexus agent: ReadMeABook matches books by the Audible
+          ID it adds.
         </p>
         <AudibleLanguageFilterOption settings={settings} onChange={onChange} />
       </div>
