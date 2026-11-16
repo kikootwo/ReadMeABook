@@ -34,17 +34,21 @@ export async function GET(request: NextRequest) {
   return requireAuth(request, (req: AuthenticatedRequest) =>
     requireAdmin(req, async () => {
       try {
-        const tokens = await prisma.apiToken.findMany({
-          include: {
-            createdBy: {
-              select: { id: true, plexUsername: true },
+        // The create form offers "Can approve requests" (own token only) while the setting is on
+        const [tokens, approvalTokensAvailable] = await Promise.all([
+          prisma.apiToken.findMany({
+            include: {
+              createdBy: {
+                select: { id: true, plexUsername: true },
+              },
+              tokenUser: {
+                select: { id: true, plexUsername: true, role: true },
+              },
             },
-            tokenUser: {
-              select: { id: true, plexUsername: true, role: true },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
+            orderBy: { createdAt: 'desc' },
+          }),
+          isTokenApprovalEnabled().catch(() => false),
+        ]);
 
         const sanitized = tokens.map((t) => ({
           id: t.id,
@@ -60,9 +64,6 @@ export async function GET(request: NextRequest) {
           createdAt: t.createdAt,
           canApproveRequests: t.canApproveRequests === true,
         }));
-
-        // The create form offers "Can approve requests" (own token only) while the setting is on
-        const approvalTokensAvailable = await isTokenApprovalEnabled().catch(() => false);
 
         return NextResponse.json({ tokens: sanitized, approvalTokensAvailable });
       } catch (error) {

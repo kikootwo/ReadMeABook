@@ -31,10 +31,14 @@ const CreateTokenSchema = z.object({
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     try {
-      const tokens = await prisma.apiToken.findMany({
-        where: { userId: req.user!.id },
-        orderBy: { createdAt: 'desc' },
-      });
+      // The create form offers "Can approve requests" only to an admin while the setting is on
+      const [tokens, approvalTokensAvailable] = await Promise.all([
+        prisma.apiToken.findMany({
+          where: { userId: req.user!.id },
+          orderBy: { createdAt: 'desc' },
+        }),
+        req.user!.role === 'admin' ? isTokenApprovalEnabled().catch(() => false) : false,
+      ]);
 
       const sanitized = tokens.map((t) => ({
         id: t.id,
@@ -46,10 +50,6 @@ export async function GET(request: NextRequest) {
         createdAt: t.createdAt,
         canApproveRequests: t.canApproveRequests === true,
       }));
-
-      // The create form offers "Can approve requests" only to an admin while the setting is on
-      const approvalTokensAvailable =
-        req.user!.role === 'admin' && (await isTokenApprovalEnabled().catch(() => false));
 
       return NextResponse.json({ tokens: sanitized, approvalTokensAvailable });
     } catch (error) {

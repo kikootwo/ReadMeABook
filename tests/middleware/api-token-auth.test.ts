@@ -82,7 +82,7 @@ describe('approve_requests permission gate (requireAuth)', () => {
   it.each([
     ['the token flag is false', tokenRow({ canApproveRequests: false }), 'This API token is not allowed to approve requests.'],
     ['the token flag is missing', tokenRow({ canApproveRequests: undefined }), 'This API token is not allowed to approve requests.'],
-    ['the owner was demoted', tokenRow({}, { role: 'user' }), 'Approving requests with an API token needs an admin account.'],
+    ["the token's user was demoted", tokenRow({}, { role: 'user' }), 'Approving requests with an API token needs an admin account.'],
     ['the token has the user role', tokenRow({ role: 'user' }), 'Approving requests with an API token needs an admin account.'],
   ])('refuses with 403 when %s, without reading the setting', async (_label, row, message) => {
     prismaMock.apiToken.findUnique.mockResolvedValue(row);
@@ -230,7 +230,7 @@ describe('approve_requests permission gate (getOptionalAuthUser)', () => {
 
   it.each([
     ['the flag is false', () => prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow({ canApproveRequests: false }))],
-    ['the owner was demoted', () => prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow({}, { role: 'user' }))],
+    ["the token's user was demoted", () => prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow({}, { role: 'user' }))],
     ['the setting is off', () => { setting('false'); prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow()); }],
     ['the setting read fails', () => { prismaMock.configuration.findUnique.mockRejectedValue(new Error('down')); prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow()); }],
   ])('returns null when %s (refused by the permission check, after the lookup)', async (_label, arrange) => {
