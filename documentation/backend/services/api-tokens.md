@@ -46,7 +46,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 | Case | Answer |
 |---|---|
 | Token flag not `true` | 403 `This API token is not allowed to approve requests.` |
-| Effective role not admin (user token, demoted owner) | 403 `Approving requests with an API token needs an admin account.` (route `requireAdmin` checks again) |
+| Effective role not admin (user token, the token's user demoted) | 403 `Approving requests with an API token needs an admin account.` (route `requireAdmin` checks again) |
 | `expiresAt` null or more than 90 days + 24 h after `createdAt` | 403 `A token that approves requests must expire within 90 days of its creation.` |
 | Setting not exactly `'true'` | 403 `Approving requests with API tokens is turned off in Settings → API.` |
 | Setting read fails | 503 `ServiceUnavailable` (handler not run); `getOptionalAuthUser` → null |
@@ -59,7 +59,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - **Approve only:** a token never denies; to deny, an admin uses the web UI or Discord (a deny blocks its requester from that book until an admin removes it, and sends no notification).
 - **Listing waiting requests:** `GET /api/requests?status=awaiting_approval` (`GET /api/admin/requests/pending-approval` stays off the allowlist).
 - **Kill switch:** turning the setting off stops every approval token at once; on again restores the unexpired ones.
-- **Demotion:** the flag stays; the role gate refuses while the owner is not admin, and re-promotion brings the approval tokens back (revoke them if that is not wanted).
+- **Demotion:** the flag stays; the role gate refuses while the token's user is not admin, and re-promotion brings the approval tokens back (revoke them if that is not wanted).
 - **Signing out:** revoking a user's sessions (`sessionsInvalidatedAt`, login link) does not cut API tokens: revoke the token.
 - **Downgrade:** an older release drops the column on its startup `db push`; after re-upgrading every flag reads false.
 
