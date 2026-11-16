@@ -79,7 +79,7 @@ ReadMeABook (RMAB) is a self-hosted request manager and downloader for audiobook
 ### Requirements
 
 - Docker on amd64 or arm64
-- Plex Media Server or Audiobookshelf, with an audiobook library. A Plex audiobook library must use the [Audnexus](https://github.com/djdembeck/Audnexus.bundle) metadata agent: RMAB matches books by the Audible ID it adds, so books from any other agent never show as available.
+- Plex Media Server or Audiobookshelf, with an audiobook library. A Plex audiobook library must use the [Audnexus](https://github.com/djdembeck/Audnexus.bundle) metadata agent: RMAB matches books by the Audible ID it adds. Agents that add none, such as Personal Media, leave requests stuck at Downloaded.
 - Prowlarr
 - A download client: qBittorrent, Transmission or Deluge for torrents, SABnzbd or NZBGet for Usenet. You can run one of each side by side.
 
