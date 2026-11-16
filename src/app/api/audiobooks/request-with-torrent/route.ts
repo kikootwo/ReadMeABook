@@ -11,18 +11,17 @@ import { prisma } from '@/lib/db';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
-import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
 import { RequestWithTorrentSchema } from '@/lib/utils/request-with-torrent-body';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
-import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { hideStoredPick } from '@/lib/services/request-detail-query';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { resolveAutoApprove } from '@/lib/utils/permissions';
 import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
+import { coverForRequestedBook, detailsForNewBook, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -114,13 +113,14 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Fetch full details from Audnexus to get releaseDate, year, and series
+      // Fetch full details from Audnexus (Audible catalog fallback): title/author for a new book, releaseDate, year, series
+      let lookedUp: BookDetailsSource | null = null;
       let year: number | undefined;
       let series: string | undefined;
       let seriesPart: string | undefined;
       try {
-        const audibleService = getAudibleService();
-        const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
+        const audnexusData = await lookUpBookDetails(audiobook.asin);
+        lookedUp = audnexusData;
 
         if (audnexusData?.releaseDate) {
           try {
@@ -152,16 +152,13 @@ export async function POST(request: NextRequest) {
         where: { audibleAsin: audiobook.asin },
       });
 
-      // If not found, create new audiobook record
+      // If not found, create new audiobook record (looked-up details and cover first; an existing record's title/author stay as saved)
       if (!audiobookRecord) {
         audiobookRecord = await prisma.audiobook.create({
           data: {
             audibleAsin: audiobook.asin,
-            title: audiobook.title,
-            author: audiobook.author,
-            narrator: audiobook.narrator,
-            description: audiobook.description,
-            coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
+            ...detailsForNewBook(lookedUp, audiobook),
+            coverArtUrl: coverForRequestedBook(lookedUp, audiobook.coverArtUrl),
             year,
             series,
             seriesPart,

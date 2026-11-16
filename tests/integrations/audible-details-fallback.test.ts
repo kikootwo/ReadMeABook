@@ -115,3 +115,34 @@ describe('details fallback when Audnexus fails (unchanged)', () => {
     expect(logMock.error.mock.calls.some(([msg]) => /Catalog API details fetch failed for B0FALL0003/.test(msg))).toBe(true);
   });
 });
+
+describe('detail lookups run only for ASIN-shaped values', () => {
+  it.each(['B0SHORT', '9780000000002', 'B0FALL0004 extra'])('%s: details are null with no Audnexus or catalog request', async (value) => {
+    audnexusServes({ [value]: { title: 'Audnexus Title' } });
+    catalogServes((asin) => catalogProduct(asin));
+
+    const details = await new AudibleService().getAudiobookDetails(value);
+
+    expect(details).toBeNull();
+    expect(axiosMock.get).not.toHaveBeenCalled();
+    expect(apiClientMock.get).not.toHaveBeenCalled();
+  });
+
+  it('a value that is not ASIN-shaped gets no runtime request', async () => {
+    axiosMock.get.mockResolvedValue({ data: { runtimeLengthMin: '480' } });
+
+    const runtime = await new AudibleService().getRuntime('B0SHORT');
+
+    expect(runtime).toBeNull();
+    expect(axiosMock.get).not.toHaveBeenCalled();
+  });
+
+  it('an ASIN-shaped value in lower case is still looked up', async () => {
+    audnexusServes({ b0fall0005: { title: 'Audnexus Title' } });
+
+    const details = await new AudibleService().getAudiobookDetails('b0fall0005', { fillSeries: false });
+
+    expect(details?.title).toBe('Audnexus Title');
+    expect(axiosMock.get).toHaveBeenCalledTimes(1);
+  });
+});

@@ -326,14 +326,18 @@ describe('createRequestForUser — release-date gate', () => {
     expect(jobQueueAddSearchJob).toHaveBeenCalled();
   });
 
-  it('stores http(s) cover URLs from any host but drops other forms', async () => {
+  it('stores http(s) cover URLs from any host for automatic callers but drops other forms', async () => {
     const { createRequestForUser } = await import('@/lib/services/request-creator.service');
 
     await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'file:///etc/passwd' });
     expect(prismaMock.audiobook.create.mock.calls[0][0].data.coverArtUrl).toBeUndefined();
 
-    await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'https://i.gr-assets.com/images/x.jpg' });
+    await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'https://i.gr-assets.com/images/x.jpg' }, { automatic: true });
     expect(prismaMock.audiobook.create.mock.calls[1][0].data.coverArtUrl).toBe('https://i.gr-assets.com/images/x.jpg');
+
+    // A user's request keeps a sent cover only on an Audible image host
+    await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'https://i.gr-assets.com/images/x.jpg' });
+    expect(prismaMock.audiobook.create.mock.calls[2][0].data.coverArtUrl).toBeUndefined();
   });
 
   it('upgrades a stored cover the library cannot use to an Audible one', async () => {

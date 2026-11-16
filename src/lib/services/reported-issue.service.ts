@@ -9,8 +9,8 @@
 import { prisma } from '@/lib/db';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
-import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { UNAPPROVED_STATUSES } from '@/lib/constants/request-statuses';
+import { coverForRequestedBook, detailsForNewBook, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('ReportedIssue');
 
@@ -43,12 +43,23 @@ export async function reportIssue(
   });
 
   if (!audiobook) {
+    // Title, author and cover from the Audible lookup; the sent ones only when it has none (a sent cover only if an Audible image)
+    let lookedUp: BookDetailsSource | null = null;
+    try {
+      lookedUp = await lookUpBookDetails(asin, { fillSeries: false });
+    } catch (error) {
+      logger.warn(`Audible lookup failed for ASIN ${asin}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const details = detailsForNewBook(lookedUp, {
+      title: metadata?.title || 'Unknown Title',
+      author: metadata?.author || 'Unknown Author',
+    });
     audiobook = await prisma.audiobook.create({
       data: {
         audibleAsin: asin,
-        title: metadata?.title || 'Unknown Title',
-        author: metadata?.author || 'Unknown Author',
-        coverArtUrl: sanitizeCoverArtUrl(metadata?.coverArtUrl),
+        title: details.title,
+        author: details.author,
+        coverArtUrl: coverForRequestedBook(lookedUp, metadata?.coverArtUrl),
         status: 'requested',
       },
     });
