@@ -136,11 +136,11 @@ test('558: a flagged admin token approves; race, expiry, lifetime and create ref
       await snap(page, DIR, `profile-create-ticked-${vp.name}`);
 
       await page.goto('/api-docs');
-      const card = page.getByText('Approve request', { exact: true }).first();
+      const card = page.getByRole('heading', { name: /^Approve request/ });
       await expect(card).toBeVisible({ timeout: 30_000 });
       await card.scrollIntoViewIfNeeded();
       await settle(page);
-      answers[`docsOptIn-${vp.name}`] = await page.getByText('Opt-in', { exact: true }).count();
+      answers[`docsOptIn-${vp.name}`] = await card.getByText('Opt-in', { exact: true }).count();
       await snap(page, DIR, `api-docs-opt-in-${vp.name}`);
       await ctx.close();
       await setApprovalSetting(admin, false);
