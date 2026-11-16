@@ -11,7 +11,9 @@
  *   B  positive control (skipped without the bot): enable with a fake token and server ID through the
  *      settings API; the sinkhole sees discord.com, the bot reports `failed`, `Failed to start the
  *      Discord bot` is logged, web approve still works, the Users page shows the field. Disable: no new
- *      records. With the token saved and the bot off, opening Settings → Discord makes 0 records.
+ *      records. With the token saved and the bot off, opening Settings → Discord makes 0 records. A failed
+ *      settings load shows an error with Retry and no Save or Test. The fake token appears nowhere in the
+ *      whole RMAB log.
  */
 
 import { test, expect } from '@playwright/test';
@@ -20,7 +22,7 @@ import { psql, sqlStr } from './242-helpers';
 import { viewer } from './177-library-page-helpers';
 import {
   DIR, SETTINGS, FAKE_TOKEN, TOKEN_MASK, VIEWPORTS, adminPage, answer, discordLogLines, dropSeeded, lastSeq,
-  openDiscordTab, openUserDialog, saveDiscord, seedRequest, settle, sinkholeRecords,
+  openDiscordTab, openDiscordTabLoadError, openUserDialog, rmabLogContains, saveDiscord, seedRequest, settle, sinkholeRecords,
 } from './231-footprint-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -168,10 +170,21 @@ test('231 B: enabled with a fake token: the sinkhole sees discord.com; disabled:
     result.tabSavedOff = tabs;
     await new Promise((r) => setTimeout(r, 5_000));
     result.sinkholeTabOpen = await sinkholeRecords(beforeTab);
+
+    // Settings → Discord when the settings GET fails: error + Retry, no Save or Test (token kept)
+    const loadErrors: Record<string, unknown> = {};
+    for (const vp of VIEWPORTS) {
+      const { ctx, page } = await adminPage(browser, vp);
+      loadErrors[vp.name] = await openDiscordTabLoadError(page, `load-error-${vp.name}`);
+      await ctx.close();
+    }
+    result.tabLoadError = loadErrors;
+    result.tokenAfterLoadError = (await admin.get(SETTINGS)).settings.botToken;
+    result.tokenInWholeLog = rmabLogContains(FAKE_TOKEN);
   } finally {
     result.cleanup = {
       unlink: readerId ? (await admin.raw('PUT', `/api/admin/users/${readerId}/discord`, { discordUserId: null })).status : null,
-      settings: (await saveDiscord(admin, {})).status,
+      settings: (await saveDiscord(admin, { clearBotToken: true })).status,
     };
     writeEvidence(`${DIR}/run-b.json`, result);
     dropSeeded(books);
@@ -194,5 +207,8 @@ test('231 B: enabled with a fake token: the sinkhole sees discord.com; disabled:
   expect(result.statusAfterDisable).toMatchObject({ state: 'stopped' });
   for (const vp of VIEWPORTS) expect((result.tabSavedOff as any)[vp.name]).toEqual({ enabled: 'false', token: TOKEN_MASK });
   expect(result.sinkholeTabOpen, 'opening Settings → Discord makes no Discord connection').toEqual([]);
+  for (const vp of VIEWPORTS) expect((result.tabLoadError as Record<string, unknown>)[vp.name], `${vp.name}: load error`).toEqual({ retry: 1, save: 0, test: 0 });
+  expect(result.tokenAfterLoadError, 'token still saved').toBe(TOKEN_MASK);
+  expect(result.tokenInWholeLog, 'token absent from the whole RMAB log').toBe(false);
   expect(result.cleanup).toEqual({ unlink: 200, settings: 200 });
 });

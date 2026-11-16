@@ -36,6 +36,11 @@ export function discordLogLines(): string[] {
     .map((l) => l.replace(/^\S+\s+\|\s?/, '').trim());
 }
 
+/** True when `secret` appears anywhere in the RMAB container log (every line, metadata included). */
+export function rmabLogContains(secret: string): boolean {
+  return stackLogsSync('rmab').includes(secret);
+}
+
 /** One API answer reduced to what must match main: code, error, message, the request's new status. */
 export async function answer(res: Response) {
   const body: any = await res.json().catch(() => null);
@@ -103,6 +108,23 @@ export async function openDiscordTab(page: Page, shot: string) {
   return {
     enabled: await page.getByRole('switch', { name: 'Enable the Discord bot' }).getAttribute('aria-checked'),
     token: await page.locator('#discord-bot-token').inputValue(),
+  };
+}
+
+/** Settings → Discord when the settings GET fails (500): the error, Retry, and no Save or Test. */
+export async function openDiscordTabLoadError(page: Page, shot: string) {
+  await page.route(
+    (url) => url.pathname === SETTINGS,
+    (route) => (route.request().method() === 'GET' ? route.fulfill({ status: 500, json: { error: 'Failed to read Discord settings' } }) : route.continue())
+  );
+  await page.goto('/admin/settings?tab=discord');
+  await expect(page.getByText(/Could not load the saved Discord settings/)).toBeVisible({ timeout: 30_000 });
+  await settle(page);
+  await snap(page, DIR, `discord-tab-${shot}`);
+  return {
+    retry: await page.getByRole('button', { name: 'Retry', exact: true }).count(),
+    save: await page.getByRole('button', { name: 'Save', exact: true }).count(),
+    test: await page.getByRole('button', { name: 'Test', exact: true }).count(),
   };
 }
 
