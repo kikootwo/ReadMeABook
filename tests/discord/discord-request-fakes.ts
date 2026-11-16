@@ -27,7 +27,7 @@ export interface FakeStepOptions {
   order?: string[];
 }
 
-/** reply, deferReply, editReply and showModal take one payload. */
+/** reply, deferReply, update, editReply and showModal take one payload. */
 type Send = (payload: Record<string, unknown>) => Promise<void>;
 
 export type FakeStep = ReturnType<typeof fakeStep>;
@@ -63,6 +63,10 @@ export function fakeStep(kind: StepKind, opts: FakeStepOptions = {}) {
       order.push('deferUpdate');
       step.deferred = true;
     }),
+    update: vi.fn<Send>(async () => {
+      order.push('update');
+      step.replied = true;
+    }),
     editReply: vi.fn<Send>(async () => {
       order.push('editReply');
     }),
@@ -74,15 +78,24 @@ export function fakeStep(kind: StepKind, opts: FakeStepOptions = {}) {
   return step;
 }
 
-/** Every payload the step sent (reply, editReply, showModal), in order. */
+type SendMock = FakeStep['reply'];
+
+/** The payloads of these sends, in the order they were made. */
+function inCallOrder(mocks: SendMock[]): Record<string, unknown>[] {
+  return mocks
+    .flatMap((mock) => mock.mock.calls.map(([payload], n) => ({ payload, at: mock.mock.invocationCallOrder[n] })))
+    .sort((a, b) => a.at - b.at)
+    .map(({ payload }) => payload);
+}
+
+/** Every payload the step sent (reply, update, editReply, showModal), in order. */
 export function sent(step: FakeStep): Record<string, unknown>[] {
-  return [...step.reply.mock.calls, ...step.editReply.mock.calls, ...step.showModal.mock.calls].map(([payload]) => payload);
+  return inCallOrder([step.reply, step.update, step.editReply, step.showModal]);
 }
 
 /** The last text the step showed. */
 export function lastText(step: FakeStep): string | undefined {
-  const payloads = [...step.reply.mock.calls, ...step.editReply.mock.calls].map(([payload]) => payload);
-  return payloads.at(-1)?.content as string | undefined;
+  return inCallOrder([step.reply, step.update, step.editReply]).at(-1)?.content as string | undefined;
 }
 
 type Row = { components: Array<Record<string, unknown>> };

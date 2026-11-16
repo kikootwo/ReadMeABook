@@ -28,6 +28,9 @@ export const TEXT = {
   bookNotFound: 'That book could not be loaded from Audible. Try again in a moment.',
   confirm: 'Request this book?',
   cancelled: 'Cancelled. Nothing was requested.',
+  requesting: 'Requesting…',
+  cancelling: 'Cancelling…',
+  alreadyWorking: 'Already working on that request. One moment.',
 } as const;
 
 const TYPE_WORD: Record<RequestMediaType, string> = { audiobook: 'audiobook', ebook: 'ebook' };

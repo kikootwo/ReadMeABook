@@ -28,10 +28,19 @@ export const DISCORD_LIMITS = {
 /** Mentions are never parsed from bot text (the client default too). */
 export const NO_MENTIONS = { parse: [] as never[] };
 
-/** Single line, trimmed, at most `max` characters (an ellipsis marks a cut). */
+/**
+ * Single line, trimmed, at most `max` UTF-16 units (an ellipsis marks a cut). Cuts between
+ * code points, so an emoji or other surrogate pair is never split in half.
+ */
 export function clip(value: string, max: number): string {
   const line = value.replace(/\s+/g, ' ').trim();
-  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+  if (line.length <= max) return line;
+  let kept = '';
+  for (const char of Array.from(line)) {
+    if (kept.length + char.length > max - 1) break;
+    kept += char;
+  }
+  return `${kept}…`;
 }
 
 /**

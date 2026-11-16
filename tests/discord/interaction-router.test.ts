@@ -41,10 +41,16 @@ describe('Discord interaction router', () => {
 
   it('registers /request (type required: audiobook or ebook; query optional), server-only', () => {
     expect(DISCORD_COMMANDS.map((command) => command.name)).toEqual(['request']);
-    const [request] = DISCORD_COMMANDS as Array<{ contexts: number[]; options: Array<Record<string, unknown>> }>;
-    expect(request.contexts).toEqual([0]);
+    const [request] = DISCORD_COMMANDS as Array<{ options: Array<Record<string, unknown>> }>;
     expect(request.options.map((o) => [o.name, o.required])).toEqual([['type', true], ['query', false]]);
     expect((request.options[0].choices as Array<{ value: string }>).map((c) => c.value)).toEqual(['audiobook', 'ebook']);
+  });
+
+  it('the server command carries no global-command fields (dm_permission, contexts)', () => {
+    for (const command of DISCORD_COMMANDS) {
+      expect(command).not.toHaveProperty('dm_permission');
+      expect(command).not.toHaveProperty('contexts');
+    }
   });
 
   it('runs a command handler only for the configured server', async () => {

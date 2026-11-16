@@ -29,6 +29,18 @@ describe('Discord text helpers', () => {
     expect(clip('abcde', 5)).toBe('abcde');
   });
 
+  it('clip never splits a surrogate pair (an emoji is kept whole or left out)', () => {
+    const book = String.fromCodePoint(0x1f4da); // two UTF-16 units
+    const isWellFormed = (text: string) => !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
+    for (let max = 2; max <= 12; max++) {
+      const cut = clip(`ab${book}${book}${book}cd${book}`, max);
+      expect(cut.length).toBeLessThanOrEqual(max);
+      expect(isWellFormed(cut)).toBe(true);
+    }
+    expect(clip(`a${book}bcdef`, 3)).toBe('a…');
+    expect(clip(`a${book}bcdef`, 4)).toBe(`a${book}…`);
+  });
+
   it('safeText stays within the limit after escaping', () => {
     const text = safeText('*'.repeat(300), 256);
     expect(text.length).toBeLessThanOrEqual(256);

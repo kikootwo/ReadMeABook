@@ -3,7 +3,7 @@
  * Documentation: documentation/integrations/discord-bot.md
  *
  * The commands the bot bulk-overwrites in the configured server on every connect, as raw
- * API JSON (no discord.js import). Server-only commands: none is offered in DMs.
+ * API JSON (no discord.js import). Server commands exist only in that server, never in DMs.
  */
 
 import { ApplicationCommandOptionType, ApplicationCommandType } from './discord-format';
@@ -17,8 +17,6 @@ export const DISCORD_COMMANDS: readonly Record<string, unknown>[] = [
     type: ApplicationCommandType.ChatInput,
     name: REQUEST_COMMAND,
     description: 'Request an audiobook or an ebook',
-    dm_permission: false,
-    contexts: [0],
     options: [
       {
         type: ApplicationCommandOptionType.String,

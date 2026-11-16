@@ -6,6 +6,7 @@
  * settings route and the startup path read these without loading the library.
  */
 
+import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import { isSnowflake } from './discord-snowflake';
 
@@ -62,9 +63,14 @@ export async function loadDiscordConfig(): Promise<DiscordConfig> {
   };
 }
 
-/** The requester role alone (read on every /request step; no token decryption). Empty = no gate. */
+/**
+ * The requester role alone (read on every /request step; no token decryption). Empty = no gate.
+ * Read straight from the database so a failed read throws (and the step is refused) instead of
+ * reading as "no role set" the way the config service's swallowed errors would.
+ */
 export async function loadRequesterRoleId(): Promise<string> {
-  return ((await getConfigService().get(DISCORD_KEYS.requesterRoleId)) ?? '').trim();
+  const row = await prisma.configuration.findUnique({ where: { key: DISCORD_KEYS.requesterRoleId } });
+  return (row?.value ?? '').trim();
 }
 
 /** The bot runs only when enabled with a token and a valid server ID. */

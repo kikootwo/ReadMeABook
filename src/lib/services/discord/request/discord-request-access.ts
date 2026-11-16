@@ -29,6 +29,8 @@ export interface RequestInteraction {
   reply(options: object): Promise<unknown>;
   deferReply(options: object): Promise<unknown>;
   deferUpdate(): Promise<unknown>;
+  /** Acknowledges a component by editing its message (buttons removed in the same call). */
+  update(options: object): Promise<unknown>;
   editReply(options: object): Promise<unknown>;
   showModal(modal: object): Promise<unknown>;
 }
@@ -39,22 +41,29 @@ export const NO_REQUESTER_ROLE = 'You need the requester role in this server to 
 
 export type RequestAccess = { ok: true; actor: DiscordActor } | { ok: false; reply: string };
 
-/** True when the member Discord sent with the interaction has the role (cached or raw member shape). */
-export function memberHasRole(member: unknown, roleId: string): boolean {
+/**
+ * True when the member Discord sent with the interaction has the role (cached or raw member
+ * shape). The @everyone role (its ID is the server's ID) is held by every member, though
+ * Discord leaves it out of a raw member's `roles`.
+ */
+export function memberHasRole(member: unknown, roleId: string, guildId: string | null): boolean {
   if (!member || typeof member !== 'object') return false;
+  if (roleId === guildId) return true;
   const roles = (member as { roles?: unknown }).roles;
   if (Array.isArray(roles)) return roles.includes(roleId);
   const cache = (roles as { cache?: { has?: (id: string) => boolean } } | undefined)?.cache;
   return typeof cache?.has === 'function' ? cache.has(roleId) === true : false;
 }
 
-/** Who is acting, or the fixed refusal to show them. Reads the database only. */
+/**
+ * Who is acting, or the fixed refusal to show them. Reads the database only (both reads at
+ * once). A failed read throws, so the step shows the generic error and nothing is requested.
+ */
 export async function checkRequestAccess(interaction: RequestInteraction): Promise<RequestAccess> {
-  const actor = await resolveDiscordActor(interaction.user.id);
+  const [actor, roleId] = await Promise.all([resolveDiscordActor(interaction.user.id), loadRequesterRoleId()]);
   if (!actor) return { ok: false, reply: NOT_LINKED };
 
-  const roleId = await loadRequesterRoleId();
-  if (roleId && !actor.isAdmin && !memberHasRole(interaction.member ?? null, roleId)) {
+  if (roleId && !actor.isAdmin && !memberHasRole(interaction.member ?? null, roleId, interaction.guildId)) {
     return { ok: false, reply: NO_REQUESTER_ROLE };
   }
   return { ok: true, actor };

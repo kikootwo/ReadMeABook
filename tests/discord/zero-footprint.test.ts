@@ -120,7 +120,9 @@ describe('Discord zero footprint: core web paths', () => {
     );
   });
 
-  const VALUE_IMPORT_RE = /^import\s+(?!type\b)[^;]*from\s+['"]discord\.js['"]/m;
+  // A value import or re-export, a side-effect import, or a require of discord.js (a lazy import() is fine)
+  const VALUE_IMPORT_RE =
+    /^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+['"]discord\.js['"]|^\s*import\s+['"]discord\.js['"]|\brequire\s*\(\s*['"]discord\.js['"]\s*\)/m;
 
   it('no Discord module imports a discord.js value at load (only types and lazy imports)', () => {
     const discordDir = path.join(SRC, 'lib/services/discord');
@@ -133,6 +135,15 @@ describe('Discord zero footprint: core web paths', () => {
     // The pattern itself: a value import matches, a type-only import does not
     expect(VALUE_IMPORT_RE.test("import { Client } from 'discord.js';")).toBe(true);
     expect(VALUE_IMPORT_RE.test("import type { Client } from 'discord.js';")).toBe(false);
+  });
+
+  it('the value-import pattern also catches re-exports, side-effect imports and require()', () => {
+    expect(VALUE_IMPORT_RE.test("export { Client } from 'discord.js';")).toBe(true);
+    expect(VALUE_IMPORT_RE.test("export * from 'discord.js';")).toBe(true);
+    expect(VALUE_IMPORT_RE.test("export type { Client } from 'discord.js';")).toBe(false);
+    expect(VALUE_IMPORT_RE.test("import 'discord.js';")).toBe(true);
+    expect(VALUE_IMPORT_RE.test("const discord = require('discord.js');")).toBe(true);
+    expect(VALUE_IMPORT_RE.test("const discord = await import('discord.js');")).toBe(false);
   });
 });
 

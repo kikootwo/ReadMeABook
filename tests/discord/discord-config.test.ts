@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const config = vi.hoisted(() => ({ values: {} as Record<string, string | null> }));
+const config = vi.hoisted(() => ({ values: {} as Record<string, string | null>, readError: null as Error | null }));
 
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({
@@ -14,11 +14,24 @@ vi.mock('@/lib/services/config.service', () => ({
   }),
 }));
 
+vi.mock('@/lib/db', () => ({
+  prisma: {
+    configuration: {
+      findUnique: async ({ where }: { where: { key: string } }) => {
+        if (config.readError) throw config.readError;
+        const value = config.values[where.key];
+        return value === undefined ? null : { key: where.key, value };
+      },
+    },
+  },
+}));
+
 import { DISCORD_KEYS, isDiscordConfigured, isSnowflake, loadDiscordConfig, loadRequesterRoleId, parseCardMode } from '@/lib/services/discord/discord-config';
 
 describe('Discord bot settings', () => {
   beforeEach(() => {
     config.values = {};
+    config.readError = null;
   });
 
   it('defaults: disabled, nothing set, request cards by DM', async () => {
@@ -68,6 +81,12 @@ describe('Discord bot settings', () => {
     expect(await loadRequesterRoleId()).toBe('');
     config.values = { 'discord.requester_role_id': ' 777777777777777777 ' };
     expect(await loadRequesterRoleId()).toBe('777777777777777777');
+  });
+
+  it('a failed requester role read throws instead of reading as "no role set"', async () => {
+    config.values = { 'discord.requester_role_id': '777777777777777777' };
+    config.readError = new Error('connection refused');
+    await expect(loadRequesterRoleId()).rejects.toThrow('connection refused');
   });
 
   it.each([[null, 'dm'], ['', 'dm'], ['public', 'public'], ['both', 'both'], ['dm', 'dm'], ['everyone', 'dm']])(

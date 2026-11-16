@@ -5,8 +5,9 @@
  * `/request type:<audiobook|ebook> [query]` → (search form when no query) → results menu →
  * book embed with Request / Cancel → the request is created with the shared creators, as
  * the RMAB account linked to the person clicking. Every step checks access again
- * (account and requester role) and answers ephemerally. Each step acknowledges Discord
- * (defer) before any database or HTTP work, except the command that opens the search form:
+ * (account and requester role) and answers ephemerally. Each step acknowledges Discord (defer,
+ * or for Request / Cancel an update that removes the buttons) before any database or HTTP
+ * work, except the command that opens the search form:
  * a form must be the first reply, so that step checks access (database only) and then shows it.
  * Replies are fixed texts; errors are logged, never shown.
  */
@@ -161,26 +162,53 @@ export async function handleRequestComponent(interaction: RequestInteraction): P
       return;
     }
 
-    if ((id.step === 'confirm' || id.step === 'cancel') && interaction.isButton()) {
-      await interaction.deferUpdate();
+    if (id.step === 'cancel' && interaction.isButton()) {
+      // The buttons go with the acknowledgement, so the message cannot be pressed again
+      await interaction.update({ content: TEXT.cancelling, components: [], allowedMentions: NO_MENTIONS });
       const access = await checkRequestAccess(interaction);
-      if (!access.ok) {
-        await interaction.editReply(textOnly(access.reply));
-        return;
-      }
-      if (id.step === 'cancel') {
-        await interaction.editReply(textOnly(TEXT.cancelled));
-        return;
-      }
-      const content = await createRequest(access.actor.userId, id.type, id.asin!);
-      // Keep the book embed so the reply shows what was requested; drop the buttons
-      await interaction.editReply({ content, components: [], allowedMentions: NO_MENTIONS });
+      await interaction.editReply(textOnly(access.ok ? TEXT.cancelled : access.reply));
+      return;
+    }
+
+    if (id.step === 'confirm' && interaction.isButton()) {
+      await confirmRequest(interaction, id.type, id.asin!);
       return;
     }
 
     logger.debug('Ignored a /request interaction whose kind does not match its step', { step: id.step });
   } catch (error) {
     await failQuietly(interaction, id.step, error);
+  }
+}
+
+/** Confirms being handled in this process, keyed `discordUserId:type:asin`. */
+const confirmsInFlight = new Set<string>();
+
+/**
+ * The Request button. A second press for the same book while the first is still being made
+ * (a double click lands before Discord removes the buttons) gets a fixed reply and creates
+ * nothing; the creators check for an existing request but are not atomic.
+ */
+async function confirmRequest(interaction: RequestInteraction, type: RequestMediaType, asin: string): Promise<void> {
+  const key = `${interaction.user.id}:${type}:${asin}`;
+  if (confirmsInFlight.has(key)) {
+    await interaction.reply({ ...textOnly(TEXT.alreadyWorking), ...EPHEMERAL });
+    return;
+  }
+  confirmsInFlight.add(key);
+  try {
+    // The buttons go with the acknowledgement; the book embed stays
+    await interaction.update({ content: TEXT.requesting, components: [], allowedMentions: NO_MENTIONS });
+    const access = await checkRequestAccess(interaction);
+    if (!access.ok) {
+      await interaction.editReply(textOnly(access.reply));
+      return;
+    }
+    const content = await createRequest(access.actor.userId, type, asin);
+    // Keep the book embed so the reply shows what was requested
+    await interaction.editReply({ content, components: [], allowedMentions: NO_MENTIONS });
+  } finally {
+    confirmsInFlight.delete(key);
   }
 }
 
@@ -192,7 +220,8 @@ async function createRequest(userId: string, type: RequestMediaType, asin: strin
     return ebookResultText(result);
   }
 
-  const book = await getAudibleService().getAudiobookDetails(asin);
+  // The creator reads no series fields, so skip the catalog series fill
+  const book = await getAudibleService().getAudiobookDetails(asin, { fillSeries: false });
   if (!book) return TEXT.bookNotFound;
   // The same options as POST /api/requests (a manual request skips the ignore list)
   const result = await createRequestForUser(
