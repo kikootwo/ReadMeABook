@@ -61,11 +61,16 @@ afterEach(async () => {
 
 describe('cancel: Discord cards', () => {
   // Runs first: nothing earlier in this file starts the bot
-  it('the bot off: the cancel loads no Discord module and starts no refresh', async () => {
+  it('the bot off: the cancel loads no Discord module and starts no refresh; the same cancel with the bot on refreshes', async () => {
     expect((await cancel()).success).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(discord.botLoads).toBe(0);
     expect(discord.refresh).not.toHaveBeenCalled();
+
+    // Control: the hook is there, gated on the bot only
+    await botRunning(true);
+    expect((await cancel()).success).toBe(true);
+    await vi.waitFor(() => expect(discord.refresh).toHaveBeenCalledTimes(1));
   });
 
   it('the bot running: one refresh, started right after the flip and before the download step', async () => {
@@ -101,11 +106,14 @@ describe('cancel: Discord cards', () => {
       prismaMock.request.findFirst.mockResolvedValue({ cancelledAt: new Date() });
       return record('cancelled');
     }],
-  ])('%s: no refresh', async (_label, arrange) => {
+  ])('%s: no refresh (only the cancel that flipped refreshed)', async (_label, arrange) => {
     await botRunning(true);
+    expect((await cancel()).success).toBe(true);
+    await vi.waitFor(() => expect(discord.refresh).toHaveBeenCalledTimes(1));
+
     await cancel(arrange());
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(discord.refresh).not.toHaveBeenCalled();
+    expect(discord.refresh).toHaveBeenCalledTimes(1);
   });
 
   it.each([

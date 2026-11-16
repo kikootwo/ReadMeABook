@@ -99,7 +99,7 @@ export async function handleDeleteComponent(interaction: ManageInteraction): Pro
     }
 
     const result = await deleteRequest(id.requestId, actor.userId);
-    logger.info('Discord delete', { userId: actor.userId, requestId: id.requestId, success: result.success, error: result.error });
+    logger.info('Discord delete', { userId: actor.userId, requestId: id.requestId, success: result.success });
     await interaction.editReply(pageReply('delete', actor, await readRequestPage(actor, 0), deleteReplyText(result)));
   } catch (error) {
     await failQuietly(interaction, `delete ${id.action}`, error);

@@ -264,9 +264,11 @@ describe('Cancel buttons and the final state after a cancel or delete', () => {
     expect(buttonsOf(approval.body).map((b) => b.label)).toEqual(['Approve', 'Deny', 'Cancel request']);
   });
 
-  it.each(['available', 'processing', 'denied', 'failed'])('a %s request card has no Cancel button', async (status) => {
+  it.each(['available', 'processing', 'denied', 'failed'])('a request that moves on to %s loses its Cancel button', async (status) => {
     const { requestCardBody } = await import('@/lib/services/discord/cards/discord-card-embeds');
     const { readCardRequest } = await import('@/lib/services/discord/cards/discord-cards');
+    seedRequest(db, { status: 'downloading' });
+    expect(buttonsOf(requestCardBody((await readCardRequest(ID))!)).map((b) => b.label)).toEqual(['Cancel request']);
     seedRequest(db, { status });
     expect(requestCardBody((await readCardRequest(ID))!).components).toEqual([]);
   });
@@ -287,6 +289,10 @@ describe('Cancel buttons and the final state after a cancel or delete', () => {
   });
 
   it('deleted: the approval message says it was removed, the card shows Removed with no Cancel, no DM', async () => {
+    const { requestCardBody } = await import('@/lib/services/discord/cards/discord-card-embeds');
+    const { readCardRequest } = await import('@/lib/services/discord/cards/discord-cards');
+    seedRequest(db, { status: 'awaiting_approval', discordCards: CARDS });
+    expect(buttonsOf(requestCardBody((await readCardRequest(ID))!)).map((b) => b.label)).toEqual(['Cancel request']);
     seedRequest(db, { status: 'awaiting_approval', deletedAt: new Date(), discordCards: CARDS });
     const calls: Call[] = [];
     const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');

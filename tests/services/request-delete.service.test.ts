@@ -558,7 +558,7 @@ describe('deleteRequest: Discord cards', () => {
   });
 
   // Runs first: nothing earlier in this file starts the bot
-  it('the bot off: the delete loads no Discord module and starts no card refresh', async () => {
+  it('the bot off: the delete loads no Discord module and starts no card refresh; the same delete with the bot on refreshes', async () => {
     const { deleteRequest } = await import('@/lib/services/request-delete.service');
     const result = await deleteRequest('req-6', 'admin-6');
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -566,6 +566,13 @@ describe('deleteRequest: Discord cards', () => {
     expect(result.success).toBe(true);
     expect(discord.botLoads).toBe(0);
     expect(discord.refresh).not.toHaveBeenCalled();
+
+    // Control: the hook is there, gated on the bot only
+    const { setDiscordBotRunning } = await import('@/lib/services/discord/discord-runtime');
+    setDiscordBotRunning(true);
+    discord.refresh.mockResolvedValue(null);
+    expect((await deleteRequest('req-6', 'admin-6')).success).toBe(true);
+    await vi.waitFor(() => expect(discord.refresh).toHaveBeenCalledWith(expect.anything(), 'req-6'));
   });
 
   it('the bot running: after the soft delete, the request and the child requests deleted with it are refreshed once each', async () => {
@@ -600,14 +607,18 @@ describe('deleteRequest: Discord cards', () => {
     await vi.waitFor(() => expect(discord.refresh).toHaveBeenCalled());
   });
 
-  it('a delete that changes nothing (not found) refreshes no card', async () => {
+  it('a delete that changes nothing (not found) refreshes no card; one that deletes does', async () => {
     const { setDiscordBotRunning } = await import('@/lib/services/discord/discord-runtime');
     setDiscordBotRunning(true);
-    prismaMock.request.findFirst.mockResolvedValue(null);
+    discord.refresh.mockResolvedValue(null);
     const { deleteRequest } = await import('@/lib/services/request-delete.service');
+    expect((await deleteRequest('req-6', 'admin-6')).success).toBe(true);
+    await vi.waitFor(() => expect(discord.refresh).toHaveBeenCalled());
+    const refreshes = discord.refresh.mock.calls.length;
 
+    prismaMock.request.findFirst.mockResolvedValue(null);
     expect((await deleteRequest('req-6', 'admin-6')).success).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(discord.refresh).not.toHaveBeenCalled();
+    expect(discord.refresh).toHaveBeenCalledTimes(refreshes);
   });
 });

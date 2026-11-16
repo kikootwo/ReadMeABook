@@ -67,8 +67,9 @@ describe('Discord /status, Cancel and /delete custom ids', () => {
     expect(decodeManageCustomId(value)).toBeNull();
   });
 
-  it('the encoders refuse bad input', () => {
-    expect(() => encodePageCustomId('status', 'page', -1)).toThrow();
+  it('the encoders refuse bad input (and accept good input)', () => {
+    expect(encodePageCustomId('status', 'page', 0, NONCE)).toBe(`rmab:sts:p:0:${NONCE}`);
+    expect(() => encodePageCustomId('status', 'page', -1)).toThrow('Invalid page');
     expect(() => encodePageCustomId('status', 'page', 1000)).toThrow();
     expect(() => encodePageCustomId('status', 'page', 1.5)).toThrow();
     expect(() => encodeRequestActionCustomId('delete', 'x')).toThrow();
