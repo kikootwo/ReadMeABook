@@ -11,7 +11,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/db';
-import { markJobQueued } from '@/lib/utils/job-queued-error';
 import { createFakeDb, resetFakeDb, seedRequest } from './approval-db-fake';
 
 const db = vi.hoisted(() => ({ rows: new Map(), histories: [], hooks: {} }) as ReturnType<typeof createFakeDb>);
@@ -169,6 +168,7 @@ describe('decideRequestApproval', () => {
   });
 
   it('the job was queued but its record could not be completed: no rollback, the approval stands and is notified', async () => {
+    const { markJobQueued } = await import('@/lib/utils/job-queued-error');
     seedRequest(db, { selectedTorrent: PICK });
     jobQueueMock.addDownloadJob.mockImplementation(async () => {
       const error = new Error('jobs table write failed');
