@@ -95,17 +95,18 @@ export function EndpointCard({ endpoint, token, useSession }: EndpointCardProps)
                   Write
                 </span>
               )}
+            </div>
+            <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold text-gray-900 dark:text-white mb-1">
+              {endpoint.title}
+              {/* Beside the title, not in the badge row: that row has no room left at phone width */}
               {endpoint.permission && (
                 <span
                   title="Needs an admin setting and a token created for it"
-                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300"
+                  className="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300"
                 >
                   Opt-in
                 </span>
               )}
-            </div>
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1">
-              {endpoint.title}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
               {endpoint.description}
