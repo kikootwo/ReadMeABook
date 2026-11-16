@@ -3,7 +3,8 @@
  * Documentation: documentation/backend/services/goodreads-sync.md
  *
  * Shared request-creation logic used by the API route and the automatic callers (shelf sync, watched lists: `automatic: true`).
- * Encapsulates: duplicate detection, library check, Audnexus enrichment,
+ * Encapsulates: duplicate detection, library check, Audnexus enrichment (the book's title and author
+ * come from the looked-up metadata; the caller's values only fill a new book the lookup knows nothing of),
  * audiobook record creation, approval flow, notification queuing, and search job triggering.
  */
 
@@ -17,6 +18,7 @@ import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { decideAutoReRequest, removedFromLibrarySkip, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
+import { detailsForNewBook, lookedUpTitleAuthorUpdates, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -107,7 +109,8 @@ export async function createRequestForUser(
     }
   }
 
-  // Fetch full details from Audnexus for year/series/releaseDate
+  // Fetch full details from Audnexus (Audible catalog fallback) for title/author/year/series/releaseDate
+  let lookedUp: BookDetailsSource | null = null;
   let year: number | undefined;
   let series: string | undefined;
   let seriesPart: string | undefined;
@@ -116,6 +119,7 @@ export async function createRequestForUser(
   try {
     const audibleService = getAudibleService();
     const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
+    lookedUp = audnexusData;
 
     if (audnexusData?.releaseDate) {
       try {
@@ -147,10 +151,7 @@ export async function createRequestForUser(
     audiobookRecord = await prisma.audiobook.create({
       data: {
         audibleAsin: audiobook.asin,
-        title: audiobook.title,
-        author: audiobook.author,
-        narrator: audiobook.narrator,
-        description: audiobook.description,
+        ...detailsForNewBook(lookedUp, audiobook),
         coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
         year,
         series,
@@ -161,10 +162,9 @@ export async function createRequestForUser(
     });
     logger.debug(`Created audiobook ${audiobookRecord.id} for ASIN ${audiobook.asin}`);
   } else {
-    // Update existing record with clean metadata (e.g. Audnexus title replacing Goodreads title)
-    const updates: Record<string, any> = {};
-    if (audiobook.title && audiobook.title !== audiobookRecord.title) updates.title = audiobook.title;
-    if (audiobook.author && audiobook.author !== audiobookRecord.author) updates.author = audiobook.author;
+    // Update existing record with clean metadata (e.g. Audnexus title replacing Goodreads title);
+    // the saved title and author change only to looked-up values, never to the caller's
+    const updates: Record<string, any> = { ...lookedUpTitleAuthorUpdates(lookedUp, audiobookRecord) };
     const safeCoverArtUrl = sanitizeCoverArtUrl(audiobook.coverArtUrl);
     // Fill a missing cover, or upgrade one the library can't use (e.g. a shelf-sync fallback) to one it can
     const existingCover = sanitizeCoverArtUrl(audiobookRecord.coverArtUrl);

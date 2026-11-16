@@ -11,6 +11,8 @@ import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
 import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { UNAPPROVED_STATUSES } from '@/lib/constants/request-statuses';
+import { getAudibleService } from '@/lib/integrations/audible.service';
+import { detailsForNewBook, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('ReportedIssue');
 
@@ -43,11 +45,22 @@ export async function reportIssue(
   });
 
   if (!audiobook) {
+    // Title and author from the Audible lookup; the sent ones only when it has none
+    let lookedUp: BookDetailsSource | null = null;
+    try {
+      lookedUp = await getAudibleService().getAudiobookDetails(asin, { fillSeries: false });
+    } catch (error) {
+      logger.warn(`Audible lookup failed for ASIN ${asin}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const details = detailsForNewBook(lookedUp, {
+      title: metadata?.title || 'Unknown Title',
+      author: metadata?.author || 'Unknown Author',
+    });
     audiobook = await prisma.audiobook.create({
       data: {
         audibleAsin: asin,
-        title: metadata?.title || 'Unknown Title',
-        author: metadata?.author || 'Unknown Author',
+        title: details.title,
+        author: details.author,
         coverArtUrl: sanitizeCoverArtUrl(metadata?.coverArtUrl),
         status: 'requested',
       },
