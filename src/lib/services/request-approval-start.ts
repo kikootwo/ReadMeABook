@@ -48,12 +48,17 @@ export type StartResult =
   /** `request`: the row as read right after the claim (hidden records dropped). */
   | { claimed: true; status: ApprovedStatus; request: ApprovalRequest };
 
-/** Errors from a start whose claim still stands (the rollback did not put the row back). */
-const claimKept = new WeakSet<object>();
+/** Errors from a start whose claim still stands (the rollback did not put the row back), with the status it set. */
+const claimKept = new WeakMap<object, ApprovedStatus>();
+
+/** The status the claim set when `error` came from a start that left the request out of awaiting_approval, else null. */
+export function keptClaimStatus(error: unknown): ApprovedStatus | null {
+  return typeof error === 'object' && error !== null ? claimKept.get(error) ?? null : null;
+}
 
 /** True when `error` came from a start that left the request out of awaiting_approval. */
 export function claimWasKept(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && claimKept.has(error);
+  return keptClaimStatus(error) !== null;
 }
 
 /** One conditional write: true when this caller moved the row out of awaiting_approval. */
@@ -110,7 +115,7 @@ async function enqueueOrRollBack(existing: ApprovalRequest, claimed: ApprovedSta
       restoredToAwaitingApproval: restored,
       error: errorForLog(error),
     });
-    if (!restored && typeof error === 'object' && error !== null) claimKept.add(error);
+    if (!restored && typeof error === 'object' && error !== null) claimKept.set(error, claimed);
     throw error;
   }
 }

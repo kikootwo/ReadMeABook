@@ -7,10 +7,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { rejectedSelectionResponse, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 import { approvalMessage, decideRequestApproval } from '@/lib/services/request-approval.service';
+import { keptClaimStatus } from '@/lib/services/request-approval-start';
 import {
   approvalOutcome,
   auditTokenApproval,
   isTokenCaller,
+  thrownApprovalOutcome,
   tokenApprovalRefusal,
   type TokenApprovalOutcome,
 } from '@/lib/services/api-token-approval';
@@ -40,6 +42,7 @@ export async function POST(
     return requireAdmin(req, async () => {
       const tokenCaller = isTokenCaller(req);
       let requestId: string | undefined;
+      let bodyUnreadable = false;
       const audit = (outcome: TokenApprovalOutcome, status: string | null) => {
         if (tokenCaller) auditTokenApproval({ requestId, outcome, status, token: req.apiToken, adminId: req.user?.sub });
       };
@@ -53,8 +56,14 @@ export async function POST(
 
         const { id } = await params;
         requestId = id;
-        const bodyResult = await readJsonBody(request);
-        if (!bodyResult.ok) return bodyResult.response;
+        const bodyResult = await readJsonBody(request).catch((error: unknown) => {
+          bodyUnreadable = true;
+          throw error;
+        });
+        if (!bodyResult.ok) {
+          audit('invalid_body', null);
+          return bodyResult.response;
+        }
         const body = bodyResult.data;
 
         // Validate action and optional admin-selected torrent
@@ -121,7 +130,13 @@ export async function POST(
         logger.error('Failed to process approval action', {
           error: errorForLog(error)
         });
-        audit(error instanceof z.ZodError ? 'invalid_body' : 'error', null);
+        if (tokenCaller) {
+          const { outcome, status } = thrownApprovalOutcome({
+            invalidBody: bodyUnreadable || error instanceof z.ZodError,
+            keptStatus: keptClaimStatus(error),
+          });
+          audit(outcome, status);
+        }
 
         if (error instanceof z.ZodError) {
           return NextResponse.json(

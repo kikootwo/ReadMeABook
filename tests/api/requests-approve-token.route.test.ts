@@ -202,6 +202,53 @@ describe('POST /api/admin/requests/[id]/approve (API token callers)', () => {
       expect(auditLines().map(([, m]) => m.outcome)).toEqual(['source_unavailable', 'error']);
     });
 
+    it('a body over the size limit: 413 and one invalid_body line', async () => {
+      caller.extra = { apiToken: { ...TOKEN } };
+      approvalDb.seed();
+      const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+      const big = JSON.stringify({ action: 'approve', pad: 'x'.repeat(1024 * 1024 + 10) });
+      const response = await POST(new Request('http://localhost/x', { method: 'POST', body: big }) as never, {
+        params: Promise.resolve({ id: 'req-1' }),
+      });
+
+      expect(response.status).toBe(413);
+      expect(auditLines()).toEqual([[
+        'API token request approval',
+        { requestId: 'req-1', outcome: 'invalid_body', status: null, tokenId: 'tok-1', tokenPrefix: 'rmab_abc1234', tokenName: 'Home automation', adminId: 'admin-1', via: 'api_token' },
+      ]]);
+      expect(decideSpy.calls).toHaveLength(0);
+    });
+
+    it('a body that is not JSON: one invalid_body line, and the same answer as a session gets', async () => {
+      const notJson = { json: async () => { throw new SyntaxError('Unexpected end of JSON input'); } };
+      const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+      approvalDb.seed();
+      asSession();
+      const session = await POST({ ...notJson } as never, { params: Promise.resolve({ id: 'req-1' }) });
+      asToken();
+      const token = await POST({ ...notJson } as never, { params: Promise.resolve({ id: 'req-1' }) });
+
+      expect(token.status).toBe(session.status);
+      expect(await token.json()).toEqual(await session.json());
+      expect(auditLines().map(([, m]) => [m.outcome, m.status])).toEqual([['invalid_body', null]]);
+      expect(decideSpy.calls).toHaveLength(0);
+    });
+
+    it('queueing and the rollback both fail: logged as approved with the status the claim set', async () => {
+      asToken();
+      approvalDb.seed();
+      jobQueueMock.addSearchJob.mockRejectedValue(new Error('redis down'));
+      const claimAndWrite = approvalDb.prisma.request.updateMany.getMockImplementation()!;
+      approvalDb.prisma.request.updateMany.mockImplementation(async (args) => {
+        if (args.where.status === 'pending') throw new Error('database unavailable'); // the rollback
+        return claimAndWrite(args);
+      });
+
+      expect((await post({ action: 'approve' })).status).toBe(500);
+      expect(approvalDb.rows.get('req-1')!.status).toBe('pending');
+      expect(auditLines().map(([, m]) => [m.outcome, m.status])).toEqual([['approved', 'pending']]);
+    });
+
     it('refusals are audited too (deny, named release)', async () => {
       asToken();
       approvalDb.seed();

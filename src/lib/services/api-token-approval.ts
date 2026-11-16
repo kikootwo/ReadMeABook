@@ -142,7 +142,6 @@ export function tokenApprovalRefusal(body: { action: string; selectedTorrent?: u
 
 export type TokenApprovalOutcome =
   | 'approved'
-  | 'denied'
   | 'not_found'
   | 'invalid_status'
   | 'source_unavailable'
@@ -155,7 +154,8 @@ export type TokenApprovalOutcome =
 /** The audit outcome and resulting request status for a service result (every code mapped). */
 export function approvalOutcome(result: ApprovalResult): { outcome: TokenApprovalOutcome; status: string | null } {
   if (result.ok) {
-    return result.action === 'approve' ? { outcome: 'approved', status: result.status } : { outcome: 'denied', status: 'denied' };
+    // A token never reaches deny (refused before the service); mapped so every result has an outcome
+    return result.action === 'approve' ? { outcome: 'approved', status: result.status } : { outcome: 'error', status: 'denied' };
   }
   switch (result.code) {
     case 'not_found':
@@ -171,6 +171,20 @@ export function approvalOutcome(result: ApprovalResult): { outcome: TokenApprova
       return { outcome: 'error', status: String((unmapped as { code?: unknown }).code ?? null) };
     }
   }
+}
+
+/**
+ * The audit outcome when the route throws: a body that could not be read, parsed or validated
+ * is `invalid_body`; a start whose work could not be queued and whose row could not be put back
+ * (`keptStatus`: the status its claim set) is `approved` with that status, since the request
+ * stays approved; anything else is `error`.
+ */
+export function thrownApprovalOutcome(context: {
+  invalidBody: boolean;
+  keptStatus: string | null;
+}): { outcome: TokenApprovalOutcome; status: string | null } {
+  if (context.invalidBody) return { outcome: 'invalid_body', status: null };
+  return context.keptStatus ? { outcome: 'approved', status: context.keptStatus } : { outcome: 'error', status: null };
 }
 
 /** The token fields an audit line carries (never the secret). */
