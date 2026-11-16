@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 
 const PATH = '/api/admin/settings/api-tokens';
@@ -23,20 +23,21 @@ export function TokenApprovalSetting({ onChanged }: TokenApprovalSettingProps) {
   const switchId = `${id}-switch`;
   const helpId = `${id}-help`;
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetchWithAuth(PATH);
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-      setOn(data.allowRequestApproval === true);
-    } catch {
-      setError('Could not load this setting');
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    fetchWithAuth(PATH)
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (active) setOn(data.allowRequestApproval === true);
+      })
+      .catch(() => {
+        if (active) setError('Could not load this setting');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const toggle = async () => {
     if (on === null || saving) return;
