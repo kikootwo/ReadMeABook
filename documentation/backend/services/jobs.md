@@ -73,8 +73,8 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
     - `job-queue.service.ts` `failed` handlers for `monitor_download` (history `failed` only when the request row was written) and `download_torrent`
     - `download_torrent`: after creating its row, a cancel that landed during the add runs the cancel's download step (no monitor job)
     - `start_direct_download`: `downloading`, `processing` and `failed` writes (0 rows → nothing downloaded / not imported)
-    - `search_ebook`: its `searching` claim only (#601: 0 rows → success "Request cancelled or deleted, search skipped", nothing searched)
-  - Not guarded: the other status writes in the download, monitor and organize processors (e.g. organize `failed`/`warn`/`downloaded`), `search_ebook` after its claim
+    - `search_ebook` past searching (#601, same `SEARCH_JOB_REFUSED_STATUSES` condition as `search_indexers`): the `searching` claim and the no-result `awaiting_search` write. A paced job for a request another search already moved on (RSS monitor, fetch-ebook, Manual Search) → success "Request is <status>, search skipped" (cancelled/deleted: "Request cancelled or deleted, search skipped"), nothing searched, no downloadHistory row, nothing queued. A download or cancel landing during the search keeps its status ("..., not re-queued"). Every caller queues from `pending`, `failed`, `awaiting_search` or `awaiting_release`
+  - Not guarded: the other status writes in the download, monitor and organize processors (e.g. organize `failed`/`warn`/`downloaded`), `search_ebook` catch `failed` and its download hand-off
   - Cancelling stops the download: RMAB's own partial download is removed, a finished one seeds first ([request-cancel.md](../../admin-features/request-cancel.md)); the monitor never writes over a row recorded `removed`
 
 **search_indexers:**
@@ -206,7 +206,7 @@ queue.on('stalled', async (job) => {
 - **Registered with 2:** search_indexers, download_torrent, monitor_download, organize_files, send_notification, search_ebook, start_direct_download, monitor_direct_download
 - **Registered with 1:** scan_plex, plex_library_scan, plex_recently_added_check, monitor_rss_feeds, audible_refresh, retry_missing_torrents, retry_failed_imports, find_missing_ebooks, cleanup_seeded_torrents, sync_reading_shelves, check_watched_lists, backfill_requester_tags
 - **Not a per-type limit:** Bull 4.16.5 sums the concurrency of every named processor on the queue and any free worker takes any job type, so two jobs of one type can overlap (e.g. two scans; ASIN writes are idempotent per `plexGuid`)
-- **Paced sweep (#601):** `retry_missing_torrents` queues its searches with a Bull `delay` (`addSearchJob(..., { delay })`, `addSearchEbookJob(..., format, { delay })`): `floor(n / 2) × 60 s` for the nth search it queues, audiobook and ebook on one schedule, so at most 2 start a minute (50 over ~25 min). Every other caller adds no delay. A delayed job's `jobs` row stays `pending` until it starts; a cancel or delete meanwhile makes it skip at its `searching` claim
+- **Paced sweep (#601):** `retry_missing_torrents` queues its searches with a Bull `delay` (`addSearchJob(..., { delay })`, `addSearchEbookJob(..., format, { delay })`): `floor(n / 2) × 60 s` for the nth search it queues, audiobook and ebook on one schedule, so at most 2 start a minute (50 over ~25 min). Every other caller adds no delay. A delayed job's `jobs` row stays `pending` until it starts; a cancel, delete or another search's download meanwhile makes it skip at its `searching` claim
 
 ## Fixed Issues ✅
 

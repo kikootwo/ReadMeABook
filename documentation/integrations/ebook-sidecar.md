@@ -126,6 +126,7 @@ childRequests    Request[] @relation("EbookParent")
 ## Job Processors
 
 ### search_ebook
+- Skips a request cancelled, deleted or past searching (`SEARCH_JOB_REFUSED_STATUSES`, like `search_indexers`; #601), see [jobs.md](../backend/services/jobs.md)
 - Searches Anna's Archive first (if enabled), then indexers (if enabled)
 - Anna's Archive: Creates download history with `downloadClient: 'direct'`, triggers `start_direct_download`
 - Indexer: Triggers `download_torrent` job (reuses audiobook processor)

@@ -17,6 +17,7 @@ import { getProwlarrService } from '../integrations/prowlarr.service';
 import { EBOOK_MAX_SIZE_MB, rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { getLanguageForRegion } from '../constants/language-config';
+import { SEARCH_JOB_REFUSED_STATUSES } from '../constants/request-statuses';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
 import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import type { AudibleRegion } from '../types/audible';
@@ -27,6 +28,18 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '../services/ebook-scraper';
+
+/** Status writes of this job refuse a request already past searching, like the audiobook search (#591, #601) */
+const KEEP_PICK = { notIn: SEARCH_JOB_REFUSED_STATUSES };
+
+/** Job result when a KEEP_PICK write found the request cancelled, deleted or past searching */
+async function keptResult(requestId: string, outcome: string, logger: RMABLogger) {
+  const row = await prisma.request.findUnique({ where: { id: requestId }, select: { status: true, deletedAt: true } });
+  const status = !row || row.deletedAt || row.status === 'cancelled' ? null : row.status;
+  const message = `Request ${status ? `is ${status}` : 'cancelled or deleted'}, ${outcome}`;
+  logger.info(`${message} (request ${requestId})`);
+  return { success: true, message, requestId };
+}
 
 /**
  * Process search ebook job
@@ -40,10 +53,10 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
   logger.info(`Processing ebook request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching, unless cancelled or deleted while queued (a paced search waits, #601)
-    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }))) {
-      logger.info(`Request ${requestId} is cancelled or deleted, skipping search`);
-      return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };
+    // Update request status to searching, unless cancelled, deleted or past searching while queued:
+    // a paced search waits, and another search may have started a download meanwhile (#601)
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }, KEEP_PICK))) {
+      return keptResult(requestId, 'search skipped', logger);
     }
     const requestRecord = await prisma.request.findUnique({
       where: { id: requestId },
@@ -110,15 +123,12 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
 
       logger.warn(`No ebook found for request ${requestId}, marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage: message,
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      // Unless a cancel, delete or another search's download landed during this search
+      if (!(await updateRequestUnlessStopped(
+        requestId, { status: 'awaiting_search', errorMessage: message, lastSearchAt: new Date() }, KEEP_PICK
+      ))) {
+        return keptResult(requestId, 'not re-queued', logger);
+      }
 
       return {
         success: false,

@@ -181,8 +181,8 @@ describe('processSearchEbook', () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('re-search');
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-4' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-4', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({
         status: 'awaiting_search',
         errorMessage: expect.stringContaining('No ebook found'),
@@ -206,7 +206,7 @@ describe('processSearchEbook', () => {
     expect(result).toEqual(expect.objectContaining({ success: true, requestId: 'req-c' }));
     expect(result.message).toContain('search skipped');
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
-      where: { id: 'req-c', deletedAt: null, status: { not: 'cancelled' } },
+      where: { id: 'req-c', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({ status: 'searching' }),
     });
     expect(prismaMock.request.update).not.toHaveBeenCalled();
@@ -235,8 +235,8 @@ describe('processSearchEbook', () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('re-search');
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-5' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-5', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({
         status: 'awaiting_search',
         errorMessage: expect.stringContaining('No ebook found'),
