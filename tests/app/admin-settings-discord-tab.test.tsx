@@ -121,8 +121,19 @@ describe('Discord settings tab', () => {
     expect(JSON.parse(put![1].body as string)).toMatchObject({ botToken: '', clearBotToken: true });
   });
 
+  it('typing a new token over a saved one never asks to clear it', async () => {
+    await renderTab(savedSettings());
+
+    fireEvent.change(screen.getByLabelText('Bot token'), { target: { value: 'new.bot.token' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchWithAuthMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));
+    const put = fetchWithAuthMock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(put![1].body as string)).toMatchObject({ botToken: 'new.bot.token', clearBotToken: false });
+  });
+
   it.each([
-    ['a 500', () => response({ error: 'Failed to read Discord settings' }, false, 500)],
+    ['a 500',() => response({ error: 'Failed to read Discord settings' }, false, 500)],
     ['a network error', () => Promise.reject(new TypeError('Failed to fetch'))],
   ])('a failed load (%s) shows the error with Retry, and no Save or Test until a load works', async (_label, failure) => {
     const loaded = savedSettings();

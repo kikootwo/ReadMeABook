@@ -2,9 +2,9 @@
  * Component: Discord Bot Settings API
  * Documentation: documentation/integrations/discord-bot.md
  *
- * Token rule for PUT: the mask or '' keeps the saved token; a new value replaces it;
- * only `clearBotToken: true` removes it (the one clear-on-purpose path). A blank form
- * sent by mistake can never erase a saved token.
+ * Token rule for PUT: the mask or '' keeps the saved token; a new value replaces it, even
+ * with clearBotToken; only `clearBotToken: true` with '' or the mask removes it (the one
+ * clear-on-purpose path). A blank form sent by mistake can never erase a saved token.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -84,8 +84,9 @@ export async function PUT(request: NextRequest) {
         if (!bodyResult.ok) return bodyResult.response;
         const input = DiscordSettingsSchema.parse(bodyResult.data);
 
-        const clearToken = input.clearBotToken === true;
-        const keepToken = !clearToken && (input.botToken === '' || isMaskedToken(input.botToken));
+        const noNewToken = input.botToken === '' || isMaskedToken(input.botToken);
+        const clearToken = input.clearBotToken === true && noNewToken;
+        const keepToken = !clearToken && noNewToken;
         const saved = await loadDiscordConfig();
         const effectiveToken = clearToken ? '' : keepToken ? saved.botToken : input.botToken;
         if (input.enabled && (!effectiveToken || !input.guildId)) {

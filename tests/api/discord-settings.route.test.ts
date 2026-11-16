@@ -142,7 +142,14 @@ describe('/api/admin/settings/discord', () => {
     expect(setManyAtomic).not.toHaveBeenCalled();
   });
 
-  it.each(['Bot new.bot.token', 'bearer new.bot.token', '  BOT   new.bot.token '])('drops a pasted prefix (%s)', async (botToken) => {
+  it('a new token wins over clearBotToken', async () => {
+    const { status } = await put(body({ botToken: 'new.bot.token', clearBotToken: true }));
+
+    expect(status).toBe(200);
+    expect(written('discord.bot_token')).toMatchObject({ value: 'new.bot.token', encrypted: true });
+  });
+
+  it.each(['Bot new.bot.token','bearer new.bot.token', '  BOT   new.bot.token '])('drops a pasted prefix (%s)', async (botToken) => {
     await put(body({ botToken }));
     expect(written('discord.bot_token')).toMatchObject({ value: 'new.bot.token', encrypted: true });
   });
