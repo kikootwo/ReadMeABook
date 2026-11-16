@@ -23,7 +23,7 @@ import { pageReply, readRequestPage } from './discord-request-list';
 
 const logger = RMABLogger.create('Discord.Status');
 
-/** What the cancel service needs, plus the requester for the ownership check. */
+/** What the cancel service needs, plus the requester, for the requester check. */
 const CANCEL_RECORD_SELECT = {
   id: true,
   userId: true,

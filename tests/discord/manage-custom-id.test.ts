@@ -2,7 +2,7 @@
  * Component: Discord /status, Cancel and /delete Custom ID Tests
  * Documentation: documentation/integrations/discord-bot.md
  *
- * The ids carry a page number or a request ID and a nonce, nothing else: no scope, owner or role.
+ * The ids carry a page number or a request ID and a nonce, nothing else: no scope, requester or role.
  * Anything not built by the encoders decodes to null.
  */
 

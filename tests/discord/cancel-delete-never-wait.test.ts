@@ -91,7 +91,7 @@ async function withinBudget<T>(work: Promise<T>): Promise<T | 'timed out'> {
 const params = { params: Promise.resolve({ id: ID }) };
 
 const paths: Record<string, () => Promise<unknown>> = {
-  'owner cancel (POST /api/requests/[id]/cancel)': async () => {
+  'requester cancel (POST /api/requests/[id]/cancel)': async () => {
     const { POST } = await import('@/app/api/requests/[id]/cancel/route');
     return (await POST({} as never, params)).status;
   },
