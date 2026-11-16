@@ -6,7 +6,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Plain holders: the config's mockReset clears vi.fn implementations per test
@@ -15,6 +15,8 @@ const server = vi.hoisted(() => ({
   setting: false,
   posts: [] as Array<{ url: string; body: Record<string, unknown> }>,
   patches: [] as Array<Record<string, unknown>>,
+  /** The next N reads of the setting fail with a 500 */
+  settingReadFailures: 0,
 }));
 
 const ADMIN_ID = 'admin-1';
@@ -32,6 +34,9 @@ vi.mock('@/lib/utils/api', () => ({
         const body = JSON.parse(String(init!.body));
         server.patches.push(body);
         server.setting = body.allowRequestApproval;
+      } else if (server.settingReadFailures > 0) {
+        server.settingReadFailures -= 1;
+        return reply({ error: 'Internal' }, 500);
       }
       return reply({ allowRequestApproval: server.setting });
     }
@@ -51,6 +56,7 @@ vi.mock('@/lib/utils/client-url', () => ({ getInstanceUrl: () => 'http://rmab.te
 
 import { ApiTokensSection } from '@/components/profile/ApiTokensSection';
 import { ApiTab } from '@/app/admin/settings/tabs/ApiTab/ApiTab';
+import { useApiTokens } from '@/lib/hooks/useApiTokens';
 
 const CHECKBOX = { name: /Can approve requests/ };
 
@@ -71,7 +77,17 @@ beforeEach(() => {
   server.setting = false;
   server.posts = [];
   server.patches = [];
+  server.settingReadFailures = 0;
 });
+
+/** The badge sits in a wrapping row with a gap: no left margin of its own to indent it when it wraps */
+function expectBadgeInWrappingRow(row: HTMLElement) {
+  const badge = within(row).getByText('Can approve requests');
+  expect(badge.className).not.toMatch(/(^|\s)m[lsx]-/);
+  const line = badge.parentElement!;
+  expect(line.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'gap-x-2']));
+  expect(line.textContent).toBe('ApproverCan approve requests');
+}
 
 describe('Profile create form', () => {
   it('is hidden unless the server offers approval tokens', async () => {
@@ -137,6 +153,38 @@ describe('Profile create form', () => {
     const row = (await screen.findByText('rmab_t1...')).closest('tr')!;
     expect(within(row).getByText('Can approve requests')).toBeTruthy();
   });
+
+  it('the badge wraps under the name with no indent (profile and Settings → API lists)', async () => {
+    await act(async () => {
+      render(<ApiTokensSection />);
+    });
+    expectBadgeInWrappingRow((await screen.findByText('rmab_t1...')).closest('tr')!);
+
+    cleanup();
+    await act(async () => {
+      render(<ApiTab />);
+    });
+    expectBadgeInWrappingRow((await screen.findByText('rmab_t1...')).closest('tr')!);
+  });
+
+  it('while ticked the expiry is 30 or 90 days, even when "never" is set', async () => {
+    const { result } = renderHook(() => useApiTokens({ basePath: '/api/user/api-tokens' }));
+    await act(async () => {});
+    act(() => result.current.setNewTokenCanApprove(true));
+    act(() => result.current.setNewTokenExpiry('never'));
+
+    expect(result.current.newTokenExpiry).toBe('90d');
+    expect(result.current.expiryOptions.map((o) => o.value)).toEqual(['30d', '90d']);
+
+    act(() => result.current.setNewTokenName('Approver'));
+    await act(async () => {
+      await result.current.handleCreate();
+    });
+    expect(server.posts[0].body).toMatchObject({ canApproveRequests: true });
+    const days = (Date.parse(String(server.posts[0].body.expiresAt)) - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(89.9);
+    expect(days).toBeLessThanOrEqual(90.05);
+  });
 });
 
 describe('Settings → API', () => {
@@ -158,6 +206,67 @@ describe('Settings → API', () => {
       fireEvent.change(userSelect, { target: { value: ADMIN_ID } });
     });
     expect((screen.getByRole('checkbox', CHECKBOX) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('when the option goes away the box is unticked and the normal expiry choices come back', async () => {
+    server.setting = true;
+    await openForm(<ApiTab />);
+    const toggle = await screen.findByRole('switch', { name: 'Allow API tokens to approve requests' });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('checkbox', CHECKBOX));
+    });
+    expect(optionValues(expirySelect())).toEqual(['30d', '90d']);
+
+    // Switched off: the server stops offering the option
+    server.available = false;
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.queryByRole('checkbox', CHECKBOX)).toBeNull();
+    expect(optionValues(expirySelect())).toEqual(['never', '30d', '90d', '1y']);
+    await act(async () => {
+      fireEvent.change(expirySelect(), { target: { value: 'never' } });
+    });
+
+    // Switched on again: the box is back, unticked, and "Never" is still a valid choice
+    server.available = true;
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect((screen.getByRole('checkbox', CHECKBOX) as HTMLInputElement).checked).toBe(false);
+    expect(optionValues(expirySelect())).toEqual(['never', '30d', '90d', '1y']);
+    expect(expirySelect().value).toBe('never');
+
+    fireEvent.change(screen.getByPlaceholderText(/Home Assistant/), { target: { value: 'Plain' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));
+    });
+    expect(server.posts[0].body).not.toHaveProperty('canApproveRequests');
+    expect(server.posts[0].body.expiresAt).toBeNull();
+  });
+
+  it('a failed first load shows the error with Retry, and the switch works after it', async () => {
+    server.settingReadFailures = 1;
+    server.setting = true;
+    await act(async () => {
+      render(<ApiTab />);
+    });
+    const toggle = await screen.findByRole('switch', { name: 'Allow API tokens to approve requests' });
+    expect(await screen.findByText(/Could not load this setting/)).toBeTruthy();
+    expect((toggle as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    });
+    expect(screen.queryByText(/Could not load this setting/)).toBeNull();
+    expect((toggle as HTMLButtonElement).disabled).toBe(false);
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(server.patches).toEqual([{ allowRequestApproval: false }]);
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
   });
 
   it('the switch saves on toggle and its help names the kill switch and revoking', async () => {

@@ -26,6 +26,7 @@ const ALL_EXPIRY_OPTIONS = [
   { value: '1y', label: '1 year' },
 ] as const;
 const APPROVAL_EXPIRY_OPTIONS = ALL_EXPIRY_OPTIONS.filter((o) => o.value === '30d' || o.value === '90d');
+const isApprovalExpiry = (value: string) => APPROVAL_EXPIRY_OPTIONS.some((o) => o.value === value);
 
 export type ExpiryOption = (typeof ALL_EXPIRY_OPTIONS)[number];
 
@@ -92,6 +93,10 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
     if (value && newTokenExpiry !== '30d') setNewTokenExpiry('90d');
   };
 
+  // While the box is ticked (and offered) the expiry is always 30 or 90 days, whatever is stored
+  const approving = newTokenCanApprove && approvalTokensAvailable;
+  const expiry = approving && !isApprovalExpiry(newTokenExpiry) ? '90d' : newTokenExpiry;
+
   const fetchTokens = useCallback(async () => {
     try {
       const response = await fetchWithAuth(config.basePath);
@@ -109,7 +114,10 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
 
       const data = await response.json();
       setTokens(data.tokens);
-      setApprovalTokensAvailable(data.approvalTokensAvailable === true);
+      const available = data.approvalTokensAvailable === true;
+      setApprovalTokensAvailable(available);
+      // The option went away: untick it, so the normal expiry choices come back
+      if (!available) setCanApprove(false);
       setError(null);
     } catch {
       setError('Failed to load API tokens');
@@ -123,9 +131,9 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
   }, [fetchTokens]);
 
   const computeExpiresAt = (): string | null => {
-    if (newTokenExpiry === 'never') return null;
+    if (expiry === 'never') return null;
     const date = new Date();
-    switch (newTokenExpiry) {
+    switch (expiry) {
       case '30d': date.setDate(date.getDate() + 30); break;
       case '90d': date.setDate(date.getDate() + 90); break;
       case '1y': date.setFullYear(date.getFullYear() + 1); break;
@@ -150,7 +158,7 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
       };
       // Sent only when ticked (and offered); never spread from elsewhere
       delete body.canApproveRequests;
-      if (newTokenCanApprove && approvalTokensAvailable) body.canApproveRequests = true;
+      if (approving) body.canApproveRequests = true;
 
       const response = await fetchWithAuth(config.basePath, {
         method: 'POST',
@@ -244,11 +252,11 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
     error,
     newTokenName,
     setNewTokenName,
-    newTokenExpiry,
+    newTokenExpiry: expiry,
     setNewTokenExpiry,
-    expiryOptions: newTokenCanApprove && approvalTokensAvailable ? APPROVAL_EXPIRY_OPTIONS : ALL_EXPIRY_OPTIONS,
+    expiryOptions: approving ? APPROVAL_EXPIRY_OPTIONS : ALL_EXPIRY_OPTIONS,
     approvalTokensAvailable,
-    newTokenCanApprove: newTokenCanApprove && approvalTokensAvailable,
+    newTokenCanApprove: approving,
     setNewTokenCanApprove,
     showCreateForm,
     setShowCreateForm,

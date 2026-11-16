@@ -38,10 +38,20 @@ export function ApprovalTokenOption({ available, checked, onChange }: ApprovalTo
 }
 
 /** Badge shown next to a token that can approve requests */
-export function ApprovalTokenBadge() {
+function ApprovalTokenBadge() {
   return (
-    <span className="ml-2 inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300">
+    <span className="inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300">
       Can approve requests
     </span>
+  );
+}
+
+/** A token list's name cell content: the name, then the badge on the same line or wrapped under it with no indent */
+export function TokenNameWithBadge({ name, canApproveRequests }: { name: string; canApproveRequests: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span>{name}</span>
+      {canApproveRequests && <ApprovalTokenBadge />}
+    </div>
   );
 }

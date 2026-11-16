@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 
 const PATH = '/api/admin/settings/api-tokens';
@@ -19,25 +19,41 @@ export function TokenApprovalSetting({ onChanged }: TokenApprovalSettingProps) {
   const [on, setOn] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const mounted = useRef(true);
   const id = useId();
   const switchId = `${id}-switch`;
   const helpId = `${id}-help`;
 
+  // Declared before the load effect, so a remount marks the component mounted before it loads
   useEffect(() => {
-    let active = true;
-    fetchWithAuth(PATH)
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const load = useCallback(() => {
+    return fetchWithAuth(PATH)
       .then(async (response) => {
         if (!response.ok) throw new Error();
         const data = await response.json();
-        if (active) setOn(data.allowRequestApproval === true);
+        if (mounted.current) setOn(data.allowRequestApproval === true);
       })
       .catch(() => {
-        if (active) setError('Could not load this setting');
+        if (mounted.current) setLoadFailed(true);
       });
-    return () => {
-      active = false;
-    };
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const retry = () => {
+    setLoadFailed(false);
+    setError(null);
+    void load();
+  };
 
   const toggle = async () => {
     if (on === null || saving) return;
@@ -90,6 +106,14 @@ export function TokenApprovalSetting({ onChanged }: TokenApprovalSettingProps) {
             <p>Turning this off stops every approval token immediately; turning it back on restores the unexpired ones.</p>
             <p>Signing a user out does not affect their API tokens: revoke the token instead.</p>
           </div>
+          {loadFailed && (
+            <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+              Could not load this setting.{' '}
+              <button type="button" onClick={retry} className="font-medium underline hover:no-underline">
+                Retry
+              </button>
+            </p>
+          )}
           {error && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
         </div>
       </div>
