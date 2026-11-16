@@ -254,6 +254,64 @@ describe('AudiobookDetailsModal', () => {
     expect(screen.queryByTitle('Interactive Search')).toBeNull();
   });
 
+  describe('a downloaded request reads "Downloaded" (#298)', () => {
+    const spinners = () => document.body.querySelectorAll('.animate-spin').length;
+
+    it('from search/home/author views (isAvailable false): Downloaded, no Processing, no spinner', async () => {
+      const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+      render(
+        <AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} requestStatus="downloaded" isAvailable={false} />
+      );
+
+      await act(async () => {});
+      expect(screen.getAllByText('Downloaded').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Processing')).toBeNull();
+      expect(spinners()).toBe(0);
+      expect(screen.queryByRole('button', { name: 'Request Audiobook' })).toBeNull();
+      // Interactive Search stays as it was for this view
+      expect(screen.getByTitle('Interactive Search')).toBeInTheDocument();
+    });
+
+    it('from a request card (isAvailable true): Downloaded, not In Your Library', async () => {
+      const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+      render(
+        <AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} requestStatus="downloaded" isAvailable={true} />
+      );
+
+      await act(async () => {});
+      expect(screen.getAllByText('Downloaded').length).toBeGreaterThan(0);
+      expect(screen.queryByText('In Your Library')).toBeNull();
+      // Interactive Search stays hidden for this view, as before
+      expect(screen.queryByTitle('Interactive Search')).toBeNull();
+    });
+
+    it('an available request still reads In Your Library', async () => {
+      const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+      render(
+        <AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} requestStatus="available" isAvailable={true} />
+      );
+
+      await act(async () => {});
+      expect(screen.getAllByText('In Your Library').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Downloaded')).toBeNull();
+    });
+
+    it('a downloading request still shows Processing with a spinner', async () => {
+      const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+      render(
+        <AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} requestStatus="downloading" isAvailable={false} />
+      );
+
+      await act(async () => {});
+      expect(screen.getAllByText('Processing').length).toBeGreaterThan(0);
+      expect(spinners()).toBeGreaterThan(0);
+    });
+  });
+
   it('shows pending approval status with requester name', async () => {
     const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
 

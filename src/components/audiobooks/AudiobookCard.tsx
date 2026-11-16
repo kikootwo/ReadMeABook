@@ -14,6 +14,8 @@ import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsM
 import { useCreateRequest } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
 import { Audiobook } from '@/lib/hooks/useAudiobooks';
+import { bookDisplayState } from '@/lib/constants/request-statuses';
+import { statusLabel } from '@/components/requests/StatusBadge';
 
 interface AudiobookCardProps {
   audiobook: Audiobook;
@@ -27,25 +29,14 @@ interface AudiobookCardProps {
 const getStatusConfig = (
   audiobook: Audiobook
 ): { type: string; label: string; color: CoverTone } | null => {
-  if (audiobook.isAvailable || audiobook.requestStatus === 'completed') {
-    return { type: 'available', label: 'In Library', color: 'emerald' };
+  switch (bookDisplayState(!!audiobook.isAvailable, audiobook.requestStatus)) {
+    case 'available': return { type: 'available', label: 'In Library', color: 'emerald' };
+    case 'downloaded': return { type: 'downloaded', label: statusLabel('downloaded'), color: 'emerald' };
+    case 'processing': return { type: 'processing', label: 'Processing', color: 'amber' };
+    case 'pending': return { type: 'pending', label: 'Requested', color: 'blue' };
+    case 'denied': return { type: 'denied', label: 'Denied', color: 'red' };
+    default: return null;
   }
-
-  const processingStatuses = ['downloading', 'processing', 'downloaded', 'awaiting_import'];
-  if (audiobook.requestStatus && processingStatuses.includes(audiobook.requestStatus)) {
-    return { type: 'processing', label: 'Processing', color: 'amber' };
-  }
-
-  const pendingStatuses = ['pending', 'awaiting_search', 'awaiting_release', 'searching', 'awaiting_approval'];
-  if (audiobook.requestStatus && pendingStatuses.includes(audiobook.requestStatus)) {
-    return { type: 'pending', label: 'Requested', color: 'blue' };
-  }
-
-  if (audiobook.requestStatus === 'denied') {
-    return { type: 'denied', label: 'Denied', color: 'red' };
-  }
-
-  return null;
 };
 
 export function AudiobookCard({
@@ -151,6 +142,7 @@ export function AudiobookCard({
                     ) : (
                       <div className={`
                         w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-center backdrop-blur-md
+                        ${status?.type === 'downloaded' ? 'bg-green-500 text-white shadow-lg shadow-green-500/25' : ''}
                         ${status?.type === 'processing' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25' : ''}
                         ${status?.type === 'pending' ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25' : ''}
                         ${status?.type === 'denied' ? 'bg-red-500 text-white shadow-lg shadow-red-500/25' : ''}
@@ -164,6 +156,7 @@ export function AudiobookCard({
                             Processing
                           </span>
                         )}
+                        {status?.type === 'downloaded' && status.label}
                         {status?.type === 'pending' && 'Requested'}
                         {status?.type === 'denied' && 'Request Denied'}
                       </div>

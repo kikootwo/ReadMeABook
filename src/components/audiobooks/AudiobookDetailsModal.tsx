@@ -24,7 +24,8 @@ import { FolderArrowDownIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { EyeSlashIcon as EyeSlashSolidIcon } from '@heroicons/react/24/solid';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { useIsIgnored, useToggleIgnore } from '@/lib/hooks/useIgnoredAudiobooks';
-import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-statuses';
+import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH, bookDisplayState } from '@/lib/constants/request-statuses';
+import { statusLabel } from '@/components/requests/StatusBadge';
 import { ExplicitCheckbox } from '@/components/requests/ExplicitCheckbox';
 import { useExplicitMarkEnabled, useSetExplicit } from '@/lib/hooks/useExplicitMark';
 
@@ -56,24 +57,27 @@ interface AudiobookDetailsModalProps {
 
 // Status helper
 const getStatusInfo = (isAvailable: boolean, requestStatus: string | null, requestedByUsername: string | null) => {
-  if (isAvailable || requestStatus === 'completed') {
+  const state = bookDisplayState(isAvailable, requestStatus);
+  if (state === 'available') {
     return { type: 'available', label: 'In Your Library', canRequest: false };
   }
 
-  const processingStatuses = ['downloading', 'processing', 'downloaded', 'awaiting_import'];
-  if (requestStatus && processingStatuses.includes(requestStatus)) {
+  if (state === 'downloaded') {
+    return { type: 'downloaded', label: statusLabel('downloaded'), canRequest: false };
+  }
+
+  if (state === 'processing') {
     return { type: 'processing', label: 'Processing', canRequest: false };
   }
 
-  const pendingStatuses = ['pending', 'awaiting_search', 'awaiting_release', 'searching', 'awaiting_approval'];
-  if (requestStatus && pendingStatuses.includes(requestStatus)) {
+  if (state === 'pending') {
     const label = requestStatus === 'awaiting_approval'
       ? requestedByUsername ? `Pending Approval (${requestedByUsername})` : 'Pending Approval'
       : requestedByUsername ? `Requested by ${requestedByUsername}` : 'Requested';
     return { type: 'pending', label, canRequest: false };
   }
 
-  if (requestStatus === 'denied') {
+  if (state === 'denied') {
     return { type: 'denied', label: 'Request Denied', canRequest: true };
   }
 
@@ -461,6 +465,7 @@ export function AudiobookDetailsModal({
                       <span className={`
                         inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium
                         ${status.type === 'available' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : ''}
+                        ${status.type === 'downloaded' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : ''}
                         ${status.type === 'processing' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' : ''}
                         ${status.type === 'pending' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : ''}
                         ${status.type === 'denied' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : ''}
@@ -714,6 +719,7 @@ export function AudiobookDetailsModal({
                     disabled
                     className={`
                       w-full py-3 px-4 rounded-xl font-semibold
+                      ${status.type === 'downloaded' ? 'text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30' : ''}
                       ${status.type === 'processing' ? 'text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30' : ''}
                       ${status.type === 'pending' ? 'text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30' : ''}
                       ${status.type === 'denied' ? 'text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30' : ''}
@@ -728,14 +734,15 @@ export function AudiobookDetailsModal({
                         Processing
                       </span>
                     )}
+                    {status.type === 'downloaded' && status.label}
                     {status.type === 'pending' && status.label}
                     {status.type === 'denied' && 'Request Denied'}
                   </button>
                 )}
               </div>
 
-              {/* Interactive Search - only if not available and user has permission */}
-              {status.type !== 'available' && (user?.role === 'admin' || user?.permissions?.interactiveSearch !== false) && (
+              {/* Interactive Search - only if not available (or a My Requests card's downloaded request) and user has permission */}
+              {!isAvailable && status.type !== 'available' && (user?.role === 'admin' || user?.permissions?.interactiveSearch !== false) && (
                 <button
                   onClick={handleInteractiveSearch}
                   disabled={!user}
