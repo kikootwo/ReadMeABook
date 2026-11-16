@@ -154,6 +154,18 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
     expect(set, 'discord_user_id NULL on every seeded row').toBe('0');
     expect(index, 'unique index on users.discord_user_id').toMatch(/^CREATE UNIQUE INDEX \S+ ON public\.users USING btree \(discord_user_id\)$/);
   }
+  // #231: the startup schema sync added requests.discord_cards (Json, nullable), NULL on every
+  // seeded row (only the running bot writes it). Required like the checks above.
+  expect.soft(execBridgeAvailable(), `discord_cards: ${EXEC_BRIDGE_SKIP}`).toBe(true);
+  if (execBridgeAvailable()) {
+    const column = psql("select concat_ws('|', is_nullable, data_type) from information_schema.columns where table_name = 'requests' and column_name = 'discord_cards'");
+    const rows = psql('select count(*) from requests');
+    const set = psql('select count(*) from requests where discord_cards is not null');
+    writeEvidence('upgrade/231-discord-cards.json', { column, rows, set });
+    expect(column, 'requests.discord_cards exists, nullable, jsonb').toBe('YES|jsonb');
+    expect(Number(rows), 'seeded requests').toBeGreaterThanOrEqual(3);
+    expect(set, 'discord_cards NULL on every seeded row').toBe('0');
+  }
 
   const search = await rmab.post<any>(`/api/requests/${failed.id}/interactive-search`, {});
   writeEvidence('upgrade/interactive-search.json', search);
