@@ -131,12 +131,16 @@ describe('approve_requests permission gate (requireAuth)', () => {
   });
 
   it('an expired token is 401 before any permission or setting read', async () => {
+    prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow());
+    expect((await callApprove()).status).toBe(200);
+    expect(settingReads()).toBe(1);
+
     prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow({ createdAt: new Date(Date.now() - 91 * DAY), expiresAt: new Date(Date.now() - 1000) }));
     const result = await callApprove();
 
     expect(result.status).toBe(401);
     expect(result.body.message).toBe('Invalid or expired API token');
-    expect(settingReads()).toBe(0);
+    expect(settingReads()).toBe(1);
   });
 
   it('a failed setting read answers 503 and the handler never runs', async () => {
@@ -158,13 +162,14 @@ describe('approve_requests permission gate (requireAuth)', () => {
     expect(settingReads()).toBe(0);
   });
 
-  it('an endpoint off the allowlist is still 403 with the allowlist message for a flagged token', async () => {
+  it('a flagged token passes only the approve route; off the allowlist it is still 403 with the allowlist message', async () => {
     prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow());
+    expect((await callApprove()).status).toBe(200);
     const result = await callApprove(`Bearer ${TOKEN}`, '/api/admin/requests/req-1/approve-all');
 
     expect(result.status).toBe(403);
     expect(result.body.message).toBe('This endpoint is not available via API token authentication');
-    expect(settingReads()).toBe(0);
+    expect(settingReads()).toBe(1);
   });
 
   it('a session on the approve path never reads the setting and has no req.apiToken', async () => {
@@ -228,10 +233,11 @@ describe('approve_requests permission gate (getOptionalAuthUser)', () => {
     ['the owner was demoted', () => prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow({}, { role: 'user' }))],
     ['the setting is off', () => { setting('false'); prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow()); }],
     ['the setting read fails', () => { prismaMock.configuration.findUnique.mockRejectedValue(new Error('down')); prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow()); }],
-  ])('returns null when %s', async (_label, arrange) => {
+  ])('returns null when %s (refused by the permission check, after the lookup)', async (_label, arrange) => {
     arrange();
     const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
     expect(await getOptionalAuthUser(makeRequest(`Bearer ${TOKEN}`) as any)).toBeNull();
+    expect(prismaMock.apiToken.findUnique).toHaveBeenCalledTimes(1);
   });
 });

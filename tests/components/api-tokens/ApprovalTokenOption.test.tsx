@@ -6,7 +6,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Plain holders: the config's mockReset clears vi.fn implementations per test
@@ -80,6 +80,11 @@ describe('Profile create form', () => {
 
     expect(screen.queryByRole('checkbox', CHECKBOX)).toBeNull();
     expect(optionValues(expirySelect())).toEqual(['never', '30d', '90d', '1y']);
+
+    cleanup();
+    server.available = true;
+    await openForm(<ApiTokensSection />);
+    expect(screen.getByRole('checkbox', CHECKBOX)).toBeTruthy();
   });
 
   it('ticked: only 30 and 90 days, 90 by default, and the flag is sent', async () => {
@@ -104,8 +109,9 @@ describe('Profile create form', () => {
     expect(days).toBeLessThanOrEqual(90.05);
   });
 
-  it('not ticked: the flag is not sent at all', async () => {
+  it('offered but not ticked: the flag is not sent at all', async () => {
     await openForm(<ApiTokensSection />);
+    expect((screen.getByRole('checkbox', CHECKBOX) as HTMLInputElement).checked).toBe(false);
     fireEvent.change(screen.getByPlaceholderText(/Home Assistant/), { target: { value: 'Plain' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));

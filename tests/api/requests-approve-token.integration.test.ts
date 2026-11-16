@@ -101,18 +101,27 @@ describe('approve route with real token auth', () => {
     settingValue = 'false';
     const result = await approve({ action: 'approve' });
 
-    expect(result.status).toBe(403);
+    expect(result).toEqual({
+      status: 403,
+      body: { error: 'Forbidden', message: 'Approving requests with API tokens is turned off in Settings → API.' },
+    });
     expect(approvalDb.prisma.request.findFirst).not.toHaveBeenCalled();
     expect(approvalDb.rows.get('req-1')!.status).toBe('awaiting_approval');
   });
 
-  it('an unflagged admin token is 403', async () => {
+  it('an unflagged admin token is 403 with the flag message', async () => {
     tokenOverrides = { canApproveRequests: false };
-    expect((await approve({ action: 'approve' })).status).toBe(403);
+    expect(await approve({ action: 'approve' })).toEqual({
+      status: 403,
+      body: { error: 'Forbidden', message: 'This API token is not allowed to approve requests.' },
+    });
     expect(approvalDb.rows.get('req-1')!.status).toBe('awaiting_approval');
   });
 
-  it('an expired token is 401', async () => {
+  it('the same token approves until it expires, then gets 401', async () => {
+    expect((await approve({ action: 'approve' })).status).toBe(200);
+    approvalDb.reset();
+    approvalDb.seed();
     tokenOverrides = { createdAt: new Date(Date.now() - 91 * DAY), expiresAt: new Date(Date.now() - 1000) };
     const result = await approve({ action: 'approve' });
 

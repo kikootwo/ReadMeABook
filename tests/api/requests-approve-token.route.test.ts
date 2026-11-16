@@ -159,6 +159,7 @@ describe('POST /api/admin/requests/[id]/approve (API token callers)', () => {
     expect(approvalDb.rows.get('req-1')).toMatchObject({ status: 'pending', selectedTorrent: null });
     expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
     expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    expect(decideSpy.calls).toEqual([expect.objectContaining({ via: 'api_token', adminSelectedTorrent: undefined })]);
   });
 
   it('two token approvals at the same moment: one 200, one 400 InvalidStatus, one job', async () => {

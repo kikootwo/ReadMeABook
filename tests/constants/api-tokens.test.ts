@@ -24,6 +24,7 @@ describe('endpoint permissions (opt-in entries)', () => {
   });
 
   it('only POST on the approve route is allowed; other methods and neighbours are not', () => {
+    expect(isEndpointAllowed('POST', APPROVE)).toBe(true);
     for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) expect(isEndpointAllowed(method, APPROVE)).toBe(false);
     expect(isEndpointAllowed('POST', '/api/admin/requests/req-123/approve/extra')).toBe(false);
     expect(isEndpointAllowed('POST', '/api/admin/requests//approve')).toBe(false);
@@ -64,6 +65,7 @@ describe('endpoint permissions (opt-in entries)', () => {
   });
 
   it('the approval setting route and the pending-approval list stay off the allowlist', () => {
+    expect(getEndpointPermissions('POST', APPROVE)).toEqual(['approve_requests']);
     for (const method of ['GET', 'PATCH', 'PUT', 'POST']) {
       expect(isEndpointAllowed(method, '/api/admin/settings/api-tokens')).toBe(false);
     }
