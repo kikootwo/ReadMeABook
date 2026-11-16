@@ -2,13 +2,15 @@
  * Component: Request Book Details
  * Documentation: documentation/backend/services/goodreads-sync.md
  *
- * A request's book title and author come from the Audible metadata the server looks up by ASIN
+ * A request's book title, author and cover come from the Audible metadata the server looks up by ASIN
  * (Audnexus, then the Audible catalog). The details sent with a request fill a new book only
  * where that lookup has nothing; an existing book's saved title and author are not changed by them.
+ * A cover sent with a request is used only when it is an Audible image or a cached thumbnail.
  */
 
 import { getAudibleService, type AudibleAudiobook } from '@/lib/integrations/audible.service';
 import { ASIN_PATTERN } from '@/lib/utils/asin';
+import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 
 /** Book details from the server's lookup or sent with a request (empty strings count as missing) */
 export interface BookDetailsSource {
@@ -16,6 +18,7 @@ export interface BookDetailsSource {
   author?: string | null;
   narrator?: string | null;
   description?: string | null;
+  coverArtUrl?: string | null;
 }
 
 export interface NewBookDetails {
@@ -26,8 +29,9 @@ export interface NewBookDetails {
 }
 
 /**
- * The Audible lookup for a book (`getAudiobookDetails`), made only for an ASIN-shaped value
- * (10 letters/digits); any other value gets null, the same as a lookup that finds nothing.
+ * The Audible lookup for a book (`getAudiobookDetails`, which also looks up only ASIN-shaped values),
+ * made only for an ASIN-shaped value (10 letters/digits); any other value gets null, the same as a
+ * lookup that finds nothing.
  */
 export async function lookUpBookDetails(asin: string, options?: { fillSeries?: boolean }): Promise<AudibleAudiobook | null> {
   if (!ASIN_PATTERN.test(asin)) return null;
@@ -66,4 +70,17 @@ export function lookedUpTitleAuthorUpdates(
   if (present(lookedUp?.title) && lookedUp.title !== saved.title) updates.title = lookedUp.title;
   if (present(lookedUp?.author) && lookedUp.author !== saved.author) updates.author = lookedUp.author;
   return updates;
+}
+
+/**
+ * Cover for a book requested by a user: the looked-up cover; else the sent one only when it is
+ * https on an Audible/Amazon image host (`COVER_ART_HOSTS`) or a cached thumbnail path; else none.
+ */
+export function coverForRequestedBook(
+  lookedUp: BookDetailsSource | null | undefined,
+  sent: string | null | undefined,
+): string | undefined {
+  const lookedUpCover = sanitizeCoverArtUrl(lookedUp?.coverArtUrl);
+  if (lookedUpCover) return lookedUpCover;
+  return sent && isLibraryCoverSource(sent) ? sent : undefined;
 }

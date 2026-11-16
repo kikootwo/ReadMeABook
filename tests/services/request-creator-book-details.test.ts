@@ -1,10 +1,11 @@
 /**
- * Component: Request Creator Book Details Tests (title and author come from the looked-up metadata)
+ * Component: Request Creator Book Details Tests (title, author and cover come from the looked-up metadata)
  * Documentation: documentation/backend/services/goodreads-sync.md
  *
  * createRequestForUser and POST /api/requests: a new book takes its title and author from the
  * Audible lookup (Audnexus, then the catalog) and uses the request's values only when the lookup
- * has none; an existing book's saved title and author change only to looked-up values.
+ * has none; an existing book's saved title and author change only to looked-up values. A user's
+ * request takes the looked-up cover, else a sent cover only on an Audible image host.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +37,10 @@ const USER = 'user-1';
 const ASIN = 'B0BOOKDT01';
 const SAVED = { id: 'book-1', audibleAsin: ASIN, title: 'Book Title', author: 'Book Author', narrator: null, coverArtUrl: null };
 const LOOKED_UP = { asin: ASIN, title: 'Book Title', author: 'Book Author', narrator: 'Book Narrator', description: 'About the book.' };
+const LOOKED_UP_COVER = 'https://m.media-amazon.com/images/I/lookedup._SL500_.jpg';
+const AUDIBLE_COVER = 'https://m.media-amazon.com/images/I/sent._SL500_.jpg';
+const CACHED_COVER = '/api/cache/thumbnails/B0BOOKDT01.jpg';
+const OTHER_COVER = 'https://example.com/cover.jpg';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,6 +64,7 @@ describe('createRequestForUser: an existing book', () => {
     const result = await createRequestForUser(USER, { asin: ASIN, title: 'Book Title (Old Edition)', author: 'Another Author' });
 
     expect(result.success).toBe(true);
+    expect(prismaMock.audiobook.update).not.toHaveBeenCalled();
     for (const [args] of prismaMock.audiobook.update.mock.calls) {
       expect(args.data).not.toHaveProperty('title');
       expect(args.data).not.toHaveProperty('author');
@@ -165,9 +171,95 @@ describe('POST /api/requests', () => {
     const response = await POST({} as never);
 
     expect(response.status).toBe(201);
+    expect(prismaMock.audiobook.update).not.toHaveBeenCalled();
     for (const [args] of prismaMock.audiobook.update.mock.calls) {
       expect(args.data).not.toHaveProperty('title');
       expect(args.data).not.toHaveProperty('author');
     }
+  });
+
+  it('a new book drops a cover sent from another host', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    state.body = { audiobook: { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: OTHER_COVER } };
+
+    const { POST } = await import('@/app/api/requests/route');
+    const response = await POST({} as never);
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: undefined }) });
+  });
+});
+
+describe('createRequestForUser: the cover of a user request', () => {
+  it('a new book takes the looked-up cover over the sent one', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ ...LOOKED_UP, coverArtUrl: LOOKED_UP_COVER });
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: AUDIBLE_COVER });
+
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: LOOKED_UP_COVER }) });
+  });
+
+  it.each([AUDIBLE_COVER, CACHED_COVER])('a new book keeps a sent cover %s when the lookup has none', async (sent) => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(LOOKED_UP);
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: sent });
+
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: sent }) });
+  });
+
+  it.each([OTHER_COVER, 'http://m.media-amazon.com/images/I/sent._SL500_.jpg'])('a new book drops a sent cover %s', async (sent) => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(LOOKED_UP);
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: sent });
+
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: undefined }) });
+  });
+
+  it('a saved book with no cover is not given one from another host', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(SAVED);
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: OTHER_COVER });
+
+    expect(prismaMock.audiobook.update).not.toHaveBeenCalled();
+  });
+
+  it('a saved book with no cover gets the looked-up one', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(SAVED);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ ...LOOKED_UP, coverArtUrl: LOOKED_UP_COVER });
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: OTHER_COVER });
+
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith({ where: { id: 'book-1' }, data: { coverArtUrl: LOOKED_UP_COVER } });
+  });
+
+  it('a saved book keeps the cover it has', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue({ ...SAVED, coverArtUrl: AUDIBLE_COVER });
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ ...LOOKED_UP, coverArtUrl: LOOKED_UP_COVER });
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: AUDIBLE_COVER });
+
+    expect(prismaMock.audiobook.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRequestForUser: the cover from shelf sync and watched lists (automatic)', () => {
+  it('a new book stores the cover the caller found, as before', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ ...LOOKED_UP, coverArtUrl: LOOKED_UP_COVER });
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: OTHER_COVER }, { automatic: true });
+
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: OTHER_COVER }) });
+  });
+
+  it('a saved book with a cover the library cannot use still gets the Audible one the caller found', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue({ ...SAVED, coverArtUrl: OTHER_COVER });
+
+    await createRequestForUser(USER, { asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: AUDIBLE_COVER }, { automatic: true });
+
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith({ where: { id: 'book-1' }, data: { coverArtUrl: AUDIBLE_COVER } });
   });
 });

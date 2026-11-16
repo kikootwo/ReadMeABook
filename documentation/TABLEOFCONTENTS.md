@@ -52,7 +52,7 @@
 - **Goodreads feeds ended (404, add message, shelf notice, one warning per sync; #514)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#feeds-ended-514)
 - **Hardcover shelf sync (GraphQL API)** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
 - **Shared sync core (Audible lookup, request creation)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)
-- **Where a requested book's title and author come from (Audible lookup; existing book keeps its saved title/author)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)
+- **Where a requested book's title, author and cover come from (Audible lookup; existing book keeps its saved title/author; a sent cover only if an Audible image)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)
 - **Combined shelves API, GenericShelf** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
 - **Hook factory (createShelfHooks)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#hook-factory)
 - **Adding a new shelf provider** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)

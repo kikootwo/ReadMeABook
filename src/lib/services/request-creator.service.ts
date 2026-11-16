@@ -6,6 +6,8 @@
  * Encapsulates: duplicate detection, library check, Audnexus enrichment (the book's title and author
  * come from the looked-up metadata; the caller's values only fill a new book the lookup knows nothing of),
  * audiobook record creation, approval flow, notification queuing, and search job triggering.
+ * Cover: a user's request takes the looked-up cover, else a sent one only on an Audible image host or a
+ * cached thumbnail (coverForRequestedBook); automatic callers store the cover they found (sanitized).
  */
 
 import { prisma } from '@/lib/db';
@@ -17,7 +19,7 @@ import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { decideAutoReRequest, removedFromLibrarySkip, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
-import { detailsForNewBook, lookedUpTitleAuthorUpdates, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
+import { coverForRequestedBook, detailsForNewBook, lookedUpTitleAuthorUpdates, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -34,7 +36,10 @@ export interface CreateRequestOptions {
   skipAutoSearch?: boolean;
   /** When true, skip the per-user ignore list check (used for manual requests) */
   bypassIgnore?: boolean;
-  /** Shelf sync and watched lists: never replace a cancelled request, back off on failures (auto-rerequest.ts) */
+  /**
+   * Shelf sync and watched lists: never replace a cancelled request, back off on failures (auto-rerequest.ts);
+   * the cover they pass is stored as found (sanitized) rather than through coverForRequestedBook
+   */
   automatic?: boolean;
   /** Mark the request Explicit (#542); a re-request keeps the replaced request's mark either way */
   explicit?: boolean;
@@ -140,6 +145,11 @@ export async function createRequestForUser(
     logger.warn(`Failed to fetch Audnexus data for ASIN ${audiobook.asin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 
+  // Cover: a user's request takes the looked-up cover, else a sent Audible image (or cached thumbnail), else none
+  const safeCoverArtUrl = automatic
+    ? sanitizeCoverArtUrl(audiobook.coverArtUrl)
+    : coverForRequestedBook(lookedUp, audiobook.coverArtUrl);
+
   // Find or create audiobook record
   let audiobookRecord = await prisma.audiobook.findFirst({
     where: { audibleAsin: audiobook.asin },
@@ -150,7 +160,7 @@ export async function createRequestForUser(
       data: {
         audibleAsin: audiobook.asin,
         ...detailsForNewBook(lookedUp, audiobook),
-        coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
+        coverArtUrl: safeCoverArtUrl,
         year,
         series,
         seriesPart,
@@ -163,7 +173,6 @@ export async function createRequestForUser(
     // Update existing record with clean metadata (e.g. Audnexus title replacing Goodreads title);
     // the saved title and author change only to looked-up values, never to the caller's
     const updates: Record<string, any> = { ...lookedUpTitleAuthorUpdates(lookedUp, audiobookRecord) };
-    const safeCoverArtUrl = sanitizeCoverArtUrl(audiobook.coverArtUrl);
     // Fill a missing cover, or upgrade one the library can't use (e.g. a shelf-sync fallback) to one it can
     const existingCover = sanitizeCoverArtUrl(audiobookRecord.coverArtUrl);
     if (safeCoverArtUrl && (!existingCover || (!isLibraryCoverSource(existingCover) && isLibraryCoverSource(safeCoverArtUrl)))) {

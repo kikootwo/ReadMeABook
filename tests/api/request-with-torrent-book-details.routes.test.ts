@@ -4,7 +4,8 @@
  *
  * POST /api/audiobooks/request-with-torrent: a new book takes its title and author from the
  * Audible lookup, the sent values only when the lookup has none; a saved book's title and author
- * are not changed by the request.
+ * are not changed by the request. A new book takes the looked-up cover, else a sent cover only on
+ * an Audible image host.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,6 +33,9 @@ vi.mock('@/lib/integrations/prowlarr-connection', () => ({
 vi.mock('@/lib/middleware/interactive-search-access', () => ({ denyWithoutInteractiveSearchAccess: async () => null }));
 
 const ASIN = 'B0TORRDT01';
+const LOOKED_UP_COVER = 'https://m.media-amazon.com/images/I/lookedup._SL500_.jpg';
+const AUDIBLE_COVER = 'https://m.media-amazon.com/images/I/sent._SL500_.jpg';
+const OTHER_COVER = 'https://example.com/cover.jpg';
 const TORRENT = { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' };
 
 async function post(audiobook: Record<string, unknown>) {
@@ -87,5 +91,34 @@ describe('request-with-torrent: book details', () => {
       expect(args.data).not.toHaveProperty('title');
       expect(args.data).not.toHaveProperty('author');
     }
+  });
+});
+
+describe('request-with-torrent: the cover of a new book', () => {
+  beforeEach(() => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+  });
+
+  it('takes the looked-up cover over the sent one', async () => {
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue({ asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: LOOKED_UP_COVER });
+
+    const response = await post({ asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: AUDIBLE_COVER });
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: LOOKED_UP_COVER }) });
+  });
+
+  it('keeps a sent Audible cover when the lookup has none', async () => {
+    const response = await post({ asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: AUDIBLE_COVER });
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: AUDIBLE_COVER }) });
+  });
+
+  it('drops a cover sent from another host', async () => {
+    const response = await post({ asin: ASIN, title: 'Book Title', author: 'Book Author', coverArtUrl: OTHER_COVER });
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ coverArtUrl: undefined }) });
   });
 });

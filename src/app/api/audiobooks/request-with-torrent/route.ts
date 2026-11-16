@@ -16,13 +16,12 @@ import { RequestWithTorrentSchema } from '@/lib/utils/request-with-torrent-body'
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
-import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { hideStoredPick } from '@/lib/services/request-detail-query';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { resolveAutoApprove } from '@/lib/utils/permissions';
 import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
-import { detailsForNewBook, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
+import { coverForRequestedBook, detailsForNewBook, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -153,13 +152,13 @@ export async function POST(request: NextRequest) {
         where: { audibleAsin: audiobook.asin },
       });
 
-      // If not found, create new audiobook record (looked-up details first; an existing record's title/author stay as saved)
+      // If not found, create new audiobook record (looked-up details and cover first; an existing record's title/author stay as saved)
       if (!audiobookRecord) {
         audiobookRecord = await prisma.audiobook.create({
           data: {
             audibleAsin: audiobook.asin,
             ...detailsForNewBook(lookedUp, audiobook),
-            coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
+            coverArtUrl: coverForRequestedBook(lookedUp, audiobook.coverArtUrl),
             year,
             series,
             seriesPart,

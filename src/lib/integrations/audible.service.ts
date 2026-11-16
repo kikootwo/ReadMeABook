@@ -27,6 +27,7 @@ import {
 import { parseRuntime as parseRuntimeUtil } from '../utils/parse-runtime';
 import { extractAllNarrators } from '../utils/extract-narrator';
 import { stripHtml } from '../utils/strip-html';
+import { ASIN_PATTERN } from '../utils/asin';
 import {
   SeriesFill,
   catalogDeadline,
@@ -681,8 +682,15 @@ export class AudibleService {
     }
   }
 
-  /** `fillSeries: false` for callers that never read the series (skips the catalog series fill). */
+  /**
+   * `fillSeries: false` for callers that never read the series (skips the catalog series fill).
+   * Only an ASIN-shaped value (`ASIN_PATTERN`) is looked up; any other value gets null with no request made.
+   */
   async getAudiobookDetails(asin: string, { fillSeries = true }: { fillSeries?: boolean } = {}): Promise<AudibleAudiobook | null> {
+    if (!ASIN_PATTERN.test(asin)) {
+      logger.debug('Details lookup skipped: value is not an ASIN');
+      return null;
+    }
     await this.initialize();
 
     try {
@@ -807,7 +815,9 @@ export class AudibleService {
     }
   }
 
+  /** Runtime in minutes from Audnexus; null for a value that is not ASIN-shaped (no request made). */
   async getRuntime(asin: string): Promise<number | null> {
+    if (!ASIN_PATTERN.test(asin)) return null;
     try {
       const audnexusRegion = AUDIBLE_REGIONS[this.region].audnexusParam;
 

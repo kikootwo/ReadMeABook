@@ -1564,7 +1564,7 @@ describe('AudibleService', () => {
       });
 
       const service = new AudibleService();
-      const details = await service.getAudiobookDetails('B000SUMMARY');
+      const details = await service.getAudiobookDetails('B000SUMMRY');
 
       expect(details?.description).toBe('Full publisher summary & details.\n\nA second paragraph.');
       expect(apiClientMock.get).not.toHaveBeenCalled();
@@ -1581,7 +1581,7 @@ describe('AudibleService', () => {
       });
 
       const service = new AudibleService();
-      const details = await service.getAudiobookDetails('B000NOSUMMR');
+      const details = await service.getAudiobookDetails('B00NOSUMMR');
 
       expect(details?.description).toBe('Short merchandising blurb.');
       expect(apiClientMock.get).not.toHaveBeenCalled();
@@ -1593,7 +1593,7 @@ describe('AudibleService', () => {
       });
 
       const service = new AudibleService();
-      const details = await service.getAudiobookDetails('B000HTMLDSC');
+      const details = await service.getAudiobookDetails('B00HTMLDSC');
 
       expect(details?.description).toBe('Short & sweet.');
     });
@@ -1648,7 +1648,7 @@ describe('AudibleService', () => {
         new Error('unexpected boom'),
       );
 
-      const result = await service.getAudiobookDetails('B000TEST');
+      const result = await service.getAudiobookDetails('B000TEST01');
 
       expect(result).toBeNull();
     });
