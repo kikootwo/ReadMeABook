@@ -69,11 +69,12 @@ function record(step: string, status: number, books?: Book[]) {
   });
 }
 
-/** A 404 here means the scrape failed; skip when audible.de answered 503, fail otherwise */
+/** A 404 here means the scrape failed; skip when audible.de answered 503, fail otherwise. The
+ *  logger prints the error as JSON on the lines after "Failed to scrape", so look a few lines on */
 function skipOn503(status: number) {
   if (status !== 404) return;
   const logs = stackLogsSync('rmab');
-  test.skip(new RegExp(`Failed to scrape series detail ${SERIES}[^\\n]*503`).test(logs), 'audible.de answered 503 for the series page');
+  test.skip(new RegExp(`Failed to scrape series detail ${SERIES}[^\\n]*(?:\\n[^\\n]*){0,3}503`).test(logs), 'audible.de answered 503 for the series page');
 }
 
 async function getSeries(rmab: Rmab, step: string): Promise<{ status: number; books?: Book[] }> {
