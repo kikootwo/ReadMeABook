@@ -83,7 +83,8 @@ export async function openUserDialog(page: Page, username: string, shot: string)
   await settle(page);
   await snap(page, DIR, `users-${shot}`);
   await holder.getByRole('button', { name: BADGE }).click();
-  const dialog = page.getByRole('dialog');
+  // The shared Modal has no dialog role: find it by its title
+  const dialog = page.locator('div.fixed.inset-0', { has: page.getByRole('heading', { name: 'User Permissions' }) });
   await expect(dialog).toBeVisible();
   await settle(page);
   const field = dialog.getByLabel('Discord user ID');
