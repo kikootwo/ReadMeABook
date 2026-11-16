@@ -15,6 +15,7 @@ export interface CreateTokenBody {
   expiresAt: string | null;
   userId?: string;
   role?: string;
+  canApproveRequests?: boolean;
 }
 
 interface UseApiTokensConfig {
@@ -31,6 +32,11 @@ export interface UseApiTokensReturn<T extends ApiToken = ApiToken> {
   setNewTokenName: (name: string) => void;
   newTokenExpiry: string;
   setNewTokenExpiry: (expiry: string) => void;
+  /** Whether the server lets this caller create a token that approves requests */
+  approvalTokensAvailable: boolean;
+  newTokenCanApprove: boolean;
+  /** Ticking it picks a 90-day expiry when the form says "Never"; any expiry can still be chosen */
+  setNewTokenCanApprove: (canApprove: boolean) => void;
   showCreateForm: boolean;
   setShowCreateForm: (show: boolean) => void;
   createdToken: string | null;
@@ -59,6 +65,8 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
   const [creating, setCreating] = useState(false);
   const [newTokenName, setNewTokenName] = useState('');
   const [newTokenExpiry, setNewTokenExpiry] = useState('never');
+  const [approvalTokensAvailable, setApprovalTokensAvailable] = useState(false);
+  const [newTokenCanApprove, setNewTokenCanApproveState] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -83,6 +91,7 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
 
       const data = await response.json();
       setTokens(data.tokens);
+      setApprovalTokensAvailable(data.approvalTokensAvailable === true);
       setError(null);
     } catch {
       setError('Failed to load API tokens');
@@ -94,6 +103,11 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
   useEffect(() => {
     fetchTokens();
   }, [fetchTokens]);
+
+  const setNewTokenCanApprove = (canApprove: boolean) => {
+    setNewTokenCanApproveState(canApprove);
+    if (canApprove && newTokenExpiry === 'never') setNewTokenExpiry('90d');
+  };
 
   const computeExpiresAt = (): string | null => {
     if (newTokenExpiry === 'never') return null;
@@ -119,6 +133,7 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
       const body: CreateTokenBody = {
         name: newTokenName.trim(),
         expiresAt: computeExpiresAt(),
+        ...(newTokenCanApprove && approvalTokensAvailable ? { canApproveRequests: true } : {}),
         ...extraBody,
       };
 
@@ -133,6 +148,7 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
         setCreatedToken(data.fullToken);
         setNewTokenName('');
         setNewTokenExpiry('never');
+        setNewTokenCanApproveState(false);
         setShowCreateForm(false);
         await fetchTokens();
         return true;
@@ -192,6 +208,7 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
     setShowCreateForm(false);
     setNewTokenName('');
     setNewTokenExpiry('never');
+    setNewTokenCanApproveState(false);
   };
 
   const formatDate = (dateStr: string | null): string => {
@@ -214,6 +231,9 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
     setNewTokenName,
     newTokenExpiry,
     setNewTokenExpiry,
+    approvalTokensAvailable,
+    newTokenCanApprove,
+    setNewTokenCanApprove,
     showCreateForm,
     setShowCreateForm,
     createdToken,

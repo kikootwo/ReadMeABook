@@ -9,6 +9,8 @@ export interface ApiToken {
   name: string;
   tokenPrefix: string;
   role: string;
+  /** May approve/deny requests (see documentation/backend/services/api-tokens.md) */
+  canApproveRequests: boolean;
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;

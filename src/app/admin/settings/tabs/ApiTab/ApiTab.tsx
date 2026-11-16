@@ -8,10 +8,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { ConfirmDialog } from '@/app/admin/components/ConfirmDialog';
-import { useApiTokens } from '@/lib/hooks/useApiTokens';
+import { useApiTokens, type CreateTokenBody } from '@/lib/hooks/useApiTokens';
 import { getInstanceUrl } from '@/lib/utils/client-url';
 import Link from 'next/link';
 import type { AdminApiToken } from '@/lib/types/api-tokens';
+import { ApprovalTokenBadge, ApprovalTokenOption } from '@/components/api-tokens/ApprovalTokenOption';
+import { TokenApprovalSetting } from './TokenApprovalSetting';
 
 interface UserOption {
   id: string;
@@ -43,8 +45,8 @@ export function ApiTab() {
   }, [fetchUsers]);
 
   const handleCreate = async () => {
-    const extraBody: Record<string, string> = {};
-    if (newTokenUserId) extraBody.userId = newTokenUserId;
+    // A token for another user never carries the approval option (hidden in the form for them)
+    const extraBody: Partial<CreateTokenBody> = newTokenUserId ? { userId: newTokenUserId, canApproveRequests: false } : {};
     const created = await api.handleCreate(extraBody);
     // Reset admin-specific fields only when create succeeds
     if (created) {
@@ -76,6 +78,8 @@ export function ApiTab() {
           </Link>
         </p>
       </div>
+
+      <TokenApprovalSetting onChange={api.fetchTokens} />
 
       {/* Error display */}
       {api.error && (
@@ -175,6 +179,14 @@ export function ApiTab() {
               </p>
             </div>
           </div>
+          {/* Approval tokens are only for the admin's own account */}
+          {api.approvalTokensAvailable && !newTokenUserId && (
+            <ApprovalTokenOption
+              checked={api.newTokenCanApprove}
+              onChange={api.setNewTokenCanApprove}
+              expiry={api.newTokenExpiry}
+            />
+          )}
           <div className="flex gap-2">
             <button
               onClick={handleCreate}
@@ -227,7 +239,10 @@ export function ApiTab() {
             <tbody>
               {api.tokens.map((token) => (
                 <tr key={token.id} className="border-b border-gray-100 dark:border-gray-800">
-                  <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">{token.name}</td>
+                  <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">
+                    {token.name}
+                    {token.canApproveRequests && <ApprovalTokenBadge />}
+                  </td>
                   <td className="py-3 px-2">
                     <code className="text-xs bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded text-gray-600 dark:text-gray-400 font-mono">
                       {token.tokenPrefix}...

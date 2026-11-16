@@ -11,6 +11,7 @@
 - **Request file download link (token check, single file or zip, streaming backpressure #500)** → [backend/services/auth.md](backend/services/auth.md#request-file-download-link)
 - **How is a Discord account mapped to a user? (Discord identity link, actor resolver, admin link route; groundwork: no bot yet)** → [backend/services/auth.md](backend/services/auth.md#discord-identity-link), [admin-dashboard.md](admin-dashboard.md)
 - **API tokens, allowlist, GET /api/requests/:id (field list, BigInt sizes #261)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
+- **API tokens approving/denying requests (opt-in, guardrails, mobile clients)** → [backend/services/api-tokens.md](backend/services/api-tokens.md#request-approval-opt-in)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 - **Credential recovery (lost CONFIG_ENCRYPTION_KEY, locked-out admin)** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
