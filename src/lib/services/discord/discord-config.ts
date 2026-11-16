@@ -19,6 +19,7 @@ export const DISCORD_KEYS = {
   adminRoleId: 'discord.admin_role_id',
   adminNotifyChannelId: 'discord.admin_notify_channel_id',
   requestCardMode: 'discord.request_card_mode',
+  requesterRoleId: 'discord.requester_role_id',
 } as const;
 
 /** Where a request's status card goes once cards exist: the requester's DMs, the request channel, or both. */
@@ -26,7 +27,7 @@ export type DiscordCardMode = 'dm' | 'public' | 'both';
 export const DEFAULT_CARD_MODE: DiscordCardMode = 'dm';
 
 /** The IDs an admin enters on the Discord tab (guild, channels, role). */
-export const DISCORD_ID_FIELDS = ['guildId', 'requestChannelId', 'adminRoleId', 'adminNotifyChannelId'] as const;
+export const DISCORD_ID_FIELDS = ['guildId', 'requestChannelId', 'adminRoleId', 'adminNotifyChannelId', 'requesterRoleId'] as const;
 export type DiscordIdField = (typeof DISCORD_ID_FIELDS)[number];
 
 export interface DiscordConfig {
@@ -37,6 +38,8 @@ export interface DiscordConfig {
   adminRoleId: string;
   adminNotifyChannelId: string;
   requestCardMode: DiscordCardMode;
+  /** Only members with this role may /request (admins always may); empty = every linked user. */
+  requesterRoleId: string;
 }
 
 export function parseCardMode(value: string | null | undefined): DiscordCardMode {
@@ -55,7 +58,13 @@ export async function loadDiscordConfig(): Promise<DiscordConfig> {
     adminRoleId: text(DISCORD_KEYS.adminRoleId),
     adminNotifyChannelId: text(DISCORD_KEYS.adminNotifyChannelId),
     requestCardMode: parseCardMode(values[DISCORD_KEYS.requestCardMode]),
+    requesterRoleId: text(DISCORD_KEYS.requesterRoleId),
   };
+}
+
+/** The requester role alone (read on every /request step; no token decryption). Empty = no gate. */
+export async function loadRequesterRoleId(): Promise<string> {
+  return ((await getConfigService().get(DISCORD_KEYS.requesterRoleId)) ?? '').trim();
 }
 
 /** The bot runs only when enabled with a token and a valid server ID. */

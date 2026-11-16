@@ -10,10 +10,11 @@ const config = vi.hoisted(() => ({ values: {} as Record<string, string | null> }
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({
     getMany: async (keys: string[]) => Object.fromEntries(keys.map((key) => [key, config.values[key] ?? null])),
+    get: async (key: string) => config.values[key] ?? null,
   }),
 }));
 
-import { DISCORD_KEYS, isDiscordConfigured, isSnowflake, loadDiscordConfig, parseCardMode } from '@/lib/services/discord/discord-config';
+import { DISCORD_KEYS, isDiscordConfigured, isSnowflake, loadDiscordConfig, loadRequesterRoleId, parseCardMode } from '@/lib/services/discord/discord-config';
 
 describe('Discord bot settings', () => {
   beforeEach(() => {
@@ -31,6 +32,7 @@ describe('Discord bot settings', () => {
       adminRoleId: '',
       adminNotifyChannelId: '',
       requestCardMode: 'dm',
+      requesterRoleId: '',
     });
     expect(isDiscordConfigured(loaded)).toBe(false);
   });
@@ -44,11 +46,12 @@ describe('Discord bot settings', () => {
       [DISCORD_KEYS.adminRoleId]: '555555555555555555',
       [DISCORD_KEYS.adminNotifyChannelId]: '666666666666666666',
       [DISCORD_KEYS.requestCardMode]: 'both',
+      [DISCORD_KEYS.requesterRoleId]: ' 777777777777777777 ',
     };
 
     const loaded = await loadDiscordConfig();
 
-    expect(loaded).toMatchObject({ enabled: true, botToken: 'tok', guildId: '222222222222222222', requestCardMode: 'both' });
+    expect(loaded).toMatchObject({ enabled: true, botToken: 'tok', guildId: '222222222222222222', requestCardMode: 'both', requesterRoleId: '777777777777777777' });
     expect(isDiscordConfigured(loaded)).toBe(true);
   });
 
@@ -57,7 +60,14 @@ describe('Discord bot settings', () => {
     ['enabled without a guild', { enabled: true, botToken: 'tok', guildId: '' }],
     ['token and guild but disabled', { enabled: false, botToken: 'tok', guildId: '222222222222222222' }],
   ])('not configured when %s', (_label, partial) => {
-    expect(isDiscordConfigured({ ...partial, requestChannelId: '', adminRoleId: '', adminNotifyChannelId: '', requestCardMode: 'dm' })).toBe(false);
+    expect(isDiscordConfigured({ ...partial, requestChannelId: '', adminRoleId: '', adminNotifyChannelId: '', requestCardMode: 'dm', requesterRoleId: '' })).toBe(false);
+  });
+
+  it('the requester role key is discord.requester_role_id; unset reads as empty (no gate)', async () => {
+    expect(DISCORD_KEYS.requesterRoleId).toBe('discord.requester_role_id');
+    expect(await loadRequesterRoleId()).toBe('');
+    config.values = { 'discord.requester_role_id': ' 777777777777777777 ' };
+    expect(await loadRequesterRoleId()).toBe('777777777777777777');
   });
 
   it.each([[null, 'dm'], ['', 'dm'], ['public', 'public'], ['both', 'both'], ['dm', 'dm'], ['everyone', 'dm']])(

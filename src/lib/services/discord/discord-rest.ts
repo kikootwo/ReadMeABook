@@ -59,6 +59,7 @@ const LABELS: Record<Exclude<DiscordIdField, 'guildId'>, string> = {
   requestChannelId: 'Request channel',
   adminNotifyChannelId: 'Admin channel',
   adminRoleId: 'Admin role',
+  requesterRoleId: 'Requester role',
 };
 
 export async function checkDiscordBot(
@@ -141,12 +142,13 @@ export async function checkDiscordBot(
     ['requestChannelId', channels],
     ['adminNotifyChannelId', channels],
     ['adminRoleId', roles],
+    ['requesterRoleId', roles],
   ];
   for (const [field, list] of lookups) {
     const id = ids[field];
     if (!id) continue;
     if (!list) {
-      warnings.push(`Could not read the server's ${field === 'adminRoleId' ? 'roles' : 'channels'}.`);
+      warnings.push(`Could not read the server's ${field.endsWith('RoleId') ? 'roles' : 'channels'}.`);
       continue;
     }
     const found = list.find((item) => item.id === id);

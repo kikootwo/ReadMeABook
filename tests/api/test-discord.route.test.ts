@@ -41,7 +41,7 @@ function answerHappyPath() {
     '/users/@me/guilds': [{ id: GUILD, name: 'Book Club' }, { id: '777777777777777777', name: 'Other' }],
     [`/guilds/${GUILD}`]: { id: GUILD, name: 'Book Club' },
     [`/guilds/${GUILD}/channels`]: [{ id: CHANNEL, name: 'requests', type: 0 }],
-    [`/guilds/${GUILD}/roles`]: [{ id: ROLE, name: 'Librarians' }],
+    [`/guilds/${GUILD}/roles`]: [{ id: ROLE, name: 'Librarians' }, { id: '666666666666666666', name: 'Readers' }],
   };
 }
 
@@ -147,6 +147,7 @@ describe('POST /api/admin/settings/test-discord', () => {
     ['requestChannelId', `${CHANNEL}/messages`],
     ['adminRoleId', '0123456789012345678'],
     ['adminNotifyChannelId', 'abc'],
+    ['requesterRoleId', 'readers'],
   ])('refuses an invalid %s (%s) with 400 before any Discord call', async (field, value) => {
     const { status } = await post({ guildId: GUILD, [field]: value });
     expect(status).toBe(400);
@@ -206,5 +207,21 @@ describe('POST /api/admin/settings/test-discord', () => {
     const { json } = await post({ guildId: GUILD, requestChannelId: '888888888888888888' });
     expect(json.names).toEqual({});
     expect(json.warnings).toContain('Request channel 888888888888888888 was not found in this server.');
+  });
+
+  it('names the requester role, or reports it missing from the server', async () => {
+    const found = await post({ guildId: GUILD, requesterRoleId: '666666666666666666' });
+    expect(found.json.names).toEqual({ requesterRoleId: 'Readers' });
+
+    const missing = await post({ guildId: GUILD, requesterRoleId: '888888888888888888' });
+    expect(missing.json.warnings).toContain('Requester role 888888888888888888 was not found in this server.');
+  });
+
+  it('roles unreadable: the requester role warning says roles, not channels', async () => {
+    discord.state.restGet[`/guilds/${GUILD}/roles`] = () => {
+      throw Object.assign(new Error('Missing Access'), { status: 403 });
+    };
+    const { json } = await post({ guildId: GUILD, requesterRoleId: '666666666666666666' });
+    expect(json.warnings).toEqual(["Could not read the server's roles."]);
   });
 });

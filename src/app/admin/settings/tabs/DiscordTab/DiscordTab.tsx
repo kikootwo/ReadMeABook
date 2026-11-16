@@ -26,6 +26,11 @@ const ID_FIELDS: { key: DiscordIdKey; label: string; help: string }[] = [
   { key: 'guildId', label: 'Server ID', help: 'The Discord server the bot works in. Required to enable the bot.' },
   { key: 'requestChannelId', label: 'Request channel ID', help: 'Optional. Where request messages will be posted.' },
   { key: 'adminRoleId', label: 'Admin role ID', help: 'Optional. Pinged on approval messages. It grants no rights in RMAB.' },
+  {
+    key: 'requesterRoleId',
+    label: 'Requester role ID',
+    help: 'Optional. Only members with this role can use /request. Empty means every linked user may request; RMAB admins always can.',
+  },
   { key: 'adminNotifyChannelId', label: 'Admin notification channel ID', help: 'Optional. Where approval messages will be posted.' },
 ];
 

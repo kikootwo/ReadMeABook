@@ -21,9 +21,10 @@ export interface DiscordFormValues {
   requestChannelId: string;
   adminRoleId: string;
   adminNotifyChannelId: string;
+  requesterRoleId: string;
 }
 
-export type DiscordIdKey = 'guildId' | 'requestChannelId' | 'adminRoleId' | 'adminNotifyChannelId';
+export type DiscordIdKey = 'guildId' | 'requestChannelId' | 'adminRoleId' | 'adminNotifyChannelId' | 'requesterRoleId';
 
 export interface DiscordBotStatusView {
   state: 'stopped' | 'starting' | 'running' | 'failed';
@@ -52,6 +53,7 @@ const EMPTY: DiscordFormValues = {
   requestChannelId: '',
   adminRoleId: '',
   adminNotifyChannelId: '',
+  requesterRoleId: '',
 };
 
 const SETTINGS_URL = '/api/admin/settings/discord';
@@ -60,7 +62,7 @@ export const LOAD_ERROR = 'Could not load the saved Discord settings. Test and S
 export const STATUS_POLLS = 5;
 export const STATUS_POLL_MS = 1000;
 export const ID_ERROR = 'Discord IDs are 15 to 20 digits';
-const ID_KEYS: DiscordIdKey[] = ['guildId', 'requestChannelId', 'adminRoleId', 'adminNotifyChannelId'];
+const ID_KEYS: DiscordIdKey[] = ['guildId', 'requestChannelId', 'adminRoleId', 'adminNotifyChannelId', 'requesterRoleId'];
 
 /** Per-field error text for IDs that are filled in but not a Discord ID. */
 export function idErrors(values: DiscordFormValues): Partial<Record<DiscordIdKey, string>> {
@@ -79,6 +81,7 @@ const trimmed = (values: DiscordFormValues): DiscordFormValues => ({
   requestChannelId: values.requestChannelId.trim(),
   adminRoleId: values.adminRoleId.trim(),
   adminNotifyChannelId: values.adminNotifyChannelId.trim(),
+  requesterRoleId: values.requesterRoleId.trim(),
 });
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -185,6 +188,7 @@ export function useDiscordSettings() {
         requestChannelId: t.requestChannelId,
         adminRoleId: t.adminRoleId,
         adminNotifyChannelId: t.adminNotifyChannelId,
+        requesterRoleId: t.requesterRoleId,
       };
       const response = await fetchWithAuth('/api/admin/settings/test-discord', {
         method: 'POST',

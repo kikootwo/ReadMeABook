@@ -40,6 +40,8 @@ const DiscordSettingsSchema = z.object({
   requestChannelId: discordId,
   adminRoleId: discordId,
   adminNotifyChannelId: discordId,
+  /** Empty: every linked user may /request. */
+  requesterRoleId: discordId,
 });
 
 /** What the tab shows: the token masked, never its value. */
@@ -52,6 +54,7 @@ function view(config: DiscordConfig) {
       requestChannelId: config.requestChannelId,
       adminRoleId: config.adminRoleId,
       adminNotifyChannelId: config.adminNotifyChannelId,
+      requesterRoleId: config.requesterRoleId,
     },
     isConfigured: isDiscordConfigured(config),
     status: getDiscordBotService().getStatus(),

@@ -25,6 +25,7 @@ const TestSchema = z.object({
   requestChannelId: discordId,
   adminRoleId: discordId,
   adminNotifyChannelId: discordId,
+  requesterRoleId: discordId,
 });
 
 /**
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
           requestChannelId: input.requestChannelId || undefined,
           adminRoleId: input.adminRoleId || undefined,
           adminNotifyChannelId: input.adminNotifyChannelId || undefined,
+          requesterRoleId: input.requesterRoleId || undefined,
         });
         return NextResponse.json(result);
       } catch (error) {

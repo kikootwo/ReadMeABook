@@ -40,6 +40,7 @@ const body = (overrides: Record<string, unknown> = {}) => ({
   requestChannelId: '444444444444444444',
   adminRoleId: '',
   adminNotifyChannelId: '',
+  requesterRoleId: '',
   ...overrides,
 });
 
@@ -166,11 +167,37 @@ describe('/api/admin/settings/discord', () => {
     ['requestChannelId', '0123456789012345678'],
     ['adminRoleId', 'role'],
     ['adminNotifyChannelId', '1234567890123456789012'],
+    ['requesterRoleId', 'requesters'],
+    ['requesterRoleId', '0123456789012345678'],
   ])('refuses an invalid %s (%s) with 400 and writes nothing', async (field, value) => {
     const { status } = await put(body({ [field]: value }));
     expect(status).toBe(400);
     expect(setManyAtomic).not.toHaveBeenCalled();
     expect(bot.stop).not.toHaveBeenCalled();
+  });
+
+  it('saves a requester role ID in the same transaction and GET returns it', async () => {
+    const { status, json } = await put(body({ requesterRoleId: ' 555555555555555555 ' }));
+
+    expect(status).toBe(200);
+    expect(written('discord.requester_role_id')).toEqual({ key: 'discord.requester_role_id', value: '555555555555555555', category: 'discord' });
+    saved.values['discord.requester_role_id'] = '555555555555555555';
+    expect((await get()).json.settings.requesterRoleId).toBe('555555555555555555');
+    expect(json.settings).toHaveProperty('requesterRoleId');
+  });
+
+  it('an empty requester role ID is saved as empty (no role gate)', async () => {
+    saved.values['discord.requester_role_id'] = '555555555555555555';
+    const { status } = await put(body({ requesterRoleId: '' }));
+
+    expect(status).toBe(200);
+    expect(written('discord.requester_role_id')).toMatchObject({ value: '' });
+  });
+
+  it('a body without the requester role ID is refused (400)', async () => {
+    const { requesterRoleId: _omitted, ...rest } = body();
+    expect((await put(rest)).status).toBe(400);
+    expect(setManyAtomic).not.toHaveBeenCalled();
   });
 
   it('refuses a body that is not JSON (400)', async () => {

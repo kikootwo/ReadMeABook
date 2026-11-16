@@ -95,6 +95,7 @@ describe('Discord settings tab', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable the Discord bot' }));
     fireEvent.change(screen.getByLabelText('Request channel ID'), { target: { value: '444444444444444444' } });
+    fireEvent.change(screen.getByLabelText('Requester role ID'), { target: { value: ' 555555555555555555 ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled());
@@ -106,6 +107,7 @@ describe('Discord settings tab', () => {
       requestChannelId: '444444444444444444',
       adminRoleId: '',
       adminNotifyChannelId: '',
+      requesterRoleId: '555555555555555555',
       clearBotToken: false,
     });
   });
@@ -199,5 +201,44 @@ describe('Discord settings tab', () => {
 
     expect(screen.getByText('Discord IDs are 15 to 20 digits')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the requester role field: loads the saved ID, explains an empty one, checks the format', async () => {
+    await renderTab(savedSettings({ requesterRoleId: '555555555555555555' }));
+
+    const field = screen.getByLabelText('Requester role ID') as HTMLInputElement;
+    expect(field.value).toBe('555555555555555555');
+    expect(screen.getByText(/Empty means every linked user may request; RMAB admins always can/)).toBeTruthy();
+
+    fireEvent.change(field, { target: { value: 'requesters' } });
+    expect(screen.getByText('Discord IDs are 15 to 20 digits')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the requester role field is empty when the saved settings have none', async () => {
+    await renderTab(savedSettings());
+    expect((screen.getByLabelText('Requester role ID') as HTMLInputElement).value).toBe('');
+  });
+
+  it('Test sends the requester role ID and shows its name', async () => {
+    await renderTab(savedSettings({ requesterRoleId: '555555555555555555' }));
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/settings/test-discord') {
+        return response({
+          bot: { id: '111111111111111111', username: 'RMAB Bot' },
+          inviteUrl: 'https://discord.com/oauth2/authorize?client_id=111111111111111111&permissions=84992',
+          guilds: [{ id: GUILD, name: 'Book Club' }],
+          guild: { id: GUILD, name: 'Book Club' },
+          names: { requesterRoleId: 'Readers' },
+          warnings: [],
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    await waitFor(() => expect(screen.getByText('Found: Readers')).toBeTruthy());
+    expect(JSON.parse(testCalls()[0][1].body as string)).toMatchObject({ requesterRoleId: '555555555555555555' });
   });
 });
