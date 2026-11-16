@@ -154,7 +154,7 @@ describe('/request: pressing Request or Cancel', () => {
     }
   });
 
-  it('two Request presses at once make one request; the second gets a fixed reply', async () => {
+  it('two Request presses at once make one request; the second gets a fixed reply; later presses go through', async () => {
     // The creator stays busy until released, as a slow database would keep it
     const pending: Array<(value: unknown) => void> = [];
     creator.createRequestForUser.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
@@ -172,13 +172,13 @@ describe('/request: pressing Request or Cancel', () => {
     expect(lastText(first)).toBe('Requested. The search has started.');
     expect(second.update).not.toHaveBeenCalled();
     expect(second.reply).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ content: h.TEXT.alreadyWorking, flags: 64 }));
-  });
 
-  it('once the first press is done (or failed), the book can be requested again', async () => {
-    const { confirmId } = await toConfirm('audiobook');
+    // Once the first press is done (or failed), the book can be requested again
+    creator.createRequestForUser.mockReset();
     creator.createRequestForUser.mockRejectedValueOnce(new Error('database unavailable'));
+    creator.createRequestForUser.mockResolvedValueOnce({ success: false, reason: 'duplicate', message: 'x' });
     expect(lastText(await press(confirmId))).toBe(h.TEXT.generic);
-    expect(lastText(await press(confirmId))).toBe('Requested. The search has started.');
+    expect(lastText(await press(confirmId))).toBe('You have already requested this audiobook.');
     expect(creator.createRequestForUser).toHaveBeenCalledTimes(2);
   });
 });
