@@ -215,7 +215,10 @@ describe('Discord bot lifecycle', () => {
   it('listens for no `invalidated` event (discord.js 14.28.1 never emits it)', async () => {
     const { service } = await load();
     await service.start();
-    expect(discord.state.clients[0].listeners.has('invalidated')).toBe(false);
+    // The enum member exists in discord.js (and the fake); nothing emits it, so nothing listens
+    expect([...discord.state.clients[0].listeners.keys()].sort()).toEqual(
+      ['clientReady', 'error', 'interactionCreate', 'shardDisconnect', 'shardError']
+    );
   });
 
   it.each([

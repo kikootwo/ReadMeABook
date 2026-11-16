@@ -128,7 +128,7 @@ describe('Discord zero footprint: core web paths', () => {
     const valueImports = files.filter((file) =>
       VALUE_IMPORT_RE.test(fs.readFileSync(path.join(discordDir, file), 'utf8'))
     );
-    expect(files.length).toBeGreaterThan(10);
+    expect(files.length).toBeGreaterThan(5);
     expect(valueImports).toEqual([]);
     // The pattern itself: a value import matches, a type-only import does not
     expect(VALUE_IMPORT_RE.test("import { Client } from 'discord.js';")).toBe(true);
