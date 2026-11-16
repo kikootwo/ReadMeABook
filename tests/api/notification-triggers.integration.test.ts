@@ -296,7 +296,8 @@ describe('Notification Triggers - Integration Tests', () => {
         updatedAt: new Date(),
       });
 
-      prismaMock.request.update.mockResolvedValue({
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // the approval claim
+      prismaMock.request.findUnique.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',

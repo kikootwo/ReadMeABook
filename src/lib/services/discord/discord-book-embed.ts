@@ -30,7 +30,7 @@ export interface SelectOption {
 const TYPE_LABEL: Record<RequestMediaType, string> = { audiobook: 'Audiobook', ebook: 'Ebook' };
 
 /** Only an https image URL is used as the cover; anything else is left out. */
-function coverUrl(url: string | undefined): string | undefined {
+export function coverUrl(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
   try {
     const parsed = new URL(url);

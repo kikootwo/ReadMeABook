@@ -9,7 +9,7 @@
 
 /** discord-api-types v10 values used by the handlers. */
 export const ComponentType = { ActionRow: 1, Button: 2, StringSelect: 3, TextInput: 4 } as const;
-export const ButtonStyle = { Primary: 1, Secondary: 2 } as const;
+export const ButtonStyle = { Primary: 1, Secondary: 2, Success: 3, Danger: 4 } as const;
 export const TextInputStyle = { Short: 1 } as const;
 export const MessageFlags = { Ephemeral: 64 } as const;
 export const ApplicationCommandType = { ChatInput: 1 } as const;

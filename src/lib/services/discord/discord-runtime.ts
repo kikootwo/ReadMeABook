@@ -44,6 +44,31 @@ export function syncDiscord(label: string, work: (bot: DiscordBotService) => Pro
   });
 }
 
+/** A request was approved or denied (web or Discord): mark its approval message decided, refresh its cards, DM the requester. */
+export function syncDiscordApprovalDecision(requestId: string, decision: 'approved' | 'denied'): void {
+  syncDiscord('approval decision', async (bot) => {
+    const { syncApprovalDecision } = await import('./cards/discord-decision-sync');
+    await syncApprovalDecision(bot, requestId, decision);
+  });
+}
+
+/** A request's status may have changed: edit its Discord cards (only requests made in Discord have any). */
+export function refreshDiscordRequestCards(requestId: string | null | undefined): void {
+  if (!requestId) return;
+  syncDiscord('request cards', async (bot) => {
+    const { refreshRequestCards } = await import('./cards/discord-cards');
+    await refreshRequestCards(bot, requestId);
+  });
+}
+
+/** A request was made in Discord: post its card(s) and, while it needs approval, the approval message. */
+export function announceDiscordRequest(requestId: string): void {
+  syncDiscord('request announcement', async (bot) => {
+    const { announceRequest } = await import('./cards/discord-cards');
+    await announceRequest(bot, requestId);
+  });
+}
+
 /**
  * Startup: start the bot in the background (it checks its own settings and loads
  * discord.js only when configured). Never awaited by the caller.

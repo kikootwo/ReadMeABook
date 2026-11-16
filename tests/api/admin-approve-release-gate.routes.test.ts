@@ -54,14 +54,20 @@ function storedRequest(overrides: Record<string, unknown> = {}) {
 
 async function approve(row: ReturnType<typeof storedRequest>) {
   prismaMock.request.findFirst.mockResolvedValue(row);
-  prismaMock.request.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...row, ...data }));
+  // The approval claim (one conditional write), then the row read back for the response
+  let written: Record<string, unknown> = {};
+  prismaMock.request.updateMany.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
+    written = data;
+    return { count: 1 };
+  });
+  prismaMock.request.findUnique.mockImplementation(async () => ({ ...row, ...written }));
   const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
   const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
   const response = await POST(request as unknown as Parameters<typeof POST>[0], { params: Promise.resolve({ id: row.id }) });
   return { status: response.status, body: await response.json() };
 }
 
-const statusWritten = () => prismaMock.request.update.mock.calls[0]?.[0]?.data?.status;
+const statusWritten = () => prismaMock.request.updateMany.mock.calls[0]?.[0]?.data?.status;
 
 describe('POST /api/admin/requests/[id]/approve: release-date gate (#556)', () => {
   beforeEach(() => {
@@ -85,7 +91,7 @@ describe('POST /api/admin/requests/[id]/approve: release-date gate (#556)', () =
     expect(body.awaitingRelease).toBe(true);
     expect(body.message).toBe('Request approved; it will be searched on its release date (May 5, 2099)');
     expect(body.request.status).toBe('awaiting_release');
-    expect(prismaMock.request.update.mock.calls[0][0].data.approvalBypassedBy).toBeNull();
+    expect(prismaMock.request.updateMany.mock.calls[0][0].data.approvalBypassedBy).toBeNull();
     expect(configGet).toHaveBeenCalledWith('indexer.skip_unreleased');
   });
 
@@ -139,7 +145,7 @@ describe('POST /api/admin/requests/[id]/approve: release-date gate (#556)', () =
     guardTorrentSelection.mockResolvedValue({ ok: false, retryable: false, error: 'link expired' });
     const { body } = await approve(storedRequest({ selectedTorrent: PICK }));
 
-    const data = prismaMock.request.update.mock.calls[0][0].data;
+    const data = prismaMock.request.updateMany.mock.calls[0][0].data;
     expect(data.status).toBe('awaiting_release');
     expect(data).toHaveProperty('selectedTorrent');
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();

@@ -80,3 +80,44 @@ export function decodeRequestCustomId(id: unknown): RequestCustomId | null {
   const asin = parts[2];
   return isAsin(asin) ? { step, type, asin, nonce } : null;
 }
+
+/*
+ * Approve / Deny buttons on an approval message: `rmab:apr:<a|d>:<request id>:<nonce>`. The
+ * request ID says which request the button is for, never that the clicker may decide it: the
+ * handler resolves the clicking user and requires an RMAB admin on every click.
+ */
+
+export type ApprovalAction = 'approve' | 'deny';
+
+export interface ApprovalCustomId {
+  action: ApprovalAction;
+  requestId: string;
+  nonce: string;
+}
+
+export const APPROVAL_CUSTOM_ID_PREFIX = 'rmab:apr:';
+
+const ACTION_CODES: Record<ApprovalAction, string> = { approve: 'a', deny: 'd' };
+/** Request IDs are UUIDs (Prisma `@default(uuid())`). */
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function isRequestId(value: unknown): value is string {
+  return typeof value === 'string' && REQUEST_ID_PATTERN.test(value);
+}
+
+export function encodeApprovalCustomId(action: ApprovalAction, requestId: string, nonce = newNonce()): string {
+  if (!isRequestId(requestId)) throw new Error('Invalid request ID');
+  if (!NONCE_PATTERN.test(nonce)) throw new Error('Invalid nonce');
+  return `${APPROVAL_CUSTOM_ID_PREFIX}${ACTION_CODES[action]}:${requestId}:${nonce}`;
+}
+
+/** Parses an Approve/Deny custom_id; null for anything not built by encodeApprovalCustomId. */
+export function decodeApprovalCustomId(id: unknown): ApprovalCustomId | null {
+  if (typeof id !== 'string' || !id.startsWith(APPROVAL_CUSTOM_ID_PREFIX) || id.length > CUSTOM_ID_MAX_LENGTH) return null;
+  const parts = id.slice(APPROVAL_CUSTOM_ID_PREFIX.length).split(':');
+  if (parts.length !== 3) return null;
+  const action = findKey(ACTION_CODES, parts[0]);
+  const [, requestId, nonce] = parts;
+  if (!action || !isRequestId(requestId) || !NONCE_PATTERN.test(nonce)) return null;
+  return { action, requestId, nonce };
+}

@@ -541,7 +541,8 @@ describe('Request Approval Workflow', () => {
         user: { id: 'user-1', plexUsername: 'testuser' },
       } as any);
 
-      prismaMock.request.update.mockResolvedValue({
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // the approval claim
+      prismaMock.request.findUnique.mockResolvedValue({
         id: 'req-1',
         status: 'pending',
         userId: 'user-1',
@@ -556,18 +557,9 @@ describe('Request Approval Workflow', () => {
       expect(response.status).toBe(200);
       expect(payload.success).toBe(true);
       expect(payload.message).toContain('approved');
-      expect(prismaMock.request.update).toHaveBeenCalledWith({
-        where: { id: 'req-1' },
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null },
         data: { status: 'pending', approvalBypassedBy: null },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-        },
       });
       expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith('req-1', {
         id: 'ab-1',
@@ -591,7 +583,8 @@ describe('Request Approval Workflow', () => {
         user: { id: 'user-1', plexUsername: 'testuser' },
       } as any);
 
-      prismaMock.request.update.mockResolvedValue({
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // the approval claim
+      prismaMock.request.findUnique.mockResolvedValue({
         id: 'req-2',
         status: 'denied',
         userId: 'user-1',
@@ -606,18 +599,9 @@ describe('Request Approval Workflow', () => {
       expect(response.status).toBe(200);
       expect(payload.success).toBe(true);
       expect(payload.message).toContain('denied');
-      expect(prismaMock.request.update).toHaveBeenCalledWith({
-        where: { id: 'req-2' },
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: { id: 'req-2', status: 'awaiting_approval', deletedAt: null },
         data: { status: 'denied' },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-        },
       });
       expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     });
@@ -691,6 +675,7 @@ describe('Request Approval Workflow', () => {
         body: { error: 'NotFound', message: 'Request not found' },
       });
       expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
       expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
       expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
       expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();

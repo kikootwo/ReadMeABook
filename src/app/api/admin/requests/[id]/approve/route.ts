@@ -4,27 +4,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Prisma } from '@/generated/prisma/client';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
-import { guardEbookSelection, guardTorrentSelection, rejectedSelectionResponse, selectionFailureResponse } from '@/lib/services/download-selection-guard';
-import { prisma } from '@/lib/db';
-import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { rejectedSelectionResponse, selectionFailureResponse } from '@/lib/services/download-selection-guard';
+import { approvalMessage, decideRequestApproval } from '@/lib/services/request-approval.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
-import { hidePlacementRecord } from '@/lib/services/request-detail-query';
-import { shouldWaitForRelease } from '@/lib/services/release-gate';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
-
-/** Release day as shown on the request card ("May 5, 2027"; UTC day, like the gate) */
-function formatReleaseDay(releaseDate: Date | null): string {
-  return releaseDate
-    ? releaseDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-    : 'unknown';
-}
 
 const ApprovalActionSchema = z.object({
   action: z.enum(['approve', 'deny']),
@@ -33,7 +21,7 @@ const ApprovalActionSchema = z.object({
 
 /**
  * POST /api/admin/requests/[id]/approve
- * Approve or deny a request in 'awaiting_approval' status
+ * Approve or deny a request in 'awaiting_approval' status (shared approval service)
  */
 export async function POST(
   request: NextRequest,
@@ -57,296 +45,52 @@ export async function POST(
         // Validate action and optional admin-selected torrent
         const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
 
-        // Fetch the request; a deleted request answers 404
-        const existingRequest = await prisma.request.findFirst({
-          where: { id, deletedAt: null },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
+        const result = await decideRequestApproval({
+          requestId: id,
+          action,
+          adminId: req.user.sub,
+          adminSelectedTorrent,
+          via: 'web',
         });
 
-        if (!existingRequest) {
-          return NextResponse.json(
-            { error: 'NotFound', message: 'Request not found' },
-            { status: 404 }
-          );
-        }
-
-        // Validate request is in 'awaiting_approval' status
-        if (existingRequest.status !== 'awaiting_approval') {
-          return NextResponse.json(
-            {
-              error: 'InvalidStatus',
-              message: `Request is not awaiting approval (current status: ${existingRequest.status})`,
-              currentStatus: existingRequest.status,
-            },
-            { status: 400 }
-          );
-        }
-
-        // Update request based on action
-        if (action === 'approve') {
-          const jobQueue = getJobQueueService();
-          const isEbookRequest = existingRequest.type === 'ebook';
-
-          // Use admin-provided torrent (from admin interactive search) or fall back to user's pre-selected torrent
-          const effectiveTorrent = adminSelectedTorrent || existingRequest.selectedTorrent;
-
-          const torrentSource = adminSelectedTorrent ? 'admin' : 'user';
-          let selectedTorrent: any = null;
-          let droppedPickReason: string | null = null;
-
-          if (effectiveTorrent) {
-            // Same rules for admin picks and stored user picks (older rows were never validated)
-            const candidate = effectiveTorrent as any;
-            const selectionCheck = isEbookRequest && candidate?.source
-              ? await guardEbookSelection(candidate)
-              : await guardTorrentSelection(candidate);
-            if (selectionCheck.ok) {
-              selectedTorrent = selectionCheck.value;
-            } else if (selectionCheck.retryable) {
-              // Source temporarily unreachable: keep the pick (status unchanged) so approval can be retried
-              return selectionFailureResponse(selectionCheck);
-            } else if (adminSelectedTorrent) {
-              return rejectedSelectionResponse(
-                `The admin-selected release cannot be used: ${selectionCheck.error}. Pick another release with interactive search.`
+        if (!result.ok) {
+          switch (result.code) {
+            case 'not_found':
+              return NextResponse.json(
+                { error: 'NotFound', message: 'Request not found' },
+                { status: 404 }
               );
-            } else {
-              // Stored user pick is unusable (or has no links any more): approve with an automatic search instead
-              logger.warn(`Stored release pick for request ${id} cannot be used; falling back to automatic search`, {
-                requestId: id,
-                reason: selectionCheck.error,
-              });
-              droppedPickReason = selectionCheck.error;
-            }
-          }
-
-          if (selectedTorrent) {
-
-            // Download the selected torrent directly
-            logger.info(`Request ${id} has ${torrentSource}-selected torrent, starting download`, {
-              requestId: id,
-              userId: existingRequest.userId,
-              adminId: req.user.sub,
-              type: existingRequest.type,
-              source: selectedTorrent.source,
-            });
-
-            // Handle ebook requests with Anna's Archive source differently
-            if (isEbookRequest && selectedTorrent.source === 'annas_archive') {
-              // Create download history record for Anna's Archive
-              const downloadHistory = await prisma.downloadHistory.create({
-                data: {
-                  requestId: existingRequest.id,
-                  indexerName: "Anna's Archive",
-                  torrentName: `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
-                  torrentSizeBytes: null,
-                  qualityScore: selectedTorrent.score || 100,
-                  selected: true,
-                  downloadClient: 'direct',
-                  downloadStatus: 'queued',
-                },
-              });
-
-              // Store all download URLs for retry purposes
-              if (selectedTorrent.downloadUrls && selectedTorrent.downloadUrls.length > 0) {
-                await prisma.downloadHistory.update({
-                  where: { id: downloadHistory.id },
-                  data: {
-                    torrentUrl: JSON.stringify(selectedTorrent.downloadUrls),
-                  },
-                });
-              }
-
-              // Trigger direct download job for Anna's Archive
-              await jobQueue.addStartDirectDownloadJob(
-                existingRequest.id,
-                downloadHistory.id,
-                selectedTorrent.downloadUrl,
-                buildEbookDownloadName(existingRequest.audiobook.title, existingRequest.audiobook.author, selectedTorrent.format || 'epub'),
-                undefined
-              );
-            } else {
-              // Trigger download job with pre-selected torrent (audiobook or indexer ebook)
-              await jobQueue.addDownloadJob(
-                existingRequest.id,
+            case 'invalid_status':
+              return NextResponse.json(
                 {
-                  id: existingRequest.audiobook.id,
-                  title: existingRequest.audiobook.title,
-                  author: existingRequest.audiobook.author,
+                  error: 'InvalidStatus',
+                  message: `Request is not awaiting approval (current status: ${result.currentStatus})`,
+                  currentStatus: result.currentStatus,
                 },
-                selectedTorrent
+                { status: 400 }
               );
-            }
-
-            // Update status to 'downloading' and clear selectedTorrent
-            const updatedRequest = await prisma.request.update({
-              where: { id },
-              data: {
-                status: 'downloading',
-                selectedTorrent: null as any, // Clear after use
-                approvalBypassedBy: null, // approved now: clears an earlier record (#232)
-              },
-              include: {
-                audiobook: true,
-                user: {
-                  select: {
-                    id: true,
-                    plexUsername: true,
-                  },
-                },
-              },
-            });
-
-            // Send notification for manual approval
-            await jobQueue.addNotificationJob(
-              'request_approved',
-              updatedRequest.id,
-              isEbookRequest ? `${existingRequest.audiobook.title} (Ebook)` : existingRequest.audiobook.title,
-              existingRequest.audiobook.author,
-              existingRequest.user.plexUsername || 'Unknown User'
-            ).catch((error) => {
-              logger.error('Failed to queue notification', { error: errorForLog(error) });
-            });
-
-            logger.info(`Request ${id} approved by admin ${req.user.sub}, downloading ${torrentSource}-selected torrent`, {
-              requestId: id,
-              userId: updatedRequest.userId,
-              audiobookTitle: existingRequest.audiobook.title,
-              adminId: req.user.sub,
-              type: existingRequest.type,
-              torrentSource,
-            });
-
-            return NextResponse.json({
-              success: true,
-              message: adminSelectedTorrent
-                ? 'Request approved and download started with admin-selected torrent'
-                : 'Request approved and download started with pre-selected torrent',
-              request: hidePlacementRecord(updatedRequest),
-            });
-          } else {
-            // No pre-selected torrent: automatic search, unless the book is unreleased and the
-            // release gate says wait (same check as request creation; ebook requests never wait there)
-            const waitForRelease = !isEbookRequest && await shouldWaitForRelease(existingRequest.releaseDate);
-            logger.info(waitForRelease
-              ? `Request ${id} is unreleased; waiting for its release date before searching`
-              : `Request ${id} using automatic search`, {
-              requestId: id,
-              userId: existingRequest.userId,
-              adminId: req.user.sub,
-              type: existingRequest.type,
-              ...(waitForRelease ? { releaseDate: existingRequest.releaseDate?.toISOString() ?? null } : {}),
-            });
-
-            const updatedRequest = await prisma.request.update({
-              where: { id },
-              data: {
-                // awaiting_release: retry_missing_torrents starts the search on release day
-                status: waitForRelease ? 'awaiting_release' : 'pending',
-                approvalBypassedBy: null, // approved now: clears an earlier record (#232)
-                // Drop an unusable stored pick so it can't be approved again
-                ...(existingRequest.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
-              },
-              include: {
-                audiobook: true,
-                user: {
-                  select: {
-                    id: true,
-                    plexUsername: true,
-                  },
-                },
-              },
-            });
-
-            // Trigger appropriate search job based on request type (none while waiting for release)
-            if (waitForRelease) {
-              // Searched later by the daily retry job
-            } else if (isEbookRequest) {
-              await jobQueue.addSearchEbookJob(updatedRequest.id, {
-                id: updatedRequest.audiobook.id,
-                title: updatedRequest.audiobook.title,
-                author: updatedRequest.audiobook.author,
-                asin: updatedRequest.audiobook.audibleAsin || undefined,
-              });
-            } else {
-              await jobQueue.addSearchJob(updatedRequest.id, {
-                id: updatedRequest.audiobook.id,
-                title: updatedRequest.audiobook.title,
-                author: updatedRequest.audiobook.author,
-                asin: updatedRequest.audiobook.audibleAsin || undefined,
-              });
-            }
-
-            // Send notification for manual approval
-            await jobQueue.addNotificationJob(
-              'request_approved',
-              updatedRequest.id,
-              isEbookRequest ? `${updatedRequest.audiobook.title} (Ebook)` : updatedRequest.audiobook.title,
-              updatedRequest.audiobook.author,
-              updatedRequest.user.plexUsername || 'Unknown User'
-            ).catch((error) => {
-              logger.error('Failed to queue notification', { error: errorForLog(error) });
-            });
-
-            logger.info(`Request ${id} approved by admin ${req.user.sub}`, {
-              requestId: id,
-              userId: updatedRequest.userId,
-              audiobookTitle: updatedRequest.audiobook.title,
-              adminId: req.user.sub,
-              type: existingRequest.type,
-            });
-
-            const searchMessage = waitForRelease
-              ? `Request approved; it will be searched on its release date (${formatReleaseDay(existingRequest.releaseDate)})`
-              : isEbookRequest
-                ? 'Ebook request approved and ebook search job triggered'
-                : 'Request approved and search job triggered';
-            return NextResponse.json({
-              success: true,
-              message: droppedPickReason
-                ? `The user's selected release could not be used (${droppedPickReason}). ${searchMessage} instead.`
-                : searchMessage,
-              ...(waitForRelease ? { awaitingRelease: true } : {}),
-              ...(droppedPickReason ? { selectionDropped: droppedPickReason } : {}),
-              request: hidePlacementRecord(updatedRequest),
-            });
+            case 'source_unavailable':
+              return selectionFailureResponse({ error: result.error, retryable: true });
+            case 'pick_rejected':
+              return rejectedSelectionResponse(result.message);
           }
-        } else {
-          // Deny: Change status to 'denied'
-          const updatedRequest = await prisma.request.update({
-            where: { id },
-            data: { status: 'denied' },
-            include: {
-              audiobook: true,
-              user: {
-                select: {
-                  id: true,
-                  plexUsername: true,
-                },
-              },
-            },
-          });
+        }
 
-          logger.info(`Request ${id} denied by admin ${req.user.sub}`, {
-            requestId: id,
-            userId: updatedRequest.userId,
-            audiobookTitle: updatedRequest.audiobook.title,
-            adminId: req.user.sub,
-          });
-
+        if (result.action === 'deny') {
           return NextResponse.json({
             success: true,
             message: 'Request denied',
-            request: hidePlacementRecord(updatedRequest),
+            request: result.request,
           });
         }
+
+        return NextResponse.json({
+          success: true,
+          message: approvalMessage(result),
+          ...(result.status === 'awaiting_release' ? { awaitingRelease: true } : {}),
+          ...(result.droppedPickReason ? { selectionDropped: result.droppedPickReason } : {}),
+          request: result.request,
+        });
       } catch (error) {
         logger.error('Failed to process approval action', {
           error: errorForLog(error)
