@@ -35,7 +35,7 @@ export interface ApprovalInput {
   adminId: string;
   /** Web only: a release the admin picked in interactive search. */
   adminSelectedTorrent?: unknown;
-  via: 'web' | 'discord';
+  via: 'web' | 'discord' | 'api_token';
 }
 
 export type ApprovalResult =

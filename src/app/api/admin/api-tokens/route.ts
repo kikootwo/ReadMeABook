@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { getRegistrationRefusal } from '@/lib/services/auth/local-account-status';
+import { checkApprovalTokenCreate, isTokenApprovalEnabled } from '@/lib/services/api-token-approval';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
@@ -22,6 +23,7 @@ const CreateTokenSchema = z.object({
   expiresAt: z.string().datetime().nullable().optional(),
   userId: z.string().guid().optional(), // Admin can specify which user the token acts as
   role: z.enum(['admin', 'user']).optional(), // Accepted for compatibility, but cannot differ from target user role
+  canApproveRequests: z.boolean().optional(), // Opt-in: only on the admin's own token (see api-token-approval.ts)
 });
 
 /**
@@ -56,9 +58,13 @@ export async function GET(request: NextRequest) {
           lastUsedAt: t.lastUsedAt,
           expiresAt: t.expiresAt,
           createdAt: t.createdAt,
+          canApproveRequests: t.canApproveRequests === true,
         }));
 
-        return NextResponse.json({ tokens: sanitized });
+        // The create form offers "Can approve requests" (own token only) while the setting is on
+        const approvalTokensAvailable = await isTokenApprovalEnabled().catch(() => false);
+
+        return NextResponse.json({ tokens: sanitized, approvalTokensAvailable });
       } catch (error) {
         logger.error('Failed to list API tokens', { error: errorForLog(error) });
         return NextResponse.json({ error: 'Failed to list API tokens' }, { status: 500 });
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
         const bodyResult = await readJsonBody(req);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { name, expiresAt, userId, role } = CreateTokenSchema.parse(body);
+        const { name, expiresAt, userId, role, canApproveRequests } = CreateTokenSchema.parse(body);
 
         // Determine target user (defaults to the admin themselves)
         const targetUserId = userId || req.user!.id;
@@ -113,6 +119,22 @@ export async function POST(request: NextRequest) {
             { error: 'Cannot create a token for an account that is not approved' },
             { status: 403 }
           );
+        }
+
+        let storedExpiry = expiresAt ? new Date(expiresAt) : null;
+        if (canApproveRequests === true) {
+          const rule = await checkApprovalTokenCreate({
+            callerId: req.user!.id,
+            callerRole: req.user!.id === targetUser.id ? targetUser.role : req.user!.role,
+            targetUserId: targetUser.id,
+            expiresAt,
+            nowMs: Date.now(),
+          });
+          if (!rule.ok) {
+            logger.warn('Approval token create refused', { reason: rule.reason, adminId: req.user!.id, targetUserId: targetUser.id });
+            return NextResponse.json({ error: rule.error }, { status: rule.status });
+          }
+          storedExpiry = rule.expiresAt;
         }
 
         // Enforce per-user token cap (count only active, non-expired tokens)
@@ -164,7 +186,8 @@ export async function POST(request: NextRequest) {
             role: tokenRole,
             createdById: req.user!.id,
             userId: targetUserId,
-            expiresAt: expiresAt ? new Date(expiresAt) : null,
+            expiresAt: storedExpiry,
+            canApproveRequests: canApproveRequests === true,
           },
         });
 
@@ -174,6 +197,8 @@ export async function POST(request: NextRequest) {
           createdBy: req.user!.username,
           targetUser: targetUser.plexUsername,
           role: tokenRole,
+          canApproveRequests: canApproveRequests === true,
+          expiresAt: storedExpiry?.toISOString() ?? null,
         });
 
         return NextResponse.json({
@@ -184,6 +209,7 @@ export async function POST(request: NextRequest) {
             role: apiToken.role,
             expiresAt: apiToken.expiresAt,
             createdAt: apiToken.createdAt,
+            canApproveRequests: apiToken.canApproveRequests === true,
           },
           // Full token is returned ONLY on creation
           fullToken,

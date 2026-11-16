@@ -4,21 +4,19 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
 import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
-import {
-  getRegistrationRefusal,
-  getSessionRefusal,
-  type SessionRefusal,
-} from '../services/auth/local-account-status';
+import { getSessionRefusal, type SessionRefusal } from '../services/auth/local-account-status';
+import { authenticateApiToken, checkTokenEndpointAccess, type ApiTokenContext } from './api-token-auth';
 
 const logger = RMABLogger.create('Auth');
 
 export interface AuthenticatedRequest extends NextRequest {
   user?: TokenPayload & { id: string };
+  /** Set only for API token (rmab_) callers, never for sessions. */
+  apiToken?: ApiTokenContext;
 }
 
 /**
@@ -37,71 +35,6 @@ function extractToken(request: NextRequest): string | null {
   }
 
   return parts[1];
-}
-
-/**
- * Authenticate via static API token (rmab_ prefix).
- * Returns a synthetic TokenPayload if valid, null otherwise.
- * Updates lastUsedAt asynchronously.
- */
-async function authenticateApiToken(token: string): Promise<TokenPayload | null> {
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-
-  const apiToken = await prisma.apiToken.findUnique({
-    where: { tokenHash },
-    include: {
-      tokenUser: {
-        select: {
-          id: true,
-          plexId: true,
-          plexUsername: true,
-          role: true,
-          deletedAt: true,
-          registrationStatus: true,
-        },
-      },
-    },
-  });
-
-  if (!apiToken) return null;
-
-  // Check expiration
-  if (apiToken.expiresAt && apiToken.expiresAt < new Date()) {
-    logger.warn('API token expired', { tokenPrefix: apiToken.tokenPrefix });
-    return null;
-  }
-
-  // Reject tokens for missing, soft-deleted, pending-approval or rejected users
-  const user = apiToken.tokenUser;
-  const refusal = user ? getRegistrationRefusal(user.registrationStatus) : null;
-  if (!user || user.deletedAt || refusal) {
-    logger.warn('API token used by a missing, deleted or unapproved user', {
-      tokenPrefix: apiToken.tokenPrefix,
-      userId: user?.id,
-      reason: !user ? 'missing' : user.deletedAt ? 'deleted' : refusal,
-    });
-    return null;
-  }
-
-  // Update lastUsedAt (fire-and-forget)
-  prisma.apiToken.update({
-    where: { id: apiToken.id },
-    data: { lastUsedAt: new Date() },
-  }).catch((err) => {
-    logger.debug('Failed to update API token lastUsedAt', {
-      error: err instanceof Error ? err.message : String(err),
-      tokenId: apiToken.id,
-    });
-  });
-
-  // Use the token's target user (userId), not the creator (createdById).
-  // The token's role is an upper bound: it never exceeds the owner's current role.
-  return {
-    sub: user.id,
-    plexId: user.plexId,
-    username: user.plexUsername,
-    role: apiToken.role === 'admin' && user.role === 'admin' ? 'admin' : 'user',
-  };
 }
 
 type AuthenticatedUser = NonNullable<AuthenticatedRequest['user']>;
@@ -159,8 +92,8 @@ export async function requireAuth(
 
   // Check if this is a static API token
   if (token.startsWith(API_TOKEN_PREFIX)) {
-    const apiUser = await authenticateApiToken(token);
-    if (!apiUser) {
+    const auth = await authenticateApiToken(token);
+    if (!auth) {
       logger.error('API token authentication failed');
       return NextResponse.json(
         {
@@ -171,25 +104,15 @@ export async function requireAuth(
       );
     }
 
-    // Enforce endpoint allowlist for API token auth
-    const pathname = request.nextUrl.pathname;
-    const method = request.method;
-    if (!isEndpointAllowed(method, pathname)) {
-      logger.warn('API token used on restricted endpoint', {
-        method,
-        path: pathname,
-      });
-      return NextResponse.json(
-        {
-          error: 'Forbidden',
-          message: 'This endpoint is not available via API token authentication',
-        },
-        { status: 403 }
-      );
+    // Endpoint allowlist, then every permission the matching entries name
+    const access = await checkTokenEndpointAccess(request.method, request.nextUrl.pathname, auth);
+    if (!access.ok) {
+      return NextResponse.json({ error: access.error, message: access.message }, { status: access.status });
     }
 
     const authenticatedRequest = request as AuthenticatedRequest;
-    authenticatedRequest.user = { ...apiUser, id: apiUser.sub };
+    authenticatedRequest.user = { ...auth.user, id: auth.user.sub };
+    authenticatedRequest.apiToken = auth.token;
     return handler(authenticatedRequest);
   }
 
@@ -229,9 +152,12 @@ export async function getOptionalAuthUser(request: NextRequest): Promise<Authent
   if (!token) return null;
 
   if (token.startsWith(API_TOKEN_PREFIX)) {
+    // The allowlist first (no lookup for an unlisted path), then the permissions after the lookup
     if (!isEndpointAllowed(request.method, request.nextUrl.pathname)) return null;
-    const apiUser = await authenticateApiToken(token);
-    return apiUser ? { ...apiUser, id: apiUser.sub } : null;
+    const auth = await authenticateApiToken(token);
+    if (!auth) return null;
+    const access = await checkTokenEndpointAccess(request.method, request.nextUrl.pathname, auth);
+    return access.ok ? { ...auth.user, id: auth.user.sub } : null;
   }
 
   const session = await checkAccessToken(token);

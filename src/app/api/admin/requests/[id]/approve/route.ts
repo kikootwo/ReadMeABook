@@ -7,6 +7,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { rejectedSelectionResponse, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 import { approvalMessage, decideRequestApproval } from '@/lib/services/request-approval.service';
+import {
+  approvalOutcome,
+  auditTokenApproval,
+  isTokenCaller,
+  tokenApprovalRefusal,
+  type TokenApprovalOutcome,
+} from '@/lib/services/api-token-approval';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
@@ -21,7 +28,9 @@ const ApprovalActionSchema = z.object({
 
 /**
  * POST /api/admin/requests/[id]/approve
- * Approve or deny a request in 'awaiting_approval' status (shared approval service)
+ * Approve or deny a request in 'awaiting_approval' status (shared approval service).
+ * An API token caller (opt-in, see api-token-approval.ts) may only approve, with no release in
+ * the body; each token decision or refusal writes one warn audit line.
  */
 export async function POST(
   request: NextRequest,
@@ -29,6 +38,11 @@ export async function POST(
 ) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
+      const tokenCaller = isTokenCaller(req);
+      let requestId: string | undefined;
+      const audit = (outcome: TokenApprovalOutcome, status: string | null) => {
+        if (tokenCaller) auditTokenApproval({ requestId, outcome, status, token: req.apiToken, adminId: req.user?.sub });
+      };
       try {
         if (!req.user) {
           return NextResponse.json(
@@ -38,20 +52,32 @@ export async function POST(
         }
 
         const { id } = await params;
+        requestId = id;
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
 
         // Validate action and optional admin-selected torrent
-        const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
+        const { action, selectedTorrent } = ApprovalActionSchema.parse(body);
+
+        // Token callers: approve only, never a named release (checked before any row is read)
+        const refusal = tokenCaller ? tokenApprovalRefusal({ action, selectedTorrent }) : null;
+        if (refusal) {
+          audit(refusal.reason === 'deny' ? 'refused_deny' : 'refused_release', null);
+          return NextResponse.json({ error: refusal.error, message: refusal.message }, { status: refusal.status });
+        }
 
         const result = await decideRequestApproval({
           requestId: id,
           action,
           adminId: req.user.sub,
-          adminSelectedTorrent,
-          via: 'web',
+          adminSelectedTorrent: tokenCaller ? undefined : selectedTorrent,
+          via: tokenCaller ? 'api_token' : 'web',
         });
+        if (tokenCaller) {
+          const { outcome, status } = approvalOutcome(result);
+          audit(outcome, status);
+        }
 
         if (!result.ok) {
           switch (result.code) {
@@ -95,6 +121,7 @@ export async function POST(
         logger.error('Failed to process approval action', {
           error: errorForLog(error)
         });
+        audit(error instanceof z.ZodError ? 'invalid_body' : 'error', null);
 
         if (error instanceof z.ZodError) {
           return NextResponse.json(
