@@ -96,6 +96,26 @@ export const LIVE_ALWAYS_STATUSES = ['pending', 'searching', 'downloading', 'pro
 /** Live only while the request's updatedAt is within LIVE_RECENT_WINDOW_MS. */
 export const LIVE_RECENT_STATUSES = ['downloaded', 'awaiting_import'] as const;
 
+/** How a book card and the book details modal show a book (#298); labels come from StatusBadge. */
+export type BookDisplayState = 'available' | 'downloaded' | 'processing' | 'pending' | 'denied';
+
+const BOOK_PROCESSING_STATUSES = ['downloading', 'processing', 'awaiting_import'];
+const BOOK_PENDING_STATUSES = ['pending', 'awaiting_search', 'awaiting_release', 'searching', 'awaiting_approval'];
+
+/**
+ * The one status-to-display mapping of AudiobookCard and AudiobookDetailsModal. `downloaded`
+ * (files placed, waiting for the library scan) wins over isAvailable: My Requests passes
+ * isAvailable for a downloaded request (COMPLETED_STATUSES), and its badge says Downloaded.
+ */
+export function bookDisplayState(isAvailable: boolean, requestStatus: string | null | undefined): BookDisplayState | null {
+  if (requestStatus === 'downloaded') return 'downloaded';
+  if (isAvailable || requestStatus === 'completed') return 'available';
+  if (requestStatus && BOOK_PROCESSING_STATUSES.includes(requestStatus)) return 'processing';
+  if (requestStatus && BOOK_PENDING_STATUSES.includes(requestStatus)) return 'pending';
+  if (requestStatus === 'denied') return 'denied';
+  return null;
+}
+
 /** How long a downloaded/awaiting_import request stays live after its last update. */
 export const LIVE_RECENT_WINDOW_MS = 15 * 60 * 1000;
 

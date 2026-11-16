@@ -107,17 +107,33 @@ describe('AudiobookCard', () => {
     expect(screen.getByTestId('details-modal')).toHaveAttribute('data-open', 'true');
   });
 
-  it('shows processing state for downloaded requests', async () => {
+  it('shows processing state with a spinner for downloading requests', async () => {
     const { AudiobookCard } = await import('@/components/audiobooks/AudiobookCard');
 
-    render(
+    const { container } = render(
       <AudiobookCard
-        audiobook={{ ...baseAudiobook, isRequested: true, requestStatus: 'downloaded' }}
+        audiobook={{ ...baseAudiobook, isRequested: true, requestStatus: 'downloading' }}
       />
     );
 
     // Processing status is shown as a div overlay, not a button
     expect(screen.getByText('Processing')).toBeInTheDocument();
+    expect(container.querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('labels a downloaded request "Downloaded" like My Requests, not Processing (#298)', async () => {
+    const { AudiobookCard } = await import('@/components/audiobooks/AudiobookCard');
+
+    const { container } = render(
+      <AudiobookCard
+        audiobook={{ ...baseAudiobook, isRequested: true, isAvailable: false, requestStatus: 'downloaded' }}
+      />
+    );
+
+    expect(screen.getByText('Downloaded')).toBeInTheDocument();
+    expect(screen.queryByText('Processing')).toBeNull();
+    expect(container.querySelector('.animate-spin')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Request' })).toBeNull();
   });
 
   it('shows pending status for awaiting_approval requests', async () => {
