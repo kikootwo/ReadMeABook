@@ -228,7 +228,7 @@ user-sam=mailto://user:pass@mail.example.com?to=sam@example.com
 **Processor:** `src/lib/processors/send-notification.processor.ts`
 - Calls NotificationService.sendNotification()
 - Non-blocking error handling (logs but doesn't throw)
-- After the send (success or not): `refreshDiscordRequestCards(requestId)` through the Discord running-check facade, never awaited; bot off, no `requestId` or `request_approved` (the approval's decision sync updates the cards) → nothing loaded or run ([discord-bot.md](../integrations/discord-bot.md#request-cards))
+- After the send (success or not): `refreshDiscordRequestCards(requestId)` through the Discord running-check facade, never awaited; bot off or no `requestId` → nothing loaded or run ([discord-bot.md](../integrations/discord-bot.md#request-cards))
 
 **Queue Method:** `addNotificationJob(event, requestId, title, author, userName, message?, requestType?)`
 

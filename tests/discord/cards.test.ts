@@ -207,7 +207,7 @@ describe('refreshRequestCards', () => {
   });
 
   it('completed straight from awaiting approval (a library match): the approval message loses its buttons and shows the status', async () => {
-    seedRequest(db, { status: 'available', discordCards: CARDS });
+    seedRequest(db, { status: 'available', approvalBypassedBy: 'asin_match:awaiting_approval', discordCards: CARDS });
     const calls: Call[] = [];
     const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');
     await refreshRequestCards(fakeBot(calls), ID);

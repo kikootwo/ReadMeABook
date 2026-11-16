@@ -4,8 +4,9 @@
  *
  * A decision made while the cards are still being posted found no cards to update: the
  * announcement applies it (the approval message shows it, the requester gets the decision DM).
- * A decision made after is the decision sync's (decision-sync.test.ts). A card Discord reports
- * as deleted is dropped instead of being edited on every refresh.
+ * A refresh without the decision (the approval notification's) that runs before the decision
+ * sync reads the decision from the row, so the approval message never loses it. A card Discord
+ * reports as deleted is dropped instead of being edited on every refresh.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -102,6 +103,36 @@ describe('a decision made while the cards are being posted', () => {
       if (route === `/channels/${ADMIN_CHANNEL}/messages`) db.rows.get(ID)!.status = 'denied';
     } }), ID);
     expect(decisionDm(denied)?.body.content).toContain('was denied');
+  });
+});
+
+describe('a refresh without the decision runs before the decision sync', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFakeDb(db);
+  });
+
+  it.each([
+    ['approved', 'pending', 'Approved.', 'was approved'],
+    ['denied', 'denied', 'Denied.', 'was denied'],
+  ] as const)('%s: the approval message still shows the decision and the requester still gets the DM', async (decision, status, content, dm) => {
+    seedRequest(db, {
+      status,
+      discordCards: [
+        { kind: 'dm', channelId: DM_CHANNEL, messageId: '900000000000000001' },
+        { kind: 'approval', channelId: ADMIN_CHANNEL, messageId: '900000000000000002' },
+      ],
+    });
+    const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');
+    const { syncApprovalDecision } = await import('@/lib/services/discord/cards/discord-decision-sync');
+    const calls: Call[] = [];
+    const bot = fakeBot(calls);
+    await refreshRequestCards(bot, ID);
+    await syncApprovalDecision(bot, ID, decision);
+
+    const approvalEdits = calls.filter((c) => c.method === 'patch' && c.route.startsWith(`/channels/${ADMIN_CHANNEL}/`));
+    expect(approvalEdits.map((c) => c.body.content)).toEqual([content]);
+    expect(decisionDm(calls)?.body.content).toContain(dm);
   });
 });
 

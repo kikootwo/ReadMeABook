@@ -80,8 +80,10 @@ async function writeCards(requestId: string, next: (current: CardRef[]) => CardR
 
 /**
  * Edits every card of the request to its current status. An approval message that is no longer
- * waiting loses its buttons and is then dropped from the list (it is not edited again); so is
- * any card Discord reports as deleted. Returns the request as read (null when it does not exist).
+ * waiting loses its buttons, shows the decision (given, or read from the row when not: so a
+ * refresh that runs before the decision sync still shows it), and is then dropped from the list
+ * (it is not edited again); so is any card Discord reports as deleted. Returns the request as
+ * read (null when it does not exist).
  */
 export async function refreshRequestCards(
   bot: DiscordBotService,
@@ -95,11 +97,12 @@ export async function refreshRequestCards(
   if (refs.length === 0 || !client) return request;
 
   const messenger = CardMessenger.fromClient(client);
+  const waiting = request.status === 'awaiting_approval' && !request.deletedAt;
+  const shown = decision ?? (!waiting && refs.some((ref) => ref.kind === 'approval') ? await decisionAfter(request) : undefined);
   const done: CardRef[] = [];
   for (const ref of refs) {
-    const waiting = request.status === 'awaiting_approval' && !request.deletedAt;
     if (ref.kind === 'approval' && waiting) continue;
-    const body = ref.kind === 'approval' ? decidedApprovalBody(request, decision) : requestCardBody(request);
+    const body = ref.kind === 'approval' ? decidedApprovalBody(request, shown) : requestCardBody(request);
     const outcome = await editCard(messenger, ref, body, requestId);
     // A decided approval message is not edited again; a deleted card cannot be
     if (outcome === 'gone' || (ref.kind === 'approval' && outcome === 'edited')) done.push(ref);
@@ -112,8 +115,9 @@ export async function refreshRequestCards(
 }
 
 /**
- * The decision behind a move off awaiting_approval seen while announcing: denied, or approved
- * (an approval clears the approval record; a library match that completes the request sets it).
+ * The decision behind a move off awaiting_approval: denied, or approved (an approval clears the
+ * approval record; a library match that completes the request sets it). Removed or cancelled:
+ * none.
  */
 async function decisionAfter(now: CardRequest): Promise<'approved' | 'denied' | undefined> {
   if (now.deletedAt || now.status === 'cancelled' || now.status === 'awaiting_approval') return undefined;

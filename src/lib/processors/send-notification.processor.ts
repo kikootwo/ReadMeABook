@@ -49,7 +49,6 @@ export async function processSendNotification(payload: SendNotificationPayload):
     // Don't throw - non-blocking
   }
 
-  // The request's status changed: its Discord cards follow (bot running only; background, never awaited).
-  // An approval updates its own cards (with the decision), so request_approved is skipped here.
-  if (event !== 'request_approved') refreshDiscordRequestCards(requestId);
+  // The request's status changed: its Discord cards follow (bot running only; background, never awaited)
+  refreshDiscordRequestCards(requestId);
 }
