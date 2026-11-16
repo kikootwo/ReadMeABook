@@ -3,7 +3,7 @@
 **Status:** ✅ Implemented | One cancel path; stops and removes RMAB's own partial download (#228, credit #506)
 
 ## Overview
-Cancel (web UI, admin table, API token route, Discord Cancel button and `/status` menu) runs `cancelRequest()` / `cancelLoadedRequest()` in `src/lib/services/request-cancel.service.ts`. Callers authorize (owner, or effective role admin). Cancel never touches library files. Delete is a different action: [request-deletion.md](request-deletion.md).
+Cancel (web UI, admin table, API token route, Discord Cancel button and `/status` menu, both behind a confirmation as on the web) runs `cancelRequest()` / `cancelLoadedRequest()` in `src/lib/services/request-cancel.service.ts`. Callers authorize (owner, or effective role admin). Cancel never touches library files. Delete is a different action: [request-deletion.md](request-deletion.md).
 
 ## Cancel vs Delete
 | | Cancel | Delete (admin) |
