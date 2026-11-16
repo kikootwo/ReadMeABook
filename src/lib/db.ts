@@ -30,9 +30,12 @@ function getPooledDatabaseUrl(): string {
 }
 
 // One Prisma Client per process (survives dev HMR and duplicate module evaluation).
-// `audiobooks.library_asin` (#325a) is left out of every audiobook result unless a query selects it
-// (or sets `omit: { libraryAsin: false }`): responses show only the effective value, through
-// src/lib/services/library/library-display.ts.
+// Two audiobook columns are left out of every audiobook result unless a query selects them (or sets
+// `omit: { <column>: false }`):
+// - `library_asin` (#325a): responses show only the effective value, through
+//   src/lib/services/library/library-display.ts.
+// - `file_size_bytes` (#600): a BigInt, which NextResponse.json cannot serialize, so full-row reads
+//   must not carry it into a response. Readers select it and convert it (toJsonSafe).
 export const prisma = processSingleton('prisma', () =>
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
@@ -42,7 +45,7 @@ export const prisma = processSingleton('prisma', () =>
       },
     },
     omit: {
-      audiobook: { libraryAsin: true },
+      audiobook: { libraryAsin: true, fileSizeBytes: true },
     },
   })
 );

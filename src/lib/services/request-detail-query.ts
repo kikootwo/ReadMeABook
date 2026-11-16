@@ -34,7 +34,8 @@ const JOB_SUMMARY_SELECT = {
 const RECENT_JOBS = { orderBy: { createdAt: 'desc' }, take: 5, select: JOB_SUMMARY_SELECT } as const;
 
 export const ADMIN_REQUEST_DETAIL_INCLUDE = {
-  audiobook: { omit: { libraryAsin: false } }, // read by withRequestLibraryDisplay (#325a)
+  // libraryAsin: read by withRequestLibraryDisplay (#325a); fileSizeBytes: the route converts it (toJsonSafe)
+  audiobook: { omit: { libraryAsin: false, fileSizeBytes: false } },
   user: { select: { id: true, plexUsername: true } },
   downloadHistory: { ...LATEST_SELECTED_DOWNLOAD, omit: { magnetLink: true, torrentUrl: true, downloadPath: true } },
   jobs: RECENT_JOBS,
