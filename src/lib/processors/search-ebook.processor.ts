@@ -11,7 +11,7 @@ import { SearchEbookPayload, EbookSearchResult, getJobQueueService } from '../se
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
-import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { buildEbookDownloadName } from '../utils/ebook-download-name';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { EBOOK_MAX_SIZE_MB, rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
@@ -152,14 +152,12 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Unknown error during ebook search',
-        updatedAt: new Date(),
-      },
-    });
+    // Mark failed, unless a cancel, delete or another search's download landed meanwhile
+    await markRequestFailedUnlessStopped(
+      requestId,
+      error instanceof Error ? error.message : 'Unknown error during ebook search',
+      KEEP_PICK
+    );
 
     throw error;
   }
@@ -446,6 +444,11 @@ async function handleAnnasArchiveDownload(
   preferredFormat: string,
   logger: RMABLogger
 ): Promise<any> {
+  // A cancel, delete or another search's download during this search wins over this pick (#601)
+  if (!(await updateRequestUnlessStopped(requestId, {}, KEEP_PICK))) {
+    return keptResult(requestId, 'no download queued', logger);
+  }
+
   logger.info(`==================== EBOOK SEARCH RESULT ====================`);
   logger.info(`Source: Anna's Archive`);
   logger.info(`Title: "${audiobook.title}"`);
@@ -512,6 +515,11 @@ async function handleIndexerDownload(
   preferredFormat: string,
   logger: RMABLogger
 ): Promise<any> {
+  // A cancel, delete or another search's download during this search wins over this pick (#601)
+  if (!(await updateRequestUnlessStopped(requestId, {}, KEEP_PICK))) {
+    return keptResult(requestId, 'no download queued', logger);
+  }
+
   logger.info(`==================== EBOOK SEARCH RESULT ====================`);
   logger.info(`Source: Indexer (${result.indexer})`);
   logger.info(`Title: "${audiobook.title}"`);

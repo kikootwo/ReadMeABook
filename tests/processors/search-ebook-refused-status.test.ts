@@ -29,10 +29,13 @@ const ebookScraperMock = vi.hoisted(() => ({
   getSlowDownloadLinks: vi.fn(),
 }));
 
+const prowlarrMock = vi.hoisted(() => ({ searchWithVariations: vi.fn() }));
+
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configServiceMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
 vi.mock('@/lib/services/ebook-scraper', () => ebookScraperMock);
+vi.mock('@/lib/integrations/prowlarr.service', () => ({ getProwlarrService: async () => prowlarrMock }));
 
 type StatusFilter = { not?: string; notIn?: string[]; in?: string[] };
 
@@ -44,6 +47,25 @@ function matches(filter: StatusFilter): boolean {
   if (filter.notIn) return !filter.notIn.includes(row.status);
   if (filter.in) return filter.in.includes(row.status);
   return true;
+}
+
+/** One ebook release that passes the automatic ranking */
+const indexerRelease = {
+  indexer: 'Indexer', indexerId: 1, title: 'Jane Writer - Paced Book (epub)', size: 2 * 1024 * 1024, seeders: 5,
+  publishDate: new Date(), downloadUrl: 'magnet:?xt=urn:btih:paced', guid: 'guid-paced', format: 'EPUB',
+};
+
+function useIndexerSearch() {
+  configServiceMock.get.mockImplementation(async (key: string) => {
+    if (key === 'ebook_sidecar_preferred_format') return 'epub';
+    if (key === 'ebook_annas_archive_enabled') return 'false';
+    if (key === 'ebook_indexer_search_enabled') return 'true';
+    if (key === 'prowlarr_indexers') {
+      return JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10, ebookCategories: [7020] }]);
+    }
+    if (key === 'indexer_flag_config') return JSON.stringify([]);
+    return null;
+  });
 }
 
 async function runSearch() {
@@ -83,6 +105,8 @@ describe('processSearchEbook refuses a request past searching (#601)', () => {
     });
     ebookScraperMock.searchByAsin.mockResolvedValue('md5paced');
     ebookScraperMock.getSlowDownloadLinks.mockResolvedValue(['https://slow.example.com/paced']);
+    prismaMock.blockedRelease.findMany.mockResolvedValue([]);
+    prowlarrMock.searchWithVariations.mockResolvedValue([indexerRelease]);
   });
 
   it.each(['downloading', 'available'])('leaves a request now %s and its download alone', async (status) => {
@@ -124,5 +148,68 @@ describe('processSearchEbook refuses a request past searching (#601)', () => {
     expect(result).toEqual(expect.objectContaining({ success: true, requestId: 'req-1' }));
     expect(result.message).toContain('not re-queued');
     expect(prismaMock.request.update).not.toHaveBeenCalled();
+  });
+
+  it("queues no second download when a download starts during an Anna's Archive search", async () => {
+    ebookScraperMock.searchByAsin.mockImplementation(async () => {
+      row.status = 'downloading';
+      return 'md5paced';
+    });
+
+    const result = await runSearch();
+
+    expect(row.status).toBe('downloading');
+    expect(result).toEqual(expect.objectContaining({ success: true, requestId: 'req-1' }));
+    expect(result.message).toContain('no download queued');
+    expect(prismaMock.downloadHistory.create).not.toHaveBeenCalled();
+    expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+  });
+
+  it('queues no second download when a download starts during an indexer search', async () => {
+    useIndexerSearch();
+    prowlarrMock.searchWithVariations.mockImplementation(async () => {
+      row.status = 'downloading';
+      return [indexerRelease];
+    });
+
+    const result = await runSearch();
+
+    expect(row.status).toBe('downloading');
+    expect(result).toEqual(expect.objectContaining({ success: true, requestId: 'req-1' }));
+    expect(result.message).toContain('no download queued');
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    expect(prismaMock.downloadHistory.create).not.toHaveBeenCalled();
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+  });
+
+  it('still hands a pending request off to the indexer download once', async () => {
+    useIndexerSearch();
+
+    const result = await runSearch();
+
+    expect(result.success).toBe(true);
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
+    expect(row.status).toBe('searching');
+  });
+
+  it('does not write failed over a download that started before the search threw', async () => {
+    ebookScraperMock.searchByAsin.mockImplementation(async () => {
+      row.status = 'downloading';
+      throw new Error('Network error');
+    });
+
+    await expect(runSearch()).rejects.toThrow('Network error');
+
+    expect(row.status).toBe('downloading');
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+  });
+
+  it('still marks a searching request failed when the search throws', async () => {
+    ebookScraperMock.searchByAsin.mockRejectedValue(new Error('Network error'));
+
+    await expect(runSearch()).rejects.toThrow('Network error');
+
+    expect(row.status).toBe('failed');
   });
 });

@@ -303,8 +303,8 @@ describe('processSearchEbook', () => {
       jobId: 'job-7',
     })).rejects.toThrow('Network error');
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-7' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-7', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({
         status: 'failed',
         errorMessage: 'Network error',
