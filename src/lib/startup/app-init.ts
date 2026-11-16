@@ -3,8 +3,8 @@
  * Documentation: documentation/backend/services/scheduler.md
  *
  * Readiness check (database + Redis), then credential migration, the merge
- * progress reset (#216) and scheduler start. Runs at most once per process;
- * concurrent callers share one run.
+ * progress reset (#216) and scheduler start, then the Discord bot start in the
+ * background (not awaited). Runs at most once per process; concurrent callers share one run.
  */
 
 import Redis from 'ioredis';
@@ -15,6 +15,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { STARTUP_REDIS_PING_TIMEOUT_MS } from '@/lib/constants/startup';
 import { processSingleton } from '@/lib/utils/process-singleton';
 import { resetInterruptedMergeProgress } from '@/lib/utils/merge-progress';
+import { startDiscordBotInBackground } from '@/lib/services/discord/discord-runtime';
 
 const logger = RMABLogger.create('Startup');
 
@@ -107,6 +108,8 @@ async function runInit(): Promise<AppInitOutcome> {
     await getSchedulerService().start();
     state().done = true;
     logger.info('Application services initialized successfully');
+    // Not awaited: a slow or unreachable Discord never delays the init route's answer
+    startDiscordBotInBackground();
     return 'initialized';
   } catch (error) {
     logger.error('Failed to initialize services', { error: error instanceof Error ? error.message : String(error) });

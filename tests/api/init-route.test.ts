@@ -10,6 +10,7 @@ const dbReady = vi.hoisted(() => ({ value: true }));
 const redisState = vi.hoisted(() => ({ value: 'ready' as 'ready' | 'loading' | 'silent', errorListeners: 0 }));
 const schedulerStart = vi.hoisted(() => vi.fn());
 const credentialMigration = vi.hoisted(() => vi.fn());
+const discordBotStart = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db', () => ({
   prisma: {
@@ -49,6 +50,7 @@ vi.mock('@/lib/constants/startup', async (importOriginal) => ({
 }));
 vi.mock('@/lib/services/scheduler.service', () => ({ getSchedulerService: () => ({ start: schedulerStart }) }));
 vi.mock('@/lib/services/credential-migration.service', () => ({ runCredentialMigration: credentialMigration }));
+vi.mock('@/lib/services/discord/discord-bot.service', () => ({ getDiscordBotService: () => ({ start: discordBotStart }) }));
 
 const INIT_STATE = Symbol.for('rmab.singleton.startup-init-state');
 const SECRET = Symbol.for('rmab.singleton.startup-secret');
@@ -73,6 +75,8 @@ describe('/api/init', () => {
     redisState.value = 'ready';
     schedulerStart.mockResolvedValue(undefined);
     credentialMigration.mockResolvedValue(undefined);
+    discordBotStart.mockReset();
+    discordBotStart.mockResolvedValue(undefined);
   });
 
   it('has no GET handler (Next answers 405)', async () => {
@@ -164,5 +168,44 @@ describe('/api/init', () => {
 
     expect((await route.POST(post(secret))).status).toBe(200);
     expect(schedulerStart).toHaveBeenCalledTimes(2);
+  });
+
+  describe('Discord bot start (fire-and-forget)', () => {
+    it('returns 200 while the bot start never settles, and starts it once', async () => {
+      const { route, secret } = await load();
+      discordBotStart.mockReturnValue(new Promise(() => undefined));
+
+      const response = await route.POST(post(secret));
+
+      expect(response.status).toBe(200);
+      await vi.waitFor(() => expect(discordBotStart).toHaveBeenCalledTimes(1));
+      expect((await route.POST(post(secret))).status).toBe(200);
+      expect(discordBotStart).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start the bot when init fails', async () => {
+      const { route, secret } = await load();
+      schedulerStart.mockRejectedValueOnce(new Error('scheduler down'));
+
+      expect((await route.POST(post(secret))).status).toBe(500);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(discordBotStart).not.toHaveBeenCalled();
+    });
+
+    it('a failing bot start does not fail init', async () => {
+      const { route, secret } = await load();
+      discordBotStart.mockRejectedValue(new Error('gateway unreachable'));
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+
+      const response = await route.POST(post(secret));
+      await vi.waitFor(() => expect(discordBotStart).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      process.off('unhandledRejection', unhandled);
+
+      expect(response.status).toBe(200);
+      expect(unhandled).not.toHaveBeenCalled();
+    });
   });
 });
