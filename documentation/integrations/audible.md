@@ -172,12 +172,15 @@ Roughly 40% of requests return the **modern** layout, the rest **legacy**. The s
 | Description | `#series-about adbl-text-block` (read `<p>` only — `[slot="title"]` is a heading) | `.bc-expander-content` |
 | Cover | first row's `adbl-product-image img` | `.productListItem img` |
 | Tags, similar series | `adbl-chip.related-tag`, `adbl-product-carousel#SeriestoSeries` (identical in both) | same |
+| Position (#599) | `series-header` attribute ("1. Titel", "Book N", "Vol. N") | `h2` label, only when the title came from `h3`/`.bc-heading` and the h2 is label-shaped |
 
 **Critical:** carousel content describes *other* series. `outsideCarousel()` excludes `adbl-product-carousel` descendants from book-count, rating, cover and row selection — the "Listeners also enjoyed" carousel carries its own `slot="child-count"` values.
 
 Modern rows yield strictly richer data (`releaseDate` as `YYYY-MM-DD`, `language`, real narrator arrays, author ASIN). Legacy rows carry a `Release date: MM-DD-YY` label (.com) that is not parsed, so legacy books are undated (new-releases-only watches skip them until a dated layout is served). `parseSeriesBooks()` returns legacy results only when zero modern rows parse.
 
 `scrapeSeriesPage()` logs a warning when the header reports books but zero rows parse — that signals Audible changed its markup again.
+
+Positions are stored normalized in `seriesPart` ("1", "1.5"; ranges = unknown) via `normalizePosition()`; every row is stamped `seriesAsin` = the page's series ASIN. A debug line logs the layout and how many rows carry a label. Fallback `fillSeriesPositions()` (`audible-series-positions.ts`): only when local dedup would merge an unlabelled row, one catalog batch call (`asins=…&response_groups=series&num_results=N`, chunks of 50, one attempt, 3 s) reads the `series[]` entry matching the page's series ASIN. 24 h cache per region:ASIN; 15 min pause after 429/5xx/timeout; failure = positions unknown.
 
 ## Unified Matching (`audiobook-matcher.ts`)
 
@@ -205,6 +208,8 @@ Discovery views (search, author books, series detail) collapse duplicate Audible
 
 1. **Local pass — `deduplicateAndCollectGroups()`** (`src/lib/utils/deduplicate-audiobooks.ts`)
    - Stateless, in-memory. Keys books by normalized title + sorted narrator set + duration (±max(5%, 10 min) tolerance), with subtitle compatibility to keep distinct series entries separate.
+   - Volume veto (`src/lib/utils/series-volume.ts`, #599): a book joins a sub-group only if it is a different volume of no member. Levels: **heal** = same series (`seriesAsin`, else normalized series name) + both positions known + different; **dedup** = heal + "Band/Book/Vol./… N" at the end of subtitle vs subtitle or title vs title with the same non-empty series-name prefix; **collapse** = dedup + bare trailing title number. Unknown on either side = compatible (re-listings keep merging).
+   - `DedupGroup.persistable` = positions settled (every member has a position, or none is in a series). Unsettled merges are display-only.
    - Picks a canonical representative per group by `metadataScore()` (cover + rating + duration + description + narrator + release date + genres).
    - Emits `DedupGroup[]` describing every multi-ASIN collapse → handed to `persistDedupGroups()` for the works table.
 
@@ -212,18 +217,23 @@ Discovery views (search, author books, series detail) collapse duplicate Audible
    - Async DB lookup. Reads `work_asins` for every ASIN in the local-passed list and collapses any books sharing a `workId` to one representative (same `metadataScore()` ranking).
    - Catches duplicates the local pass misses: source-metadata divergence (e.g. HTML scraper captured different narrators), cross-page splits (paginated series), or non-matching field shapes.
    - Degrades gracefully — returns the input unchanged on DB failure (view still renders).
+   - Never collapses known different volumes: `partitionVolumes()` (collapse level, anchor = canonical ASIN in view, else first) splits each work in memory. No writes.
+
+3. **Heal — `detachVetoedAsins()`** (`src/lib/services/works-heal.ts`, #599)
+   - Runs on the pre-dedup rows, awaited before persist/collapse (series, search, author routes) and before the owned check (watched series and authors, `healDedupeAndPersist()`). Route calls add `.catch(() => {})`: a failed heal never fails the page. Search is optional-auth, so unauthenticated GETs can trigger it (bounded, idempotent).
+   - Per work with 2+ rows in view: `partitionVolumes()` at heal level; each non-anchor class moves to a new work (title/author from the class anchor) in one transaction: `work.create` → `updateMany where asin in class AND workId = stale`; count 0 → rollback (concurrent view or rerun). Sequential, only `source = 'dedup_auto'` rows move, the anchor never moves. Partial count commits (benign split).
 
 ### Works Table Schema
 - `Work { id, title, author }` — one row per logical book
 - `WorkAsin { id, workId, asin, narrator?, durationMinutes?, isCanonical, source, createdAt }` — many ASINs per Work
 
 ### Population Layers
-- **Layer 1 (auto):** `persistDedupGroups()` writes whenever the local pass finds a duplicate. Merges across pre-existing works when a new group spans them.
+- **Layer 1 (auto):** `persistDedupGroups()` writes groups with `persistable !== false`, each in its own try. Merge rule (#599): a touched work is absorbed only if all its ASINs are in the group; at most one touched work may hold outside ASINs (it is the target). With 2+ such works: no merge, unlinked group ASINs join the canonical ASIN's work (nothing written if the canonical ASIN is unlinked). Rows move by `asin in group`; only works left empty are deleted (`asins: { none: {} }`). New rows use `createMany({ skipDuplicates: true })`; a new work whose rows were all taken meanwhile is deleted.
 - **Layer 2 (seed):** `seedAsin()` writes a single-ASIN work at request creation time, ensuring every requested ASIN has an entry to grow from.
 
 ### Read Paths
 - **`collapseByExistingWorks()`** — view-level collapse (this section).
-- **`getSiblingAsins()`** — library availability matching (`audiobook-matcher.ts`), request-creation duplicate prevention (`request-creator.service.ts`), ignored-audiobook expansion. Returns sibling ASINs grouped by input ASIN.
+- **`getSiblingAsins()`** — library availability matching (`audiobook-matcher.ts`, incl. `getAvailableAsins()` for "hide available"), request-creation duplicate prevention (`request-creator.service.ts`), watched-list owned check, ignored-audiobook expansion. Returns sibling ASINs grouped by input ASIN. A wrong link here hides a book everywhere, which is why persisting needs settled positions.
 
 ### Narrator Capture in HTML Scrapers
 - HTML scrapers (`audible-series.ts`, the two `parse*Items` parsers in `audible.service.ts`) capture **all** narrator anchors via `extractAllNarrators()` (`src/lib/utils/extract-narrator.ts`). Multi-narrator productions render each name as its own `<a href="?searchNarrator=...">` link; capturing only the first (prior bug) made co-narrated audiobooks fail to dedup. Order is not significant — `normalizeNarrator()` sorts before comparison.
@@ -231,9 +241,9 @@ Discovery views (search, author books, series detail) collapse duplicate Audible
 ### Wired Routes
 - `src/app/api/audiobooks/search/route.ts`
 - `src/app/api/authors/[asin]/books/route.ts`
-- `src/app/api/series/[asin]/route.ts`
+- `src/app/api/series/[asin]/route.ts` (also `fillSeriesPositions()` first)
 
-Watched-list background jobs (`watched-lists.service.ts`) run the local pass only — they don't render a view, and the downstream `request-creator.service.ts` already does sibling-aware dedup at request creation time.
+Five dedup call sites persist groups: the three routes above, watched series and watched authors (`watched-lists-releases.ts`). All five heal first. Watched-list jobs run the local pass only (no collapse) — they don't render a view, and the downstream `request-creator.service.ts` already does sibling-aware dedup at request creation time.
 
 ## Database-First Approach
 
@@ -344,6 +354,12 @@ interface AuthorBooksResult {
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
+
+**Series volumes merged as duplicates and remembered (#599, 2026-11-15)**
+- **Problem:** Vols 1-3 of a German light-novel series (same title, narrator, ~500 min) showed as one book; vols 2/3 counted as owned once vol 1 was in the library.
+- **Root cause:** Local dedup never read positions; series page rows dropped the position label; every multi-ASIN group was persisted and merged all works it touched, so one false merge stuck and leaked through `getSiblingAsins()`.
+- **Fix:** Position labels + volume veto + persist only settled groups + merge rule + heal on the five call sites (see Dedup & Works Table). Trade-off: a re-listing group with series data on only some members no longer persists.
+- **Location:** `series-volume.ts`, `deduplicate-audiobooks.ts`, `audible-series-parsers.ts`, `audible-series.ts`, `audible-series-positions.ts`, `works.service.ts`, `works-heal.ts`, `watched-lists-releases.ts`, the three routes.
 
 **Home sections emptied by one failed nightly refresh (#507, 2026-11-02)**
 - **Problem:** After a night when the storefront answered `Request failed (503)` through all 12 retries, the job logged `fetched 0 books` and the category section showed "No audiobooks yet" until a later good night.
