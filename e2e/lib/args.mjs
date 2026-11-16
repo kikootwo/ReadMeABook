@@ -21,7 +21,7 @@ export const TAINTED_DISABLED_MESSAGE = 'tainted mode is disabled until build-ti
 export const USAGE = `usage:
   node e2e/run.mjs [stack] --slug <s> --port <3401-3499> (--image <ref> | --worktree <dir> (--trusted | --tainted))
        [--pr-dockerfile] [--dockerfile <file>] [--specs <a,b>] [--scenario <name>]
-       [--backend abs|plex] [--upgrade-from <release tag, e.g. 1.2.3>] [--upgrade-specs <a,b>] [--evidence <dir>]
+       [--backend abs|plex] [--upgrade-from <release tag, e.g. 1.2.3>] [--upgrade-specs <a,b>] [--downgrade-to <release tag>] [--evidence <dir>]
        [--offline-fixtures] [--rm-image] [--allow-log-canary] [--isolation-check] [--allow-untracked]
        [--overrides <name,name>]   (trusted e2e/overrides/*.yml; untainted only)
        [--isolate-specs]           (fresh stack per --specs entry, same images)
@@ -32,7 +32,7 @@ export const USAGE = `usage:
   node e2e/run.mjs down --slug <s> [--force-reserved]`;
 
 const FLAGS = new Set(['offline-fixtures', 'rm-image', 'help', 'trusted', 'tainted', 'pr-dockerfile', 'allow-log-canary', 'force-reserved', 'isolation-check', 'allow-untracked', 'isolate-specs']);
-const VALUE_OPTIONS = new Set(['slug', 'port', 'image', 'worktree', 'dockerfile', 'specs', 'scenario', 'backend', 'upgrade-from', 'upgrade-specs', 'evidence', 'overrides', 'replace-image', 'stop-specs', 'stop-cycles', 'stop-time']);
+const VALUE_OPTIONS = new Set(['slug', 'port', 'image', 'worktree', 'dockerfile', 'specs', 'scenario', 'backend', 'upgrade-from', 'upgrade-specs', 'downgrade-to', 'evidence', 'overrides', 'replace-image', 'stop-specs', 'stop-cycles', 'stop-time']);
 
 /** `child` is inside `parent` (or equal). Case-insensitive on Windows. */
 export function isInside(parent, child) {
@@ -109,6 +109,8 @@ export function parseArgs(argv) {
   }
   if (opts['pr-dockerfile'] && !opts.tainted) throw new Error('--pr-dockerfile only applies with --tainted');
   if (opts['upgrade-specs'] && !opts['upgrade-from']) throw new Error('--upgrade-specs only applies with --upgrade-from');
+  if (opts['downgrade-to'] && !opts['upgrade-from']) throw new Error('--downgrade-to only applies with --upgrade-from');
+  if (opts['downgrade-to'] && !/^v?\d+\.\d+\.\d+$/.test(opts['downgrade-to'])) throw new Error('--downgrade-to must be a release tag such as 1.2.3');
   if ((opts['stop-cycles'] || opts['stop-time']) && !opts['stop-specs']) throw new Error('--stop-cycles / --stop-time only apply with --stop-specs');
   if (opts['stop-specs']) {
     if (opts.tainted || opts['upgrade-from'] || opts['isolate-specs'] || opts.command !== 'stack') {

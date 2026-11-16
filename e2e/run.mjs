@@ -30,6 +30,7 @@ import {
 import { fetchAndLoad } from './lib/fetch-image.mjs';
 import { startExecBridge } from './lib/exec-bridge.mjs';
 import { stopFlow } from './lib/stop-flow.mjs';
+import { downgradeFlow } from './lib/downgrade-flow.mjs';
 import { phaseResult, readReport } from './lib/phase-result.mjs';
 
 const RELEASE_REPO = 'ghcr.io/kikootwo/readmeabook';
@@ -133,8 +134,9 @@ async function obtainImages(ctx) {
   return image;
 }
 
-async function upgradeFlow(ctx, image) {
-  const oldRef = `${RELEASE_REPO}:${ctx.opts['upgrade-from'].replace(/^v/, '')}`;
+/** A published release image (`1.2.3` or `v1.2.3`): local, else pulled, else fetched over the registry API. */
+async function ensureReleaseImage(ctx, tag) {
+  const oldRef = `${RELEASE_REPO}:${tag.replace(/^v/, '')}`;
   if (!imageExists(oldRef)) {
     if (run('docker', ['pull', oldRef], { allowFail: true }) !== 0) {
       ctx.warn(`docker pull ${oldRef} failed; fetching it over the registry API (digest-verified)`);
@@ -146,7 +148,12 @@ async function upgradeFlow(ctx, image) {
     }
     ctx.pulled.push(oldRef);
   }
-  ctx.sizeRefs.push(oldRef);
+  if (!ctx.sizeRefs.includes(oldRef)) ctx.sizeRefs.push(oldRef);
+  return oldRef;
+}
+
+async function upgradeFlow(ctx, image) {
+  const oldRef = await ensureReleaseImage(ctx, ctx.opts['upgrade-from']);
   ctx.summary.upgradeFrom = oldRef;
   // --upgrade-specs replaces upgrade.spec.ts in both phases (each spec reads E2E_PHASE).
   const specs = ctx.opts['upgrade-specs'] ? ctx.opts['upgrade-specs'].split(',').map((s) => s.trim()).filter(Boolean) : ['upgrade.spec.ts'];
@@ -170,7 +177,10 @@ async function upgradeFlow(ctx, image) {
   fs.writeFileSync(path.join(ctx.evidence, 'upgrade', 'after-counts.json'), JSON.stringify(after, null, 2));
   const problems = compareUpgradeCounts(before, after);
   ctx.summary.upgradeRowCounts = problems.length ? { ok: false, problems } : { ok: true };
-  return problems.length ? 1 : status;
+  if (problems.length || status !== 0 || !ctx.opts['downgrade-to']) return problems.length ? 1 : status;
+  // --downgrade-to: the release image again on these volumes (phase downgrade), then the branch (reupgrade).
+  const releaseRef = await ensureReleaseImage(ctx, ctx.opts['downgrade-to']);
+  return downgradeFlow(ctx, image, { up, playwright, saveLogs, specs, releaseRef });
 }
 
 async function finish(ctx, status) {

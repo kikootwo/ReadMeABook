@@ -109,3 +109,9 @@ test('--upgrade-specs needs --upgrade-from', () => {
   assert.throws(() => parseArgs(stack('--image', 'y', '--upgrade-specs', '423-upgrade')), /only applies with --upgrade-from/);
   assert.equal(parseArgs(stack('--image', 'y', '--upgrade-from', '1.2.10', '--upgrade-specs', '423-upgrade'))['upgrade-specs'], '423-upgrade');
 });
+
+test('--downgrade-to needs --upgrade-from and a release tag', () => {
+  assert.throws(() => parseArgs(stack('--image', 'y', '--downgrade-to', '1.3.0')), /--downgrade-to only applies with --upgrade-from/);
+  assert.throws(() => parseArgs(stack('--image', 'y', '--upgrade-from', '1.3.0', '--downgrade-to', 'latest')), /must be a release tag/);
+  assert.equal(parseArgs(stack('--image', 'y', '--upgrade-from', '1.3.0', '--downgrade-to', 'v1.3.0'))['downgrade-to'], 'v1.3.0');
+});

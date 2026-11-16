@@ -17,6 +17,7 @@ import { test, expect } from '@playwright/test';
 import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, urls, waitFor, writeEvidence, snap, Rmab } from '../../lib/harness';
 import { psql, sqlStr } from './242-helpers';
 import { VIEWPORTS, adminPage, answer, seedRequest } from './231-footprint-helpers';
+import { tokenParity } from './558-token-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 
@@ -49,6 +50,8 @@ test('231 parity: web approve and deny answer as before; the bot off writes no D
   const user = await registerUser(admin);
   const seeded: string[] = [];
   const answers: Record<string, unknown> = {};
+  // #558: on the branch the approval-token setting is on for every session answer below
+  const tokens = await tokenParity(admin, stamp);
 
   try {
     const approveUi = await user.rmab.requestBook(books.martian);
@@ -100,6 +103,7 @@ test('231 parity: web approve and deny answer as before; the bot off writes no D
     // discord_cards: NULL on every row (the column exists on the branch image only)
     const column = psql("select count(*) from information_schema.columns where table_name = 'requests' and column_name = 'discord_cards'");
     const cardsSet = column === '1' ? psql('select count(*) from requests where discord_cards is not null') : 'no column';
+    answers.tokens = await tokens.check(user.id, seeded);
 
     writeEvidence(`${DIR}/answers.json`, { image: process.env.E2E_RMAB_IMAGE, answers, race: raceAnswers, discordCards: { column, set: cardsSet } });
 
@@ -119,6 +123,7 @@ test('231 parity: web approve and deny answer as before; the bot off writes no D
       expect.soft(raceAnswers, 'two approves at once: exactly one wins').toEqual(['200:awaiting_release', '400:InvalidStatus']);
     }
   } finally {
+    await tokens.cleanup();
     await admin.raw('POST', `/api/requests/${(await user.rmab.findRequest(books.martian.asin))?.id}/cancel`).catch(() => null);
     // Seeded rows: cancelled and soft-deleted (a started download may reference them)
     for (const id of seeded) psql(`update requests set status = 'cancelled', deleted_at = now() where audiobook_id = ${sqlStr(id)}`);
