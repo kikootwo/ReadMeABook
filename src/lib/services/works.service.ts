@@ -10,6 +10,7 @@
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { metadataScore, type DedupGroup } from '@/lib/utils/deduplicate-audiobooks';
+import { partitionVolumes } from '@/lib/utils/series-volume';
 import type { AudibleAudiobook } from '@/lib/integrations/audible.service';
 
 const logger = RMABLogger.create('WorksService');
@@ -21,117 +22,103 @@ const logger = RMABLogger.create('WorksService');
 /**
  * Persist dedup groups to the works table. For each group of 2+ ASINs that
  * were identified as the same audiobook, create or update a Work record
- * linking all ASINs together.
+ * linking all ASINs together. Groups whose series positions are not settled
+ * (`persistable: false`) are display-only and never written (#599).
  *
- * Safe to call fire-and-forget — never throws.
+ * Safe to call fire-and-forget — never throws; one failing group does not stop the rest.
  */
 export async function persistDedupGroups(groups: DedupGroup[]): Promise<void> {
-  try {
-    for (const group of groups) {
+  for (const group of groups) {
+    if (group.persistable === false) continue;
+    try {
       await persistSingleGroup(group);
+    } catch (error) {
+      logger.error('Failed to persist dedup group', {
+        error: error instanceof Error ? error.message : String(error),
+        canonicalAsin: group.canonicalAsin,
+      });
     }
-  } catch (error) {
-    logger.error('Failed to persist dedup groups', {
-      error: error instanceof Error ? error.message : String(error),
-      groupCount: groups.length,
-    });
   }
 }
 
+/** work_asins rows for group ASINs not linked yet (concurrent inserts are skipped) */
+function newRows(group: DedupGroup, workId: string, asins: string[]) {
+  return asins.map(asin => ({
+    workId,
+    asin,
+    narrator: asin === group.canonicalAsin ? group.narrator : undefined,
+    durationMinutes: asin === group.canonicalAsin ? group.durationMinutes : undefined,
+    isCanonical: asin === group.canonicalAsin,
+    source: 'dedup_auto',
+  }));
+}
+
 /**
- * Persist a single dedup group. Handles merging when ASINs span multiple
- * existing works.
+ * Persist a single dedup group. Merge rule (#599): of the existing works the group
+ * touches, at most one may hold ASINs outside the group (it becomes the target); a
+ * work is absorbed only when all its ASINs are in the group, so the in-view checks
+ * covered them. With two or more such works there is no merge: unlinked group ASINs
+ * join the work holding the canonical ASIN, or nothing is written when it is unlinked.
  */
 async function persistSingleGroup(group: DedupGroup): Promise<void> {
-  const { canonicalAsin, allAsins, title, author, narrator, durationMinutes } = group;
+  const { canonicalAsin, allAsins, title, author } = group;
 
-  // Find which of these ASINs already exist in work_asins
   const existingEntries = await prisma.workAsin.findMany({
     where: { asin: { in: allAsins } },
     select: { asin: true, workId: true },
   });
-
-  // Collect unique work IDs that already contain any of our ASINs
   const existingWorkIds = [...new Set(existingEntries.map(e => e.workId))];
   const existingAsinSet = new Set(existingEntries.map(e => e.asin));
+  const unlinked = allAsins.filter(a => !existingAsinSet.has(a));
 
   if (existingWorkIds.length === 0) {
-    // No existing works — create a new one with all ASINs
-    const work = await prisma.work.create({
-      data: { title, author },
-    });
+    const work = await prisma.work.create({ data: { title, author } });
+    const { count } = await prisma.workAsin.createMany({ data: newRows(group, work.id, allAsins), skipDuplicates: true });
+    // Every ASIN was linked by a concurrent view meanwhile: drop the empty work
+    if (count === 0) await prisma.work.deleteMany({ where: { id: work.id, asins: { none: {} } } });
+    logger.debug('Created new work', { workId: work.id, asinCount: count });
+    return;
+  }
 
-    await Promise.all(
-      allAsins.map(asin =>
-        prisma.workAsin.create({
-          data: {
-            workId: work.id,
-            asin,
-            narrator: asin === canonicalAsin ? narrator : undefined,
-            durationMinutes: asin === canonicalAsin ? durationMinutes : undefined,
-            isCanonical: asin === canonicalAsin,
-            source: 'dedup_auto',
-          },
-        })
-      )
-    );
+  const groupSet = new Set(allAsins);
+  const touchedRows = await prisma.workAsin.findMany({
+    where: { workId: { in: existingWorkIds } },
+    select: { asin: true, workId: true },
+  });
+  const outsideWorkIds = existingWorkIds.filter(id => touchedRows.some(r => r.workId === id && !groupSet.has(r.asin)));
+  const canonicalWorkId = existingEntries.find(e => e.asin === canonicalAsin)?.workId;
 
-    logger.debug('Created new work', { workId: work.id, asinCount: allAsins.length });
+  let targetWorkId: string;
+  if (outsideWorkIds.length >= 2) {
+    if (!canonicalWorkId) {
+      logger.debug('Group spans works with unchecked ASINs and its canonical ASIN is unlinked; nothing written', { canonicalAsin });
+      return;
+    }
+    targetWorkId = canonicalWorkId;
   } else {
-    // Use the first existing work as the target
-    const targetWorkId = existingWorkIds[0];
-
-    // If multiple existing works, merge them into the target
-    if (existingWorkIds.length > 1) {
-      const mergeWorkIds = existingWorkIds.slice(1);
-
-      // Move all ASINs from other works to the target
+    targetWorkId = outsideWorkIds[0] ?? canonicalWorkId ?? existingWorkIds[0];
+    const mergeWorkIds = existingWorkIds.filter(id => id !== targetWorkId);
+    if (mergeWorkIds.length > 0) {
+      // Move only the group's rows; delete only works left empty (a concurrent insert survives)
       await prisma.workAsin.updateMany({
-        where: { workId: { in: mergeWorkIds } },
+        where: { asin: { in: allAsins }, workId: { in: mergeWorkIds } },
         data: { workId: targetWorkId },
       });
-
-      // Delete the now-empty works
-      await prisma.work.deleteMany({
-        where: { id: { in: mergeWorkIds } },
-      });
-
-      logger.debug('Merged works', {
-        targetWorkId,
-        mergedWorkIds: mergeWorkIds,
-      });
+      await prisma.work.deleteMany({ where: { id: { in: mergeWorkIds }, asins: { none: {} } } });
+      logger.debug('Merged works', { targetWorkId, mergedWorkIds: mergeWorkIds });
     }
-
-    // Add any new ASINs that don't already exist
-    const newAsins = allAsins.filter(a => !existingAsinSet.has(a));
-    if (newAsins.length > 0) {
-      await Promise.all(
-        newAsins.map(asin =>
-          prisma.workAsin.create({
-            data: {
-              workId: targetWorkId,
-              asin,
-              narrator: asin === canonicalAsin ? narrator : undefined,
-              durationMinutes: asin === canonicalAsin ? durationMinutes : undefined,
-              isCanonical: asin === canonicalAsin,
-              source: 'dedup_auto',
-            },
-          })
-        )
-      );
-
-      logger.debug('Added ASINs to existing work', {
-        workId: targetWorkId,
-        newAsinCount: newAsins.length,
-      });
-    }
-
-    // Update canonical status: ensure the canonical ASIN is marked
-    await prisma.workAsin.updateMany({
-      where: { workId: targetWorkId, asin: canonicalAsin },
-      data: { isCanonical: true },
-    });
   }
+
+  if (unlinked.length > 0) {
+    await prisma.workAsin.createMany({ data: newRows(group, targetWorkId, unlinked), skipDuplicates: true });
+    logger.debug('Added ASINs to existing work', { workId: targetWorkId, newAsinCount: unlinked.length });
+  }
+
+  // Ensure the canonical ASIN is marked
+  await prisma.workAsin.updateMany({
+    where: { workId: targetWorkId, asin: canonicalAsin },
+    data: { isCanonical: true },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +189,9 @@ export async function seedAsin(
  *  - Books whose ASINs map to a shared workId collapse to a single representative
  *    chosen by `metadataScore()` (same ranking as local dedup).
  *  - Books not present in any work, or in single-ASIN works, pass through untouched.
+ *  - Known different volumes of one series never collapse, even when a work links
+ *    them (#599): each work's books in view are split with `partitionVolumes` (anchor =
+ *    canonical ASIN when in view), in memory only — the heal does the writes.
  *  - Original ordering is preserved (the kept representative sits at the position
  *    of the first occurrence of its work in the input list).
  *  - DB failure is non-fatal: the input list is returned unchanged so the view
@@ -216,32 +206,45 @@ export async function collapseByExistingWorks(
     const asins = books.map(b => b.asin);
     const entries = await prisma.workAsin.findMany({
       where: { asin: { in: asins } },
-      select: { asin: true, workId: true },
+      select: { asin: true, workId: true, isCanonical: true },
     });
 
     if (entries.length === 0) return books;
 
-    // Map ASIN → workId for fast lookup in the loop below
     const asinToWorkId = new Map<string, string>();
+    const canonicalByWork = new Map<string, string>();
     for (const entry of entries) {
       asinToWorkId.set(entry.asin, entry.workId);
+      if (entry.isCanonical) canonicalByWork.set(entry.workId, entry.asin);
     }
 
-    // Walk the input once, preserving position. For each work seen, keep a
-    // running "best" book; for books not in any work, emit immediately.
-    const result: AudibleAudiobook[] = [];
-    const workIdToResultIndex = new Map<string, number>();
-
+    // Each work's books in view, split into classes of compatible volumes
+    const booksByWork = new Map<string, AudibleAudiobook[]>();
     for (const book of books) {
       const workId = asinToWorkId.get(book.asin);
-      if (!workId) {
+      if (workId) booksByWork.set(workId, [...(booksByWork.get(workId) ?? []), book]);
+    }
+    const classKey = new Map<AudibleAudiobook, string>();
+    for (const [workId, members] of booksByWork) {
+      partitionVolumes(members, canonicalByWork.get(workId), 'collapse')
+        .forEach((cls, i) => cls.forEach(book => classKey.set(book, `${workId}#${i}`)));
+    }
+
+    // Walk the input once, preserving position. For each class seen, keep a
+    // running "best" book; for books not in any work, emit immediately.
+    const result: AudibleAudiobook[] = [];
+    const keyToResultIndex = new Map<string, number>();
+
+    for (const book of books) {
+      const key = classKey.get(book);
+      if (!key) {
         result.push(book);
         continue;
       }
 
-      const existingIndex = workIdToResultIndex.get(workId);
+      const existingIndex = keyToResultIndex.get(key);
       if (existingIndex === undefined) {
-        workIdToResultIndex.set(workId, result.length);
+        keyToResultIndex.set(key, result.length);
         result.push(book);
         continue;
       }

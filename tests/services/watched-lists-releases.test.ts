@@ -9,6 +9,9 @@ const searchByAuthorAsin = vi.hoisted(() => vi.fn());
 const dedup = vi.hoisted(() => vi.fn());
 const persistDedupGroups = vi.hoisted(() => vi.fn());
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async () => {} }));
+vi.mock('@/lib/integrations/audible-series-positions', () => ({ fillSeriesPositions: async (rows: unknown[]) => rows }));
 vi.mock('@/lib/integrations/audible.service', () => ({
   AUDIBLE_PAGE_SIZE: 50,
   getAudibleService: () => ({ searchByAuthorAsin }),

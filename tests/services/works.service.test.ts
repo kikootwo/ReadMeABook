@@ -42,7 +42,7 @@ describe('persistDedupGroups', () => {
   it('creates new work + work_asins for a fresh group', async () => {
     prismaMock.workAsin.findMany.mockResolvedValue([]);
     prismaMock.work.create.mockResolvedValue({ id: 'work-1' });
-    prismaMock.workAsin.create.mockResolvedValue({});
+    prismaMock.workAsin.createMany.mockResolvedValue({ count: 2 });
     prismaMock.workAsin.updateMany.mockResolvedValue({ count: 0 });
 
     const { persistDedupGroups } = await import('@/lib/services/works.service');
@@ -61,36 +61,23 @@ describe('persistDedupGroups', () => {
     expect(prismaMock.work.create).toHaveBeenCalledWith({
       data: { title: 'Test Book', author: 'Test Author' },
     });
-    expect(prismaMock.workAsin.create).toHaveBeenCalledTimes(2);
-
-    // Canonical ASIN should have narrator, duration, isCanonical=true
-    expect(prismaMock.workAsin.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        workId: 'work-1',
-        asin: 'ASIN_A',
-        narrator: 'Test Narrator',
-        durationMinutes: 600,
-        isCanonical: true,
-        source: 'dedup_auto',
-      }),
+    // Canonical ASIN carries narrator, duration, isCanonical=true; concurrent inserts are skipped
+    expect(prismaMock.workAsin.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          workId: 'work-1', asin: 'ASIN_A', narrator: 'Test Narrator', durationMinutes: 600, isCanonical: true, source: 'dedup_auto',
+        }),
+        expect.objectContaining({ workId: 'work-1', asin: 'ASIN_B', isCanonical: false, source: 'dedup_auto' }),
+      ],
+      skipDuplicates: true,
     });
-
-    // Non-canonical ASIN should have isCanonical=false
-    expect(prismaMock.workAsin.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        workId: 'work-1',
-        asin: 'ASIN_B',
-        isCanonical: false,
-        source: 'dedup_auto',
-      }),
-    });
+    expect(prismaMock.work.deleteMany).not.toHaveBeenCalled();
   });
 
   it('adds new ASINs to existing work when canonical already exists', async () => {
     prismaMock.workAsin.findMany.mockResolvedValue([
       { asin: 'ASIN_A', workId: 'existing-work' },
     ]);
-    prismaMock.workAsin.create.mockResolvedValue({});
     prismaMock.workAsin.updateMany.mockResolvedValue({ count: 1 });
 
     const { persistDedupGroups } = await import('@/lib/services/works.service');
@@ -110,18 +97,12 @@ describe('persistDedupGroups', () => {
     expect(prismaMock.work.create).not.toHaveBeenCalled();
 
     // Should create entries for ASIN_B and ASIN_C only (ASIN_A already exists)
-    expect(prismaMock.workAsin.create).toHaveBeenCalledTimes(2);
-    expect(prismaMock.workAsin.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        workId: 'existing-work',
-        asin: 'ASIN_B',
-      }),
-    });
-    expect(prismaMock.workAsin.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        workId: 'existing-work',
-        asin: 'ASIN_C',
-      }),
+    expect(prismaMock.workAsin.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ workId: 'existing-work', asin: 'ASIN_B' }),
+        expect.objectContaining({ workId: 'existing-work', asin: 'ASIN_C' }),
+      ],
+      skipDuplicates: true,
     });
   });
 
@@ -145,15 +126,15 @@ describe('persistDedupGroups', () => {
 
     await persistDedupGroups(groups);
 
-    // Should move work-2 ASINs to work-1
+    // Should move the group's rows of work-2 to work-1 (both works lie wholly inside the group)
     expect(prismaMock.workAsin.updateMany).toHaveBeenCalledWith({
-      where: { workId: { in: ['work-2'] } },
+      where: { asin: { in: ['ASIN_A', 'ASIN_B'] }, workId: { in: ['work-2'] } },
       data: { workId: 'work-1' },
     });
 
-    // Should delete work-2
+    // Should delete work-2 only if it is left empty
     expect(prismaMock.work.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['work-2'] } },
+      where: { id: { in: ['work-2'] }, asins: { none: {} } },
     });
   });
 
@@ -489,7 +470,7 @@ describe('collapseByExistingWorks', () => {
     expect(prismaMock.workAsin.findMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.workAsin.findMany).toHaveBeenCalledWith({
       where: { asin: { in: ['A1', 'A2', 'A3'] } },
-      select: { asin: true, workId: true },
+      select: { asin: true, workId: true, isCanonical: true },
     });
   });
 });

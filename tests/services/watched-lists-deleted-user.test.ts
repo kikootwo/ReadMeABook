@@ -15,6 +15,9 @@ const scrapeSeriesPage = vi.hoisted(() => vi.fn());
 const searchByAuthorAsin = vi.hoisted(() => vi.fn());
 const createRequestForUser = vi.hoisted(() => vi.fn());
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async () => {} }));
+vi.mock('@/lib/integrations/audible-series-positions', () => ({ fillSeriesPositions: async (rows: unknown[]) => rows }));
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/utils/logger', () => {
   const make = () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });

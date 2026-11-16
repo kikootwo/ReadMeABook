@@ -7,11 +7,14 @@
  * - scanAuthorBooks(): one author catalog scan, relevance order (entire catalog, as before)
  *   or newest first with an early stop at the cutoff (new releases only).
  * - scanAuthorLegs(): runs the scans an author's watchers need and feeds each watcher its own.
+ * - healDedupeAndPersist(): both watched paths heal wrongly linked volumes before dedup (#599).
  */
 
 import { getAudibleService, AudibleAudiobook, AuthorBooksResult, AUDIBLE_PAGE_SIZE } from '@/lib/integrations/audible.service';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups } from '@/lib/services/works.service';
+import { detachVetoedAsins } from '@/lib/services/works-heal';
+import { fillSeriesPositions } from '@/lib/integrations/audible-series-positions';
 import { toReleaseDay } from '@/lib/utils/release-date';
 import { isNewRelease, newReleaseFloorDay } from '@/lib/utils/watch-mode';
 import type { RMABLogger } from '@/lib/utils/logger';
@@ -40,6 +43,19 @@ export function dedupeAndPersist(
     ? after.then(() => persistDedupGroups(groups)).catch(() => {})
     : after;
   return { books: deduped, persisted };
+}
+
+/**
+ * Watched series and authors: fill missing series positions (series only), then heal wrongly
+ * linked volumes (#599), awaited so the owned check that follows sees the split, then dedupe.
+ */
+export async function healDedupeAndPersist(
+  books: AudibleAudiobook[],
+  { after = Promise.resolve(), seriesAsin }: { after?: Promise<void>; seriesAsin?: string } = {}
+): Promise<{ books: AudibleAudiobook[]; persisted: Promise<void> }> {
+  const rows = seriesAsin ? await fillSeriesPositions(books, seriesAsin) : books;
+  await detachVetoedAsins(rows).catch(() => {});
+  return dedupeAndPersist(rows, after);
 }
 
 /**
@@ -144,8 +160,8 @@ export async function scanAuthorLegs(
   const entireAsins = new Set(entireRaw.map((b) => b.asin));
   const found = entireRaw.length + newRaw.filter((b) => !entireAsins.has(b.asin)).length;
 
-  const entire = dedupeAndPersist(entireRaw);
-  const newOnly = entireScan.complete ? entire : dedupeAndPersist(newRaw, entire.persisted);
+  const entire = await healDedupeAndPersist(entireRaw);
+  const newOnly = entireScan.complete ? entire : await healDedupeAndPersist(newRaw, { after: entire.persisted });
   return { found, booksFor: (watch) => (watch.newReleasesSince != null ? newOnly.books : entire.books) };
 }
 

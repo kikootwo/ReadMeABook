@@ -112,7 +112,7 @@ export function isAbort(error: FetchError): boolean {
  * abort/timeout. These pause the fill; anything else (another 4xx, a malformed product)
  * is that ASIN's outcome.
  */
-function isTransient(error: FetchError): boolean {
+export function isTransient(error: FetchError): boolean {
   const status = error.response?.status;
   if (typeof status === 'number') return status === 429 || status === 401 || status === 403 || status >= 500;
   return isAbort(error) || error.isAxiosError === true || typeof error.code === 'string';

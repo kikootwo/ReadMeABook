@@ -13,6 +13,9 @@ const clientMock = vi.hoisted(() => ({ get: vi.fn() }));
 const axiosMock = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn() }));
 const configServiceMock = vi.hoisted(() => ({ getAudibleRegion: vi.fn() }));
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async () => {} }));
+vi.mock('@/lib/integrations/audible-series-positions', () => ({ fillSeriesPositions: async (rows: unknown[]) => rows }));
 vi.mock('axios', () => ({ default: axiosMock, ...axiosMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configServiceMock }));
 vi.mock('@/lib/middleware/auth', () => ({

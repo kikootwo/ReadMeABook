@@ -10,6 +10,8 @@ import { scrapeSeriesPage } from '@/lib/integrations/audible-series';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups, collapseByExistingWorks } from '@/lib/services/works.service';
+import { detachVetoedAsins } from '@/lib/services/works-heal';
+import { fillSeriesPositions } from '@/lib/integrations/audible-series-positions';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
 import { LANGUAGE_DISPLAY_NAMES } from '@/lib/constants/language-config';
 
@@ -49,7 +51,11 @@ export async function GET(
       // Two-pass dedup: local title/narrator/duration matching first, then collapse
       // any remaining duplicates that the works table already knows are the same book
       // (handles cases where source metadata diverges across paths or pages).
-      const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(detail.books);
+      // Volumes can share a title (#599): positions tell them apart, and wrongly linked
+      // volumes are detached before dedup (a failed heal never fails the page).
+      const books = await fillSeriesPositions(detail.books, asin);
+      await detachVetoedAsins(books).catch(() => {});
+      const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(books);
 
       if (groups.length > 0) {
         persistDedupGroups(groups).catch(() => {});
