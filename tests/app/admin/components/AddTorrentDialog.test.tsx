@@ -153,6 +153,7 @@ describe('AddTorrentDialog', () => {
     expect(await screen.findByText('No torrent client is set up. Add qBittorrent, Transmission or Deluge in Settings > Download Clients.')).toBeInTheDocument();
     expect(magnetField()).toBeDisabled();
     expect(chooseButton()).toBeDisabled();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+    // Focus moves to Cancel in an effect that can run after the message is already on screen
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' })));
   });
 });
