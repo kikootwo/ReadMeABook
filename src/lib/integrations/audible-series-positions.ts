@@ -2,11 +2,9 @@
  * Component: Audible Series Positions (fallback when a series page row has no label)
  * Documentation: documentation/integrations/audible.md
  *
- * Series page rows normally carry their position label (#599). Only when the local dedup
- * pass would merge a row that has none does one catalog batch call read the positions,
- * from the `series[]` entry of this very series (not the first entry). Outcomes are cached
- * for 24 h per region:ASIN; after a 429/5xx/timeout, lookups pause for 15 min. A failure
- * leaves positions unknown, which means no veto and no persist.
+ * Only when local dedup would merge a row without a position label (#599): one catalog
+ * batch call reads the `series[]` entry of this very series. 24 h cache per region:ASIN,
+ * 15 min pause after a 429/5xx/timeout; a failure leaves positions unknown (no veto, no persist).
  */
 
 import { getAudibleService, type AudibleAudiobook } from './audible.service';
@@ -14,14 +12,8 @@ import { deduplicateAndCollectGroups } from '../utils/deduplicate-audiobooks';
 import { normalizePosition } from '../utils/series-volume';
 import { RMABLogger } from '../utils/logger';
 import {
-  catalogBudget,
-  isAbort,
-  isTransient,
-  SERIES_CACHE_MAX_ENTRIES,
-  SERIES_CACHE_TTL_MS,
-  SERIES_FILL_COOLDOWN_MS,
-  type CatalogSeriesEntry,
-  type FetchError,
+  catalogBudget, isAbort, isTransient, SERIES_CACHE_MAX_ENTRIES, SERIES_CACHE_TTL_MS, SERIES_FILL_COOLDOWN_MS,
+  type CatalogSeriesEntry, type FetchError,
 } from './audible-series-fill';
 
 const logger = RMABLogger.create('Audible.SeriesPositions');
@@ -45,6 +37,11 @@ function remember(key: string, position: string | null): void {
   }
 }
 
+function cached(key: string): { position: string | null } | undefined {
+  const hit = cache.get(key);
+  return hit && hit.expiresAt > Date.now() ? hit : undefined;
+}
+
 function reason(error: FetchError): string {
   const status = error.response?.status;
   if (typeof status === 'number') return `HTTP ${status}`;
@@ -64,15 +61,9 @@ function mergeCandidates(rows: AudibleAudiobook[]): string[] {
 async function fetchPositions(asins: string[], seriesAsin: string, region: string): Promise<void> {
   const budget = catalogBudget(DEADLINE_MS);
   try {
+    const params = { asins: asins.join(','), num_results: asins.length, response_groups: 'series' };
     const { data: response } = await getAudibleService().fetch(
-      CATALOG_PRODUCTS,
-      {
-        params: { asins: asins.join(','), num_results: asins.length, response_groups: 'series' },
-        signal: budget.signal,
-        timeout: DEADLINE_MS,
-      },
-      { catalog: true },
-    );
+      CATALOG_PRODUCTS, { params, signal: budget.signal, timeout: DEADLINE_MS }, { catalog: true });
     const products = (response?.data as { products?: Array<{ asin?: string; series?: CatalogSeriesEntry[] }> } | undefined)?.products;
     const byAsin = new Map((Array.isArray(products) ? products : []).map((p) => [p?.asin, p]));
     for (const asin of asins) {
@@ -84,26 +75,12 @@ async function fetchPositions(asins: string[], seriesAsin: string, region: strin
   }
 }
 
-/**
- * Fill missing positions on series page rows (all stamped with `seriesAsin`). Returns the
- * rows unchanged when every row has a label or no merge is proposed (no call). Never throws.
- */
-export async function fillSeriesPositions(rows: AudibleAudiobook[], seriesAsin: string): Promise<AudibleAudiobook[]> {
-  try {
-    return await fill(rows, seriesAsin);
-  } catch (error) {
-    logger.warn(`Series positions for ${seriesAsin} skipped: ${error instanceof Error ? error.message : String(error)}`);
-    return rows;
-  }
-}
-
 async function fill(rows: AudibleAudiobook[], seriesAsin: string): Promise<AudibleAudiobook[]> {
   const candidates = mergeCandidates(rows);
   if (candidates.length === 0) return rows;
 
   const region = getAudibleService().getRegion();
-  const missing = candidates.filter((asin) => !((cache.get(`${region}:${asin}`)?.expiresAt ?? 0) > Date.now()));
-
+  const missing = candidates.filter((asin) => !cached(`${region}:${asin}`));
   if (missing.length > 0 && Date.now() < pausedUntil) {
     logger.debug(`Series positions for ${seriesAsin} skipped: Audible catalog lookups are paused`);
   } else {
@@ -112,24 +89,37 @@ async function fill(rows: AudibleAudiobook[], seriesAsin: string): Promise<Audib
         await fetchPositions(missing.slice(i, i + CHUNK_SIZE), seriesAsin, region);
       } catch (caught) {
         const error = (caught ?? {}) as FetchError;
-        if (isTransient(error)) {
-          pausedUntil = Date.now() + SERIES_FILL_COOLDOWN_MS;
-          logger.warn(`Series position lookups paused for 15 min after: ${reason(error)} (series ${seriesAsin})`);
-          break;
+        if (!isTransient(error)) {
+          logger.debug(`Series position lookup for ${seriesAsin} failed (${reason(error)}); positions stay unknown`);
+          continue;
         }
-        logger.debug(`Series position lookup for ${seriesAsin} failed (${reason(error)}); positions stay unknown`);
+        pausedUntil = Date.now() + SERIES_FILL_COOLDOWN_MS;
+        logger.warn(`Series position lookups paused for 15 min after: ${reason(error)} (series ${seriesAsin})`);
+        break;
       }
     }
   }
 
-  const filled = new Set<string>();
+  let found = 0;
   const out = rows.map((row) => {
-    if (!candidates.includes(row.asin)) return row;
-    const cached = cache.get(`${region}:${row.asin}`);
-    if (!cached || cached.expiresAt <= Date.now() || cached.position === null) return row;
-    filled.add(row.asin);
-    return { ...row, seriesPart: cached.position };
+    const position = candidates.includes(row.asin) ? cached(`${region}:${row.asin}`)?.position : null;
+    if (!position) return row;
+    found++;
+    return { ...row, seriesPart: position };
   });
-  logger.debug(`Series ${seriesAsin}: ${candidates.length} unlabelled rows proposed for a merge, ${filled.size} positions found`);
+  logger.debug(`Series ${seriesAsin}: ${candidates.length} unlabelled rows proposed for a merge, ${found} positions found`);
   return out;
+}
+
+/**
+ * Fill missing positions on series page rows (all stamped with `seriesAsin`). No call when
+ * every row has a label or no merge is proposed. Never throws.
+ */
+export async function fillSeriesPositions(rows: AudibleAudiobook[], seriesAsin: string): Promise<AudibleAudiobook[]> {
+  try {
+    return await fill(rows, seriesAsin);
+  } catch (error) {
+    logger.warn(`Series positions for ${seriesAsin} skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return rows;
+  }
 }

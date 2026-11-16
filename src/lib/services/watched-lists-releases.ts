@@ -45,10 +45,7 @@ export function dedupeAndPersist(
   return { books: deduped, persisted };
 }
 
-/**
- * Watched series and authors: fill missing series positions (series only), then heal wrongly
- * linked volumes (#599), awaited so the owned check that follows sees the split, then dedupe.
- */
+/** Both watched paths: fill positions (series), heal wrongly linked volumes (#599) before the owned check, dedupe */
 export async function healDedupeAndPersist(
   books: AudibleAudiobook[],
   { after = Promise.resolve(), seriesAsin }: { after?: Promise<void>; seriesAsin?: string } = {}

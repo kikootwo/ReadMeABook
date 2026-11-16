@@ -2,12 +2,9 @@
  * Component: Works Heal (detach wrongly linked series volumes)
  * Documentation: documentation/integrations/audible.md
  *
- * Before #599, different volumes of one series could be merged into one work and stay
- * linked, so the later volumes were hidden and counted as owned. Views that show the
- * rows (series, search, author pages and both watched syncs) heal that here, on the
- * pre-dedup rows: a work's rows in view are split with `partitionVolumes` at the
- * strictest level (same series, both positions known and different), and each class
- * apart from the anchor's moves to a new work.
+ * Different volumes of one series wrongly linked into one work (#599) are split on the
+ * pre-dedup rows of the series, search and author views and both watched syncs
+ * (`partitionVolumes`, heal level); each class apart from the anchor's moves to a new work.
  */
 
 import { prisma } from '@/lib/db';
@@ -20,11 +17,8 @@ const logger = RMABLogger.create('WorksHeal');
 /** Another view already moved these rows: roll back, nothing to do */
 class AlreadyMoved extends Error {}
 
-/**
- * One class to a new work, in one transaction. The move is conditional on the rows still
- * sitting in the stale work: a rerun or a concurrent view matches 0 rows and rolls back,
- * so no empty work is left. A partial count (some rows moved elsewhere meanwhile) commits.
- */
+/** One class to a new work in one transaction, only while its rows sit in the stale work: a rerun or a
+ *  concurrent view matches 0 rows and rolls back (no empty work); a partial count commits */
 async function moveClass(staleWorkId: string, cls: AudibleAudiobook[]): Promise<void> {
   const anchor = cls[0];
   try {
@@ -52,11 +46,8 @@ async function moveClass(staleWorkId: string, cls: AudibleAudiobook[]): Promise<
   }
 }
 
-/**
- * Detach known different volumes that one work links. Sequential (one transaction at a
- * time, never a burst on a GET), only rows written by dedup (`dedup_auto`) move, the
- * anchor (canonical ASIN when in view) never moves. Never throws.
- */
+/** Detach known different volumes one work links: sequential transactions, only `dedup_auto` rows
+ *  move, the anchor (canonical ASIN when in view) never moves. Never throws. */
 export async function detachVetoedAsins(rows: AudibleAudiobook[]): Promise<void> {
   if (rows.length < 2) return;
   try {

@@ -10,12 +10,8 @@ import type { AudibleAudiobook } from '../integrations/audible.service';
 
 type VolumeFields = Pick<AudibleAudiobook, 'asin' | 'title' | 'subtitle' | 'series' | 'seriesPart' | 'seriesAsin'>;
 
-/**
- * Which rules apply:
- * - heal: same series, both positions known and different (it writes, so the strictest).
- * - dedup: heal + a "Band N" keyword number in subtitle vs subtitle or title vs title.
- * - collapse: dedup + a bare trailing number in title vs title (display only).
- */
+/** heal: same series, both positions known and different (it writes, so the strictest);
+ *  dedup: + "Band N" keyword numbers, subtitle vs subtitle or title vs title; collapse: + a bare trailing title number */
 export type VetoLevel = 'heal' | 'dedup' | 'collapse';
 
 const NUM = String.raw`(\d+(?:[.,]\d+)?)`;
@@ -33,11 +29,8 @@ function toNumberString(raw: string): string {
   return String(parseFloat(raw.replace(',', '.')));
 }
 
-/**
- * A series position as a normalized number ("1", "1.5"), or undefined. Takes a catalog
- * sequence or a page label holding exactly one number: "1", "1.0", "1,5", "Book 2",
- * "Vol. 1", "1. Titel". Ranges ("1-3") and anything else are unknown.
- */
+/** Position as a normalized number ("1", "1.5") from a sequence or one-number label ("1.0", "1,5",
+ *  "Book 2", "Vol. 1", "1. Titel"); ranges ("1-3") and anything else are unknown */
 export function normalizePosition(raw?: string | null): string | undefined {
   const text = (raw ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return undefined;
@@ -97,20 +90,13 @@ export function isDifferentVolume(a: VolumeFields, b: VolumeFields, level: VetoL
   return ta !== undefined && tb !== undefined && ta !== tb;
 }
 
-/**
- * A merged group may be persisted only when its positions are settled: every member has a
- * known position, or no member is known to be in a series. Otherwise the merge is display-only.
- */
+/** Persist a merge only when every member has a known position or none is known to be in a series */
 export function positionsSettled(members: VolumeFields[]): boolean {
   return members.every((m) => normalizePosition(m.seriesPart) !== undefined) || !members.some(inSeries);
 }
 
-/**
- * Split books one work links into classes of mutually compatible volumes. The anchor (the
- * canonical ASIN when present, else the first book) starts class 0; every other book, in
- * input order, joins the first class it is vetoed against no member of. Shared by the
- * works-table collapse and the heal so both split a work the same way.
- */
+/** Split one work's books into classes of compatible volumes, shared by collapse and heal: the anchor
+ *  (canonical ASIN, else the first book) starts class 0; others join the first class with no veto */
 export function partitionVolumes<T extends VolumeFields>(books: T[], canonicalAsin: string | undefined, level: VetoLevel): T[][] {
   const anchorIndex = Math.max(0, books.findIndex((b) => b.asin === canonicalAsin));
   const ordered = books.length > 0 ? [books[anchorIndex], ...books.filter((_, i) => i !== anchorIndex)] : [];

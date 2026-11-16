@@ -54,11 +54,9 @@ function newRows(group: DedupGroup, workId: string, asins: string[]) {
 }
 
 /**
- * Persist a single dedup group. Merge rule (#599): of the existing works the group
- * touches, at most one may hold ASINs outside the group (it becomes the target); a
- * work is absorbed only when all its ASINs are in the group, so the in-view checks
- * covered them. With two or more such works there is no merge: unlinked group ASINs
- * join the work holding the canonical ASIN, or nothing is written when it is unlinked.
+ * Persist one group. Merge rule (#599): a touched work is absorbed only when all its ASINs are in
+ * the group (checked in view); at most one may hold outside ASINs (the target). With two or more,
+ * no merge: unlinked ASINs join the canonical ASIN's work, or nothing is written if it is unlinked.
  */
 async function persistSingleGroup(group: DedupGroup): Promise<void> {
   const { canonicalAsin, allAsins, title, author } = group;
@@ -74,8 +72,7 @@ async function persistSingleGroup(group: DedupGroup): Promise<void> {
   if (existingWorkIds.length === 0) {
     const work = await prisma.work.create({ data: { title, author } });
     const { count } = await prisma.workAsin.createMany({ data: newRows(group, work.id, allAsins), skipDuplicates: true });
-    // Every ASIN was linked by a concurrent view meanwhile: drop the empty work
-    if (count === 0) await prisma.work.deleteMany({ where: { id: work.id, asins: { none: {} } } });
+    if (count === 0) await prisma.work.deleteMany({ where: { id: work.id, asins: { none: {} } } }); // all taken meanwhile
     logger.debug('Created new work', { workId: work.id, asinCount: count });
     return;
   }
@@ -189,9 +186,8 @@ export async function seedAsin(
  *  - Books whose ASINs map to a shared workId collapse to a single representative
  *    chosen by `metadataScore()` (same ranking as local dedup).
  *  - Books not present in any work, or in single-ASIN works, pass through untouched.
- *  - Known different volumes of one series never collapse, even when a work links
- *    them (#599): each work's books in view are split with `partitionVolumes` (anchor =
- *    canonical ASIN when in view), in memory only — the heal does the writes.
+ *  - Known different volumes never collapse even when a work links them (#599):
+ *    `partitionVolumes` splits each work in memory; the heal does the writes.
  *  - Original ordering is preserved (the kept representative sits at the position
  *    of the first occurrence of its work in the input list).
  *  - DB failure is non-fatal: the input list is returned unchanged so the view
