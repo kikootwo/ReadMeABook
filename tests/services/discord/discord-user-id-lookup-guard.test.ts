@@ -9,7 +9,9 @@
  *   - `discordUserId` inside a `where` object (`where: { ... }` or `const where = { ... }`,
  *     nested objects and arrays included), and
  *   - the raw column name `discord_user_id` (raw SQL).
- * Not caught: a where object built under another variable name and passed in later.
+ * A tripwire for the direct forms, not a proof. Not caught: a where object built under
+ * another variable name, a typed declaration (`const where: Prisma.UserWhereInput = { ... }`),
+ * or a property assignment (`where.discordUserId = ...`).
  */
 
 import { readdirSync, readFileSync } from 'fs';
