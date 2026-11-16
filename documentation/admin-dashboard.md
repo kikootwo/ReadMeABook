@@ -51,7 +51,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 **GET /api/admin/users**
 - User ID, Plex ID, username, email, role, avatar, created/updated dates, last login, request count, autoApproveRequests
 - `localLoginEnabled`: `isLocalLoginEnabled()` (shows the Add User button)
-- `discordUserId` per user (null = not linked; not shown on the page yet)
+- `discordUserId` per user (null = not linked). The page shows it (`Discord: <id>` under the name) and the Discord user ID field in the permissions dialog (`DiscordAccountField.tsx`: Save, Unlink, inline 15-20 digit check, the route's 409 text) only when the Discord bot is configured (`GET /api/admin/settings/discord` → `isConfigured`, [integrations/discord-bot.md](integrations/discord-bot.md))
 
 **POST /api/admin/users** (#77)
 - Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403)
@@ -70,7 +70,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Returning user: signing in again creates a new account. Rules + freed key format: [backend/services/auth.md](backend/services/auth.md#deleting-users)
 - Clears `discordUserId` (the Discord account can then be linked to another user)
 
-**PUT /api/admin/users/[id]/discord** (#231, groundwork: no bot and no Users page field yet)
+**PUT /api/admin/users/[id]/discord** (#231; called by the Users page field)
 - Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403). An admin may link their own account: only `discordUserId` is written, never the role
 - Body `{ discordUserId }` (`AUTH_JSON_BODY_LIMIT_BYTES`; other keys ignored): a Discord user ID, trimmed, 15-20 digits, no leading zero (`^[1-9]\d{14,19}$`); `null` or `''` unlinks
 - One write, `updateMany` on `{ id, deletedAt: null }`: 200 `{ user: { id, discordUserId } }`; info log `Discord account linked`/`unlinked` with `userId`, `adminId`, `discordUserId` (null on unlink)

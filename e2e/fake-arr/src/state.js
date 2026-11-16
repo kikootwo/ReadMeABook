@@ -30,6 +30,8 @@ export function loadConfig(env = process.env) {
       plex: Number(env.PLEX_PORT || 32400),
       metadata: Number(env.METADATA_PORT || 9898),
       control: Number(env.CONTROL_PORT || 9999),
+      // TLS sinkhole for the Discord hosts (raw TCP, see sinkhole.js)
+      sinkhole: Number(env.SINKHOLE_PORT || 443),
     },
     defaultScenario: env.SCENARIO || 'smoke',
     // Required for every /__control call except /health. run.mjs generates one per run; RMAB never gets it.
