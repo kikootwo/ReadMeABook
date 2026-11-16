@@ -1,6 +1,10 @@
 /**
  * Component: Discord Bot Settings API
  * Documentation: documentation/integrations/discord-bot.md
+ *
+ * Token rule for PUT: the mask or '' keeps the saved token; a new value replaces it;
+ * only `clearBotToken: true` removes it (the one clear-on-purpose path). A blank form
+ * sent by mistake can never erase a saved token.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,7 +23,7 @@ import {
   loadDiscordConfig,
   type DiscordConfig,
 } from '@/lib/services/discord/discord-config';
-import { DISCORD_TOKEN_MASK, isMaskedToken } from '@/lib/services/discord/discord-token-mask';
+import { DISCORD_TOKEN_MASK, isMaskedToken, normalizeBotToken } from '@/lib/services/discord/discord-token-mask';
 
 const logger = RMABLogger.create('API.Admin.Settings.Discord');
 
@@ -28,8 +32,10 @@ const discordId = z.string().trim().refine((value) => value === '' || isSnowflak
 
 const DiscordSettingsSchema = z.object({
   enabled: z.boolean(),
-  /** The masked value keeps the saved token; '' clears it. */
-  botToken: z.string().trim().max(200),
+  /** The mask or '' keeps the saved token; a leading "Bot " / "Bearer " is dropped. */
+  botToken: z.string().max(220).transform(normalizeBotToken).pipe(z.string().max(200)),
+  /** The only way to remove a saved token. */
+  clearBotToken: z.boolean().optional(),
   guildId: discordId,
   requestChannelId: discordId,
   adminRoleId: discordId,
@@ -78,9 +84,10 @@ export async function PUT(request: NextRequest) {
         if (!bodyResult.ok) return bodyResult.response;
         const input = DiscordSettingsSchema.parse(bodyResult.data);
 
-        const keepToken = isMaskedToken(input.botToken);
+        const clearToken = input.clearBotToken === true;
+        const keepToken = !clearToken && (input.botToken === '' || isMaskedToken(input.botToken));
         const saved = await loadDiscordConfig();
-        const effectiveToken = keepToken ? saved.botToken : input.botToken;
+        const effectiveToken = clearToken ? '' : keepToken ? saved.botToken : input.botToken;
         if (input.enabled && (!effectiveToken || !input.guildId)) {
           return NextResponse.json(
             { error: 'ValidationError', message: 'Enabling the bot needs a bot token and a server ID' },
@@ -92,7 +99,7 @@ export async function PUT(request: NextRequest) {
         const updates = [
           { key: DISCORD_KEYS.enabled, value: String(input.enabled), category },
           ...DISCORD_ID_FIELDS.map((field) => ({ key: DISCORD_KEYS[field], value: input[field], category })),
-          ...(keepToken ? [] : [{ key: DISCORD_KEYS.botToken, value: input.botToken, encrypted: true, category }]),
+          ...(keepToken ? [] : [{ key: DISCORD_KEYS.botToken, value: effectiveToken, encrypted: true, category }]),
         ];
         await getConfigService().setManyAtomic(updates);
         logger.info('Discord settings saved', { adminId: req.user?.sub, enabled: input.enabled, tokenChanged: !keepToken });

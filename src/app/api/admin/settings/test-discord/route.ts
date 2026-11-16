@@ -10,7 +10,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { isSnowflake, loadDiscordConfig } from '@/lib/services/discord/discord-config';
-import { isMaskedToken } from '@/lib/services/discord/discord-token-mask';
+import { isMaskedToken, normalizeBotToken } from '@/lib/services/discord/discord-token-mask';
 import { checkDiscordBot, DiscordCheckError } from '@/lib/services/discord/discord-rest';
 
 const logger = RMABLogger.create('API.Admin.Settings.TestDiscord');
@@ -19,8 +19,8 @@ const ID_MESSAGE = 'Discord IDs are 15 to 20 digits, not starting with 0 (or emp
 const discordId = z.string().trim().refine((value) => value === '' || isSnowflake(value), { message: ID_MESSAGE }).optional();
 
 const TestSchema = z.object({
-  /** Omitted, empty or the mask: test the saved token. */
-  botToken: z.string().trim().max(200).optional(),
+  /** Omitted, empty or the mask: test the saved token. A leading "Bot " / "Bearer " is dropped. */
+  botToken: z.string().max(220).transform(normalizeBotToken).pipe(z.string().max(200)).optional(),
   guildId: discordId,
   requestChannelId: discordId,
   adminRoleId: discordId,
@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
         }
         if (error instanceof DiscordCheckError) {
           logger.warn('Discord bot test failed', { kind: error.kind });
-          return NextResponse.json({ error: error.message }, { status: error.kind === 'token-rejected' ? 400 : 502 });
+          const status = error.kind === 'token-rejected' ? 400 : error.kind === 'rate-limited' ? 429 : 502;
+          return NextResponse.json({ error: error.message }, { status });
         }
         logger.error('Discord bot test failed', { error: errorForLog(error) });
         return NextResponse.json({ error: 'Discord bot test failed' }, { status: 500 });

@@ -5,13 +5,16 @@
  * One bot client per process (globalThis singleton). discord.js is loaded only after the
  * settings say the bot is configured, and only once per process. A generation counter
  * makes start/stop/restart safe to interleave: a start that a later stop or restart has
- * superseded never keeps its client. start() never throws; failures are logged and shown
- * on the settings tab as the bot status.
+ * superseded never keeps its client, and a client from an older start is destroyed before a
+ * new one logs in (one gateway session per token). start() never throws; failures are logged
+ * and shown on the settings tab as the bot status. A gateway that closes for good (token
+ * reset, invalid intents) marks the bot failed; it is not retried until an admin saves again.
  */
 
 import type { Client } from 'discord.js';
 import { RMABLogger } from '@/lib/utils/logger';
 import { processSingleton } from '@/lib/utils/process-singleton';
+import { DISCORD_BOT_SINGLETON_KEY } from '@/lib/constants/shutdown';
 import { errorForLog } from '@/lib/utils/zod-validation';
 import { isDiscordConfigured, loadDiscordConfig } from './discord-config';
 import { setDiscordBotRunning } from './discord-runtime';
@@ -37,10 +40,17 @@ interface BotState {
   status: DiscordBotStatus;
   /** discord.js, loaded once per process on the first configured start. */
   library?: Promise<DiscordModule>;
+  /** Read by the shutdown coordinator (peeked, never created there). */
+  stop: () => Promise<void>;
 }
 
 function botState(): BotState {
-  return processSingleton<BotState>('discord-bot', () => ({ generation: 0, client: null, status: { state: 'stopped' } }));
+  return processSingleton<BotState>(DISCORD_BOT_SINGLETON_KEY, () => ({
+    generation: 0,
+    client: null,
+    status: { state: 'stopped' },
+    stop: () => service.stop(),
+  }));
 }
 
 function loadLibrary(state: BotState): Promise<DiscordModule> {
@@ -78,6 +88,12 @@ export class DiscordBotService {
       const { Client, Events, GatewayIntentBits } = await loadLibrary(state);
       if (superseded()) return;
 
+      // A client from an earlier start (no stop in between) must not stay connected
+      const previous = state.client;
+      state.client = null;
+      if (previous) await destroyQuietly(previous);
+      if (superseded()) return;
+
       // Guilds only: roles come from interaction.member, no privileged intents.
       // No mention is parsed unless a send names it (an admin role ping lists its role).
       const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
@@ -93,8 +109,20 @@ export class DiscordBotService {
         void this.registerCommands(ready, config.guildId);
       });
       client.on(Events.InteractionCreate, (interaction) => {
+        if (superseded()) return;
         void this.onInteraction(interaction as unknown as RoutableInteraction, config.guildId);
       });
+      // The gateway will not reconnect: show it, and stop routing work through this client
+      const dead = (reason: string) => {
+        if (superseded() || state.client !== client) return;
+        logger.error('Discord gateway closed for good; save the settings to try again', { reason });
+        state.status = { state: 'failed', lastError: reason };
+        state.client = null;
+        setDiscordBotRunning(false);
+        void destroyQuietly(client);
+      };
+      client.on(Events.Invalidated, () => dead('Discord ended the session'));
+      client.on(Events.ShardDisconnect, (event) => dead(`Gateway closed (code ${event.code})`));
 
       await client.login(config.botToken);
       if (superseded()) {

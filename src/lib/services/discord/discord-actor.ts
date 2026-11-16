@@ -10,11 +10,12 @@
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getSessionRefusal } from '@/lib/services/auth/local-account-status';
+import { DISCORD_SNOWFLAKE_PATTERN, isSnowflake } from './discord-snowflake';
 
 const logger = RMABLogger.create('DiscordActor');
 
 /** A Discord user ID (snowflake): 15 to 20 digits, no leading zero. */
-export const DISCORD_USER_ID_PATTERN = /^[1-9]\d{14,19}$/;
+export const DISCORD_USER_ID_PATTERN = DISCORD_SNOWFLAKE_PATTERN;
 
 /** The RMAB account a Discord user acts as. */
 export interface DiscordActor {
@@ -33,7 +34,7 @@ export interface DiscordActor {
  * chooses those).
  */
 export async function resolveDiscordActor(discordUserId: string): Promise<DiscordActor | null> {
-  if (typeof discordUserId !== 'string' || !DISCORD_USER_ID_PATTERN.test(discordUserId)) return null;
+  if (!isSnowflake(discordUserId)) return null;
 
   const user = await prisma.user.findUnique({
     where: { discordUserId },

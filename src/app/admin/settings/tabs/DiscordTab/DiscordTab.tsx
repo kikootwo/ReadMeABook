@@ -30,10 +30,22 @@ const ID_FIELDS: { key: DiscordIdKey; label: string; help: string }[] = [
 ];
 
 export function DiscordTab({ onSuccess, onError }: DiscordTabProps) {
-  const { values, loaded, status, testResult, testing, saving, errors, update, test, save } = useDiscordSettings();
+  const { values, loaded, loadError, retryLoad, status, testResult, testing, saving, errors, update, test, save } =
+    useDiscordSettings();
   const pill = STATUS_STYLES[status.state];
   const hasErrors = Object.keys(errors).length > 0;
 
+  if (loadError) {
+    return (
+      <div className="space-y-4 max-w-2xl">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Discord Bot</h2>
+        <div className="p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 space-y-3">
+          <p role="alert" className="text-sm text-red-700 dark:text-red-300">{loadError}</p>
+          <Button variant="secondary" onClick={retryLoad}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
   if (!loaded) {
     return <div className="text-sm text-gray-500 dark:text-gray-400">Loading Discord settings...</div>;
   }
@@ -53,6 +65,10 @@ export function DiscordTab({ onSuccess, onError }: DiscordTabProps) {
         <p className="text-gray-600 dark:text-gray-400">
           Connect a Discord bot to this RMAB server. It has no commands yet. Users act in Discord as the RMAB account an
           admin links to their Discord ID on the Users page. Use one bot token for one RMAB server only.
+        </p>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Create a Discord application just for RMAB and turn Public Bot off: connecting replaces that application&apos;s
+          commands in your server.
         </p>
         {status.state === 'failed' && status.lastError && (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400 break-words">Last error: {status.lastError}</p>
@@ -75,7 +91,7 @@ export function DiscordTab({ onSuccess, onError }: DiscordTabProps) {
         <div className="min-w-0">
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Enable the Discord bot</div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            While off, RMAB never contacts Discord.
+            While off, the bot stays disconnected. Test still checks the token with Discord.
           </p>
         </div>
       </div>

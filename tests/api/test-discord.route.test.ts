@@ -107,8 +107,38 @@ describe('POST /api/admin/settings/test-discord', () => {
   });
 
   it('builds every Discord path with Routes from validated IDs', async () => {
+    discord.state.restGet['/users/@me/guilds'] = [];
     await post({ guildId: GUILD, requestChannelId: CHANNEL });
     expect(discord.state.restCalls).toEqual(['/users/@me', '/users/@me/guilds', `/guilds/${GUILD}`, `/guilds/${GUILD}/channels`, `/guilds/${GUILD}/roles`]);
+  });
+
+  it('skips the server lookup when the server list already has it', async () => {
+    const { json } = await post({ guildId: GUILD, requestChannelId: CHANNEL });
+    expect(json.guild).toEqual({ id: GUILD, name: 'Book Club' });
+    expect(discord.state.restCalls).not.toContain(`/guilds/${GUILD}`);
+  });
+
+  it('the one-off REST client fails at once on a 429 and keeps no sweeper timers', async () => {
+    await post({});
+    const options = discord.state.restOptions[0];
+    expect(options).toMatchObject({ retries: 0, hashSweepInterval: 0, handlerSweepInterval: 0 });
+    expect(typeof options.rejectOnRateLimit).toBe('function');
+    expect((options.rejectOnRateLimit as () => boolean)()).toBe(true);
+  });
+
+  it.each(['/users/@me', `/guilds/${GUILD}/channels`])('a 429 on %s: 429 with a fixed message', async (route) => {
+    discord.state.restGet[route] = async () => {
+      const { RateLimitError } = await import('discord.js');
+      throw new RateLimitError(route);
+    };
+    const { status, json } = await post({ guildId: GUILD, requestChannelId: CHANNEL });
+    expect(status).toBe(429);
+    expect(json).toEqual({ error: 'Discord is rate limiting this bot; try again in a minute' });
+  });
+
+  it.each(['Bot typed.token', 'bearer  typed.token', ' BOT typed.token '])('drops a pasted prefix (%s)', async (botToken) => {
+    await post({ botToken });
+    expect(discord.state.restTokens[0]).toBe('typed.token');
   });
 
   it.each([
@@ -150,15 +180,26 @@ describe('POST /api/admin/settings/test-discord', () => {
     expect(JSON.stringify(json)).not.toContain('ECONNREFUSED');
   });
 
-  it('a server the bot is not in: identity still returned, with a warning', async () => {
+  it.each([403, 404])('a server the bot is not in (%s): identity still returned, with a warning', async (code) => {
+    discord.state.restGet['/users/@me/guilds'] = [];
     discord.state.restGet[`/guilds/${GUILD}`] = () => {
-      throw Object.assign(new Error('Missing Access'), { status: 403 });
+      throw Object.assign(new Error('Missing Access'), { status: code });
     };
     const { status, json } = await post({ guildId: GUILD, requestChannelId: CHANNEL });
     expect(status).toBe(200);
     expect(json.bot.id).toBe(BOT_ID);
     expect(json.guild).toBeNull();
     expect(json.warnings).toContain('The bot is not in this server yet. Use the invite link, then test again.');
+  });
+
+  it('another server lookup failure says the server could not be checked', async () => {
+    discord.state.restGet['/users/@me/guilds'] = [];
+    discord.state.restGet[`/guilds/${GUILD}`] = () => {
+      throw Object.assign(new Error('Internal Server Error'), { status: 500 });
+    };
+    const { json } = await post({ guildId: GUILD });
+    expect(json.guild).toBeNull();
+    expect(json.warnings).toEqual(['Could not check the server. Try again in a moment.']);
   });
 
   it('an ID that is not in the server is reported, not guessed', async () => {

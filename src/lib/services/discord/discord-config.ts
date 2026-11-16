@@ -7,7 +7,9 @@
  */
 
 import { getConfigService } from '@/lib/services/config.service';
-import { DISCORD_USER_ID_PATTERN } from './discord-actor';
+import { isSnowflake } from './discord-snowflake';
+
+export { isSnowflake };
 
 export const DISCORD_KEYS = {
   enabled: 'discord.enabled',
@@ -35,11 +37,6 @@ export interface DiscordConfig {
   adminRoleId: string;
   adminNotifyChannelId: string;
   requestCardMode: DiscordCardMode;
-}
-
-/** A Discord ID (snowflake): 15 to 20 digits, no leading zero. Same rule for users, servers, channels and roles. */
-export function isSnowflake(value: unknown): value is string {
-  return typeof value === 'string' && DISCORD_USER_ID_PATTERN.test(value);
 }
 
 export function parseCardMode(value: string | null | undefined): DiscordCardMode {

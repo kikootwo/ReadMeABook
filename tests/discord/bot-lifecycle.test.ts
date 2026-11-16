@@ -26,6 +26,15 @@ discord.state = createFakeDiscordState();
 const GUILD = '222222222222222222';
 const OTHER_GUILD = '333333333333333333';
 const TOKEN = 'fake.bot.token';
+const IGNORED_FOREIGN = 'Ignored a Discord interaction from another server';
+
+/** A slash command from `guildId` (every type guard the router may read). */
+function commandFrom(guildId: string | null, reply = vi.fn()) {
+  return {
+    guildId, commandName: 'request', reply,
+    isChatInputCommand: () => true, isAutocomplete: () => false, isModalSubmit: () => false, isButton: () => false, isAnySelectMenu: () => false,
+  };
+}
 
 function configure(values: Partial<Record<'enabled' | 'token' | 'guild', string | null>>) {
   config.values = {
@@ -173,15 +182,77 @@ describe('Discord bot lifecycle', () => {
     await service.start();
     const client = discord.state.clients[0];
     const reply = vi.fn();
-    const foreign = { guildId: OTHER_GUILD, isChatInputCommand: () => true, isAutocomplete: () => false, isModalSubmit: () => false, commandName: 'request', reply };
-    const noGuild = { ...foreign, guildId: null };
+    const foreign = commandFrom(OTHER_GUILD, reply);
+    const noGuild = commandFrom(null, reply);
 
     client.emit(FAKE_EVENTS.InteractionCreate, foreign);
     client.emit(FAKE_EVENTS.InteractionCreate, noGuild);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(reply).not.toHaveBeenCalled();
-    expect(logLines.filter((l) => l.message === 'Ignored a Discord interaction from another server')).toHaveLength(2);
+    expect(logLines.filter((l) => l.message === IGNORED_FOREIGN)).toHaveLength(2);
+  });
+
+  it('a second start with no stop between destroys the first client; the old client is ignored', async () => {
+    const { service, runtime } = await load();
+    await service.start();
+    const [first] = discord.state.clients;
+    await vi.waitFor(() => expect(runtime.isDiscordBotRunning()).toBe(true));
+
+    await service.start();
+
+    expect(discord.state.clients).toHaveLength(2);
+    expect(first.destroy).toHaveBeenCalledTimes(1);
+    expect(discord.state.clients[1].destroy).not.toHaveBeenCalled();
+    expect(service.getClient()).toBe(discord.state.clients[1]);
+    first.emit(FAKE_EVENTS.InteractionCreate, commandFrom(OTHER_GUILD));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(logLines.filter((l) => l.message === IGNORED_FOREIGN)).toHaveLength(0);
+  });
+
+  it.each([
+    ['invalidated', FAKE_EVENTS.Invalidated, [] as unknown[], 'Discord ended the session'],
+    ['a shard closed for good (4004)', FAKE_EVENTS.ShardDisconnect, [{ code: 4004 }, 0], 'Gateway closed (code 4004)'],
+  ])('%s: status failed, not running, client destroyed, no retry', async (_label, event, args, reason) => {
+    const { service, runtime } = await load();
+    await service.start();
+    await vi.waitFor(() => expect(runtime.isDiscordBotRunning()).toBe(true));
+    const client = discord.state.clients[0];
+
+    client.emit(event, ...args);
+
+    expect(service.getStatus()).toEqual({ state: 'failed', lastError: reason });
+    expect(runtime.isDiscordBotRunning()).toBe(false);
+    expect(service.getClient()).toBeNull();
+    await vi.waitFor(() => expect(client.destroy).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(discord.state.clients).toHaveLength(1);
+    expect(JSON.stringify(logLines)).not.toContain(TOKEN);
+  });
+
+  it('the shutdown coordinator reaches stop() through the peeked state, without loading discord.js', async () => {
+    configure({ enabled: 'false' });
+    const { service } = await load();
+    await service.start();
+    const { peekProcessSingleton } = await import('@/lib/utils/process-singleton');
+    const { DISCORD_BOT_SINGLETON_KEY } = await import('@/lib/constants/shutdown');
+
+    await peekProcessSingleton<{ stop(): Promise<void> }>(DISCORD_BOT_SINGLETON_KEY)!.stop();
+
+    expect(discord.state.evaluated).toBe(0);
+    expect(service.getStatus().state).toBe('stopped');
+  });
+
+  it('the peeked stop() disconnects a running bot', async () => {
+    const { service, runtime } = await load();
+    await service.start();
+    await vi.waitFor(() => expect(runtime.isDiscordBotRunning()).toBe(true));
+    const { peekProcessSingleton } = await import('@/lib/utils/process-singleton');
+
+    await peekProcessSingleton<{ stop(): Promise<void> }>('discord-bot')!.stop();
+
+    expect(discord.state.clients[0].destroy).toHaveBeenCalledTimes(1);
+    expect(runtime.isDiscordBotRunning()).toBe(false);
   });
 
   it('loads discord.js once for several starts', async () => {

@@ -21,6 +21,7 @@ export interface FakeDiscordState {
   restGet: Record<string, unknown | ((path: string) => unknown)>;
   restCalls: string[];
   restTokens: string[];
+  restOptions: Record<string, unknown>[];
 }
 
 export interface FakeClient {
@@ -34,7 +35,7 @@ export interface FakeClient {
 }
 
 export function createFakeDiscordState(): FakeDiscordState {
-  return { evaluated: 0, clients: [], restGet: {}, restCalls: [], restTokens: [] };
+  return { evaluated: 0, clients: [], restGet: {}, restCalls: [], restTokens: [], restOptions: [] };
 }
 
 export function resetFakeDiscordState(state: FakeDiscordState): void {
@@ -44,6 +45,7 @@ export function resetFakeDiscordState(state: FakeDiscordState): void {
   state.restGet = {};
   state.restCalls.length = 0;
   state.restTokens.length = 0;
+  state.restOptions.length = 0;
 }
 
 export const FAKE_EVENTS = {
@@ -51,6 +53,8 @@ export const FAKE_EVENTS = {
   InteractionCreate: 'interactionCreate',
   Error: 'error',
   ShardError: 'shardError',
+  Invalidated: 'invalidated',
+  ShardDisconnect: 'shardDisconnect',
 };
 
 export function fakeDiscordModule(state: FakeDiscordState) {
@@ -89,7 +93,9 @@ export function fakeDiscordModule(state: FakeDiscordState) {
 
   class REST {
     private token = '';
-    constructor(public options: Record<string, unknown> = {}) {}
+    constructor(public options: Record<string, unknown> = {}) {
+      state.restOptions.push(options);
+    }
     setToken(token: string) {
       this.token = token;
       return this;
@@ -119,9 +125,17 @@ export function fakeDiscordModule(state: FakeDiscordState) {
     }
   }
 
+  /** What @discordjs/rest throws on a 429 when rejectOnRateLimit says so. */
+  class RateLimitError extends Error {
+    constructor(public route = '/users/@me') {
+      super('Rate limited');
+    }
+  }
+
   return {
     Client,
     REST,
+    RateLimitError,
     Routes,
     DiscordAPIError,
     Events: FAKE_EVENTS,

@@ -24,12 +24,19 @@ const ENTRIES = [
   'src/app/api/admin/requests/[id]/route.ts',
   'src/lib/services/request-delete.service.ts',
   'src/lib/startup/app-init.ts',
+  'src/lib/startup/shutdown-coordinator.ts',
 ];
 
-/** Modules a core path may import: the facade only (it loads the bot lazily, when running). */
-const ALLOWED_DISCORD_MODULES = new Set(['src/lib/services/discord/discord-runtime.ts', 'src/lib/services/discord/discord-actor.ts']);
+/** Modules a core path may import: the facade (it loads the bot lazily, when running), the actor resolver and the ID check. */
+const ALLOWED_DISCORD_MODULES = new Set([
+  'src/lib/services/discord/discord-runtime.ts',
+  'src/lib/services/discord/discord-actor.ts',
+  'src/lib/services/discord/discord-snowflake.ts',
+]);
 
-const IMPORT_RE = /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
+/** Static import/export, and import() or require() with a quoted or plain template-literal specifier. */
+const IMPORT_RE =
+  /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]|(?:import|require)\(\s*(?:['"]([^'"]+)['"]|`([^`$]+)`)\s*\)/g;
 
 function resolveModule(spec: string, fromFile: string): string | null {
   let base: string;
@@ -57,7 +64,7 @@ function importGraph(entry: string) {
     if (rel === 'src/lib/services/discord/discord-runtime.ts') continue;
     const source = fs.readFileSync(file, 'utf8');
     for (const match of source.matchAll(IMPORT_RE)) {
-      const spec = match[1] ?? match[2];
+      const spec = match[1] ?? match[2] ?? match[3];
       const resolved = resolveModule(spec, file);
       if (!resolved) {
         packages.set(spec, rel);
@@ -80,6 +87,15 @@ describe('Discord zero footprint: core web paths', () => {
     expect([...packages.keys()].filter((p) => p === 'discord.js' || p.startsWith('@discordjs/'))).toEqual([]);
     const disallowed = [...discordModules.keys()].filter((m) => !ALLOWED_DISCORD_MODULES.has(m));
     expect(disallowed).toEqual([]);
+  });
+
+  it.each([
+    ["require('discord.js')", 'discord.js'],
+    ['require("@discordjs/rest")', '@discordjs/rest'],
+    ['await import(`discord.js`)', 'discord.js'],
+    ["const x = await import( './discord-bot.service' )", './discord-bot.service'],
+  ])('the import pattern catches %s', (source, spec) => {
+    expect([...source.matchAll(IMPORT_RE)].map((m) => m[1] ?? m[2] ?? m[3])).toEqual([spec]);
   });
 
   it('the walker sees the bot module when it is imported (control)', () => {

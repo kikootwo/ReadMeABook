@@ -125,14 +125,26 @@ describe('/api/admin/settings/discord', () => {
     expect(written('discord.bot_token')).toBeUndefined();
   });
 
-  it('an empty token clears it; enabling then needs a token (400)', async () => {
-    expect((await put(body({ enabled: false, botToken: '' }))).status).toBe(200);
-    expect(written('discord.bot_token')).toMatchObject({ value: '' });
+  it('an empty token alone keeps the stored token (a blank form cannot erase it)', async () => {
+    const { status } = await put(body({ enabled: false, botToken: '', guildId: '', requestChannelId: '' }));
+
+    expect(status).toBe(200);
+    expect(written('discord.bot_token')).toBeUndefined();
+  });
+
+  it('clearBotToken removes it; enabling then needs a token (400)', async () => {
+    expect((await put(body({ enabled: false, botToken: '', clearBotToken: true }))).status).toBe(200);
+    expect(written('discord.bot_token')).toMatchObject({ value: '', encrypted: true });
 
     setManyAtomic.mockClear();
-    const refused = await put(body({ enabled: true, botToken: '' }));
+    const refused = await put(body({ enabled: true, botToken: '', clearBotToken: true }));
     expect(refused.status).toBe(400);
     expect(setManyAtomic).not.toHaveBeenCalled();
+  });
+
+  it.each(['Bot new.bot.token', 'bearer new.bot.token', '  BOT   new.bot.token '])('drops a pasted prefix (%s)', async (botToken) => {
+    await put(body({ botToken }));
+    expect(written('discord.bot_token')).toMatchObject({ value: 'new.bot.token', encrypted: true });
   });
 
   it('enabling with no server ID is refused (400)', async () => {

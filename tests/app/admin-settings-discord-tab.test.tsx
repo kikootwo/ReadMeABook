@@ -106,7 +106,79 @@ describe('Discord settings tab', () => {
       requestChannelId: '444444444444444444',
       adminRoleId: '',
       adminNotifyChannelId: '',
+      clearBotToken: false,
     });
+  });
+
+  it('emptying a saved token asks the server to clear it on purpose', async () => {
+    await renderTab(savedSettings());
+
+    fireEvent.change(screen.getByLabelText('Bot token'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchWithAuthMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));
+    const put = fetchWithAuthMock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(put![1].body as string)).toMatchObject({ botToken: '', clearBotToken: true });
+  });
+
+  it.each([
+    ['a 500', () => response({ error: 'Failed to read Discord settings' }, false, 500)],
+    ['a network error', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('a failed load (%s) shows the error with Retry, and no Save or Test until a load works', async (_label, failure) => {
+    const loaded = savedSettings();
+    let fail = true;
+    fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method) throw new Error(`unexpected ${init.method} ${url}`);
+      return fail ? failure() : response(loaded);
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { DiscordTab } = await import('@/app/admin/settings/tabs/DiscordTab/DiscordTab');
+    render(<DiscordTab onSuccess={vi.fn()} onError={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(/Could not load the saved Discord settings/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull();
+    expect(screen.queryByLabelText('Bot token')).toBeNull();
+
+    fail = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect((screen.getByLabelText('Bot token') as HTMLInputElement).value).toBe(MASK));
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(fetchWithAuthMock.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+  });
+
+  it('after a Save that enables the bot, reads the status again until it settles (bounded)', async () => {
+    const statuses = [{ state: 'starting' }, { state: 'failed', lastError: 'An invalid token was provided.' }];
+    let gets = 0;
+    fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') return response({ ...savedSettings({ enabled: true }), status: { state: 'stopped' } });
+      gets++;
+      if (gets === 1) return response(savedSettings());
+      return response({ ...savedSettings({ enabled: true }), status: statuses[Math.min(gets - 2, statuses.length - 1)] });
+    });
+    const { DiscordTab } = await import('@/app/admin/settings/tabs/DiscordTab/DiscordTab');
+    render(<DiscordTab onSuccess={vi.fn()} onError={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText('Bot token')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable the Discord bot' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByText('Could not connect')).toBeTruthy(), { timeout: 3000 });
+    expect(screen.getByText(/Last error: An invalid token was provided/)).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(gets).toBe(3); // the load, then two reads: none after "failed"
+  }, 10_000);
+
+  it('changing an ID or the token clears the last Test result', async () => {
+    await renderTab(savedSettings());
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+    await waitFor(() => expect(screen.getByText(/Token works/)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Server ID'), { target: { value: '333333333333333333' } });
+
+    expect(screen.queryByText(/Token works/)).toBeNull();
+    expect(screen.queryByRole('link', { name: /Invite the bot/ })).toBeNull();
   });
 
   it('an ID that is not a Discord ID shows an inline error and disables Save', async () => {

@@ -12,8 +12,7 @@
 
 import React, { useState } from 'react';
 import { fetchJSON } from '@/lib/utils/api';
-
-const DISCORD_ID = /^[1-9]\d{14,19}$/;
+import { isSnowflake } from '@/lib/services/discord/discord-snowflake';
 
 interface DiscordAccountFieldProps {
   user: { id: string; plexUsername: string; discordUserId?: string | null };
@@ -32,7 +31,7 @@ export function DiscordAccountField({ user, onSaved }: DiscordAccountFieldProps)
   const [error, setError] = useState<string | null>(null);
 
   const trimmed = value.trim();
-  const invalid = trimmed !== '' && !DISCORD_ID.test(trimmed);
+  const invalid = trimmed !== '' && !isSnowflake(trimmed);
   const unchanged = trimmed === (user.discordUserId ?? '');
 
   const submit = async (discordUserId: string | null) => {

@@ -4,18 +4,20 @@
  *
  * Owns the stop when NEXT_MANUAL_SIG_HANDLE=true (exported by docker/unified/app-start.sh,
  * read by Next before register() runs). Order, all within SHUTDOWN_HARD_DEADLINE_MS:
- * stop HTTP + new jobs → running jobs and requests get SHUTDOWN_DRAIN_MS → close the queue
+ * stop HTTP + new jobs (and disconnect the Discord bot, if it ever started, within one step
+ * limit) → running jobs and requests get SHUTDOWN_DRAIN_MS → close the queue
  * (only when nothing is left running) → flush job-row writes → disconnect Prisma and
  * Redis → exit 0. Every step is bounded and they end before the hard deadline, which
  * exits 1 if the event loop ran late. A blocked event loop fires no timer at all:
  * app-start.sh then SIGKILLs node by wall clock (APP_STOP_KILL_AFTER).
- * Only peeks the process singletons: never creates the job queue (that starts workers)
- * or Prisma, and imports neither, so the instrumentation bundle stays small.
+ * Only peeks the process singletons: never creates the job queue (that starts workers),
+ * Prisma or the Discord bot, and imports none of them, so the instrumentation bundle stays
+ * small and discord.js is never loaded here.
  * Dependency-light like startup-trigger.ts: console logging, no Prisma/logger imports.
  */
 
 import diagnosticsChannel from 'node:diagnostics_channel';
-import { SHUTDOWN_DRAIN_MS, SHUTDOWN_HARD_DEADLINE_MS, SHUTDOWN_STEP_LIMIT_MS } from '@/lib/constants/shutdown';
+import { DISCORD_BOT_SINGLETON_KEY, SHUTDOWN_DRAIN_MS, SHUTDOWN_HARD_DEADLINE_MS, SHUTDOWN_STEP_LIMIT_MS } from '@/lib/constants/shutdown';
 import { JOB_QUEUE_SINGLETON_KEY, type ActiveJobInfo, type QueueShutdownTarget } from '@/lib/services/job-activity-tracker';
 import { oncePerProcess, peekProcessSingleton } from '@/lib/utils/process-singleton';
 import { markProcessStopping } from '@/lib/utils/process-stopping';
@@ -35,6 +37,8 @@ export interface ShutdownDeps {
   getServer: () => ClosableServer | undefined;
   getQueue: () => QueueShutdownTarget | undefined;
   getPrisma: () => { $disconnect(): Promise<void> } | undefined;
+  /** The Discord bot, only when its module has run in this process. */
+  getDiscordBot?: () => { stop(): Promise<void> } | undefined;
   markStopping: () => void;
   exit: (code: number) => void;
   log: (level: Level, message: string) => void;
@@ -93,6 +97,9 @@ async function runShutdown(signal: string, deps: ShutdownDeps): Promise<void> {
   if (!server) log('warn', 'HTTP server not captured; open requests end when the process exits');
   const queue = deps.getQueue();
   const runningAtStart = queue ? queue.activeJobs().length : 0;
+  // The bot's gateway session ends now (alongside the drain, so it adds no time)
+  const discordBot = deps.getDiscordBot?.();
+  const botStopped = discordBot ? within(() => discordBot.stop(), SHUTDOWN_STEP_LIMIT_MS) : Promise.resolve<Outcome>('done');
 
   // 2. Running jobs and in-flight requests get the drain window
   const [httpOutcome, jobsOutcome] = await Promise.all([
@@ -109,6 +116,8 @@ async function runShutdown(signal: string, deps: ShutdownDeps): Promise<void> {
         }, remaining(SHUTDOWN_DRAIN_MS))
       : Promise.resolve<Outcome>('done'),
   ]);
+  const botOutcome = await botStopped;
+  if (botOutcome !== 'done') log('warn', `Discord bot stop: ${botOutcome}`);
   if (server && httpOutcome !== 'done') {
     log('warn', 'Requests still open at the drain limit; closing their connections');
     server.closeAllConnections?.();
@@ -202,6 +211,7 @@ export function registerShutdownHandlers(env: Record<string, string | undefined>
       getServer: captureHttpServer(),
       getQueue: () => peekProcessSingleton<{ shutdownTarget(): QueueShutdownTarget }>(JOB_QUEUE_SINGLETON_KEY)?.shutdownTarget(),
       getPrisma: () => peekProcessSingleton<{ $disconnect(): Promise<void> }>('prisma'),
+      getDiscordBot: () => peekProcessSingleton<{ stop(): Promise<void> }>(DISCORD_BOT_SINGLETON_KEY),
       markStopping: markProcessStopping,
       exit: (code) => process.exit(code),
       log: consoleLog,

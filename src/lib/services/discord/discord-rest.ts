@@ -9,11 +9,14 @@
  */
 
 import { isSnowflake, type DiscordIdField } from './discord-config';
+import { normalizeBotToken } from './discord-token-mask';
 
 /** View Channels + Send Messages + Embed Links + Read Message History. Never Administrator. */
 export const DISCORD_INVITE_PERMISSIONS = '84992';
 
 const REST_TIMEOUT_MS = 10_000;
+
+export const RATE_LIMITED_MESSAGE = 'Discord is rate limiting this bot; try again in a minute';
 
 export interface DiscordNamedItem {
   id: string;
@@ -33,7 +36,7 @@ export interface DiscordCheckResult {
 }
 
 export class DiscordCheckError extends Error {
-  constructor(public readonly kind: 'token-rejected' | 'unreachable', message: string) {
+  constructor(public readonly kind: 'token-rejected' | 'unreachable' | 'rate-limited', message: string) {
     super(message);
   }
 }
@@ -65,13 +68,26 @@ export async function checkDiscordBot(
   for (const value of Object.values(ids)) {
     if (value && !isSnowflake(value)) throw new Error('checkDiscordBot: unvalidated ID');
   }
-  const { REST, Routes } = await import('discord.js');
-  const rest = new REST({ version: '10', timeout: REST_TIMEOUT_MS, retries: 0 }).setToken(token);
+  const { REST, Routes, RateLimitError } = await import('discord.js');
+  // A 429 fails at once (by default the library waits out retry_after and tries again, with
+  // no limit). No sweeper timers: they would keep this one-off client and its token alive.
+  const rest = new REST({
+    version: '10',
+    timeout: REST_TIMEOUT_MS,
+    retries: 0,
+    rejectOnRateLimit: () => true,
+    hashSweepInterval: 0,
+    handlerSweepInterval: 0,
+  }).setToken(normalizeBotToken(token));
+  const failIfLimited = (error: unknown) => {
+    if (error instanceof RateLimitError) throw new DiscordCheckError('rate-limited', RATE_LIMITED_MESSAGE);
+  };
 
   let bot: { id: string; username: string };
   try {
     bot = (await rest.get(Routes.user('@me'))) as { id: string; username: string };
   } catch (error) {
+    failIfLimited(error);
     if (statusOf(error) === 401) throw new DiscordCheckError('token-rejected', 'Discord rejected the bot token');
     throw new DiscordCheckError('unreachable', 'Could not reach Discord');
   }
@@ -81,7 +97,8 @@ export async function checkDiscordBot(
   try {
     const list = (await rest.get(Routes.userGuilds())) as DiscordNamedItem[];
     guilds = list.map(({ id, name }) => ({ id, name }));
-  } catch {
+  } catch (error) {
+    failIfLimited(error);
     warnings.push('Could not list the servers the bot is in.');
   }
 
@@ -96,18 +113,30 @@ export async function checkDiscordBot(
   const guildId = ids.guildId;
   if (!guildId) return result;
 
-  try {
-    const guild = (await rest.get(Routes.guild(guildId))) as DiscordNamedItem;
-    result.guild = { id: guild.id, name: guild.name };
-  } catch {
-    warnings.push('The bot is not in this server yet. Use the invite link, then test again.');
-    return result;
+  // The server list already names it when the bot is in it; ask Discord only otherwise
+  result.guild = guilds.find((guild) => guild.id === guildId) ?? null;
+  if (!result.guild) {
+    try {
+      const guild = (await rest.get(Routes.guild(guildId))) as DiscordNamedItem;
+      result.guild = { id: guild.id, name: guild.name };
+    } catch (error) {
+      failIfLimited(error);
+      const status = statusOf(error);
+      warnings.push(
+        status === 403 || status === 404
+          ? 'The bot is not in this server yet. Use the invite link, then test again.'
+          : 'Could not check the server. Try again in a moment.'
+      );
+      return result;
+    }
   }
 
-  const [channels, roles] = await Promise.all([
-    rest.get(Routes.guildChannels(guildId)).catch(() => null) as Promise<DiscordNamedItem[] | null>,
-    rest.get(Routes.guildRoles(guildId)).catch(() => null) as Promise<DiscordNamedItem[] | null>,
-  ]);
+  const listOrNull = (path: `/${string}`) =>
+    (rest.get(path) as Promise<DiscordNamedItem[]>).catch((error: unknown) => {
+      failIfLimited(error);
+      return null;
+    });
+  const [channels, roles] = await Promise.all([listOrNull(Routes.guildChannels(guildId)), listOrNull(Routes.guildRoles(guildId))]);
   const lookups: Array<[Exclude<DiscordIdField, 'guildId'>, DiscordNamedItem[] | null]> = [
     ['requestChannelId', channels],
     ['adminNotifyChannelId', channels],

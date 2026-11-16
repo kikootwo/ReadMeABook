@@ -14,3 +14,8 @@ export const DISCORD_TOKEN_MASK = '••••••••••••';
 export function isMaskedToken(value: string | null | undefined): boolean {
   return typeof value === 'string' && /^•+$/.test(value);
 }
+
+/** The token as Discord wants it: a pasted `Bot ` or `Bearer ` prefix (any case) removed. */
+export function normalizeBotToken(value: string): string {
+  return value.trim().replace(/^(?:Bot|Bearer)\s+/i, '').trim();
+}

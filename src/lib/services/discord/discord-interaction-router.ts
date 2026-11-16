@@ -2,10 +2,10 @@
  * Component: Discord Interaction Router
  * Documentation: documentation/integrations/discord-bot.md
  *
- * Decides whether an interaction is handled at all. Slash commands, autocomplete and
- * modal submits must come from the configured server (none from DMs or other servers).
- * Buttons and menus may come from a DM (request cards are DMed) but never from another
- * server. Handlers resolve the Discord user to an RMAB account themselves, on every
+ * Decides whether an interaction is handled at all. Everything must come from the
+ * configured server, except buttons and select menus, which may also come from a DM
+ * (request cards are DMed). Any other kind from a DM (commands, context menus,
+ * autocomplete, modals) is dropped. Handlers resolve the Discord user to an RMAB account themselves, on every
  * interaction; nothing here grants authority. No commands are registered yet.
  */
 
@@ -16,8 +16,8 @@ export const DISCORD_COMMANDS: readonly Record<string, unknown>[] = [];
 export interface RoutableInteraction {
   guildId: string | null;
   isChatInputCommand(): boolean;
-  isAutocomplete(): boolean;
-  isModalSubmit(): boolean;
+  isButton(): boolean;
+  isAnySelectMenu(): boolean;
   commandName?: string;
 }
 
@@ -30,8 +30,7 @@ const COMMAND_HANDLERS = new Map<string, InteractionHandler>();
 
 /** True when the interaction may be handled for the configured server. */
 export function isFromConfiguredGuild(interaction: RoutableInteraction, guildId: string): boolean {
-  const needsGuild = interaction.isChatInputCommand() || interaction.isAutocomplete() || interaction.isModalSubmit();
-  if (interaction.guildId === null) return !needsGuild;
+  if (interaction.guildId === null) return interaction.isButton() || interaction.isAnySelectMenu();
   return interaction.guildId === guildId;
 }
 

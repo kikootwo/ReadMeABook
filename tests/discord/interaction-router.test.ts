@@ -8,14 +8,21 @@ import { DISCORD_COMMANDS, routeInteraction, type RoutableInteraction } from '@/
 
 const GUILD = '222222222222222222';
 
-function interaction(kind: 'command' | 'autocomplete' | 'modal' | 'button', guildId: string | null): RoutableInteraction {
-  return {
+type Kind = 'command' | 'autocomplete' | 'modal' | 'button' | 'select' | 'context-menu';
+
+/** Only the kind's own check is true, like discord.js (every type guard present). */
+function interaction(kind: Kind, guildId: string | null): RoutableInteraction {
+  const fake = {
     guildId,
     commandName: 'probe',
     isChatInputCommand: () => kind === 'command',
     isAutocomplete: () => kind === 'autocomplete',
     isModalSubmit: () => kind === 'modal',
+    isContextMenuCommand: () => kind === 'context-menu',
+    isButton: () => kind === 'button',
+    isAnySelectMenu: () => kind === 'select',
   };
+  return fake;
 }
 
 describe('Discord interaction router', () => {
@@ -33,13 +40,13 @@ describe('Discord interaction router', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['autocomplete', 'modal'] as const)('drops a %s with no server', async (kind) => {
+  it.each(['autocomplete', 'modal', 'context-menu'] as const)('drops a %s with no server', async (kind) => {
     expect(await routeInteraction(interaction(kind, null), GUILD, new Map())).toBe('ignored-foreign-guild');
   });
 
-  it('a button from a DM passes the server check; from another server it does not', async () => {
-    expect(await routeInteraction(interaction('button', null), GUILD, new Map())).toBe('ignored-unhandled');
-    expect(await routeInteraction(interaction('button', '333333333333333333'), GUILD, new Map())).toBe('ignored-foreign-guild');
+  it.each(['button', 'select'] as const)('a %s from a DM passes the server check; from another server it does not', async (kind) => {
+    expect(await routeInteraction(interaction(kind, null), GUILD, new Map())).toBe('ignored-unhandled');
+    expect(await routeInteraction(interaction(kind, '333333333333333333'), GUILD, new Map())).toBe('ignored-foreign-guild');
   });
 
   it('an unknown command in the right server is ignored (nothing registered)', async () => {
