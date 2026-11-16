@@ -165,6 +165,11 @@ async function seriesShot(browser: Browser, name: string, view: { width: number;
     const vol2 = books.find((b) => b.asin === V2);
     expect(vol2, 'vol 2 in the page data').toBeTruthy();
     await expect(page.getByText(vol2!.title).first()).toBeVisible({ timeout: 30_000 });
+    // The shot shows the book grid (vols 1-3 apart), not the series header
+    await page.getByText('Books in Series').first().evaluate((el) => {
+      el.scrollIntoView({ block: 'start' });
+      window.scrollBy(0, -80); // clear the sticky header
+    });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForFunction(() => Array.from(document.images).every((img) => img.complete));
     await snap(page, '599', name);
