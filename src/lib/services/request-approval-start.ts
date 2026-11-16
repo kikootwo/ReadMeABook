@@ -19,6 +19,8 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { errorForLog } from '@/lib/utils/zod-validation';
 import type { ApprovalPick } from './request-approval-selection';
 
+type DownloadPick = Extract<ApprovalPick, { kind: 'download' }>;
+
 const logger = RMABLogger.create('RequestApproval');
 
 /** The relations every approval read returns (and every response carries). */
@@ -73,7 +75,7 @@ async function enqueueOrRollBack(existing: ApprovalRequest, claimed: ApprovedSta
 }
 
 /** Downloads the chosen release: Anna's Archive ebook picks as a direct download, the rest through the client. */
-async function startDownload(existing: ApprovalRequest, release: any): Promise<StartResult> {
+async function startDownload(existing: ApprovalRequest, release: DownloadPick['release']): Promise<StartResult> {
   const claimed = await claimFromApproval(existing.id, {
     status: 'downloading',
     selectedTorrent: null as any, // Clear after use

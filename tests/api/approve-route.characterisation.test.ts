@@ -122,7 +122,9 @@ function seed(overrides: Record<string, unknown> = {}): Row {
 
 /** The request object every success response carries: the row as stored, minus the hidden records. */
 function shown(row: Record<string, unknown>) {
-  const { placedEbookFiles: _placed, approvalBypassedBy: _bypass, ...rest } = row;
+  const rest = { ...row };
+  delete rest.placedEbookFiles;
+  delete rest.approvalBypassedBy;
   return { ...rest, audiobook: AUDIOBOOK, user: USER };
 }
 

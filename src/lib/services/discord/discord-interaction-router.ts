@@ -6,13 +6,13 @@
  * configured server, except buttons and select menus, which may also come from a DM
  * (request cards are DMed). Any other kind from a DM (commands, context menus,
  * autocomplete, modals) is dropped. Slash commands go by name; modals, buttons and menus
- * by their custom_id prefix. Handlers resolve the Discord user to an RMAB account
+ * by their custom_id prefix (`rmab:req:` /request steps, `rmab:apr:` Approve/Deny). Handlers resolve the Discord user to an RMAB account
  * themselves, on every interaction; nothing here grants authority. Handler modules load on
  * first use, so a bot that is off never loads them.
  */
 
 import { DISCORD_COMMANDS, REQUEST_COMMAND } from './discord-commands';
-import { REQUEST_CUSTOM_ID_PREFIX } from './discord-custom-id';
+import { APPROVAL_CUSTOM_ID_PREFIX, REQUEST_CUSTOM_ID_PREFIX } from './discord-custom-id';
 
 /** The slash commands registered in the configured server (an idempotent bulk overwrite on every start). */
 export { DISCORD_COMMANDS };
@@ -41,9 +41,14 @@ const COMMAND_HANDLERS = new Map<string, InteractionHandler>([
   [REQUEST_COMMAND, async (i) => (await requestHandlers()).handleRequestCommand(i as unknown as RequestInteraction)],
 ]);
 
+type ApprovalHandlers = typeof import('./approval/discord-approval-handler');
+type ApprovalInteraction = Parameters<ApprovalHandlers['handleApprovalComponent']>[0];
+const approvalHandlers = () => import('./approval/discord-approval-handler');
+
 /** Modal, button and select menu handlers by custom_id prefix. */
 const COMPONENT_HANDLERS = new Map<string, InteractionHandler>([
   [REQUEST_CUSTOM_ID_PREFIX, async (i) => (await requestHandlers()).handleRequestComponent(i as unknown as RequestInteraction)],
+  [APPROVAL_CUSTOM_ID_PREFIX, async (i) => (await approvalHandlers()).handleApprovalComponent(i as unknown as ApprovalInteraction)],
 ]);
 
 /** True when the interaction may be handled for the configured server. */

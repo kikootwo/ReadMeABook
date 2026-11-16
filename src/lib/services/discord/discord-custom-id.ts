@@ -1,11 +1,12 @@
 /**
- * Component: Discord Request Custom IDs
+ * Component: Discord Request and Approval Custom IDs
  * Documentation: documentation/integrations/discord-bot.md
  *
  * Encodes and checks the custom_id on the /request modal, select menu and buttons:
  * `rmab:req:<step>:<a|e>[:<ASIN>]:<nonce>`. It carries only the step, the media type,
- * the ASIN and a random nonce, never who may act: the sender controls a custom_id, so
- * every step resolves the clicking user again. Anything that does not match exactly
+ * the ASIN and a random nonce. The Approve and Deny buttons use
+ * `rmab:apr:<a|d>:<request UUID>:<nonce>`. Neither carries who may act: the sender controls a
+ * custom_id, so every step resolves the clicking user again. Anything that does not match exactly
  * (unknown step, bad ASIN, extra parts, over Discord's 100 characters) decodes to null.
  */
 

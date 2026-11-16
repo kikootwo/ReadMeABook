@@ -36,6 +36,7 @@ import { preferredEbookFile } from '../utils/import-inventory';
 import { findEbookOnDisk } from '../utils/ebook-on-disk';
 import { recordEbookPlacement } from '../utils/ebook-placement';
 import { relinkParentlessEbookRequest } from '../services/request-delete-children';
+import { refreshDiscordRequestCards } from '../services/discord/discord-runtime';
 
 /**
  * Process organize files job
@@ -339,6 +340,9 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         updatedAt: new Date(),
       },
     });
+
+    // Discord cards show "Downloaded" (bot running only; background, never awaited)
+    refreshDiscordRequestCards(requestId);
 
     // Apply post-import category to torrent client if configured
     await applyPostImportCategory(requestId, logger);

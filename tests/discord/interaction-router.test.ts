@@ -11,6 +11,8 @@ const requestHandlers = vi.hoisted(() => ({
   handleRequestComponent: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/services/discord/request/discord-request-handlers', () => requestHandlers);
+const approvalHandlers = vi.hoisted(() => ({ handleApprovalComponent: vi.fn(async () => undefined) }));
+vi.mock('@/lib/services/discord/approval/discord-approval-handler', () => approvalHandlers);
 
 const GUILD = '222222222222222222';
 const REQUEST_ID = 'rmab:req:pick:a:abcdefghij';
@@ -37,6 +39,16 @@ describe('Discord interaction router', () => {
   beforeEach(() => {
     requestHandlers.handleRequestCommand.mockClear();
     requestHandlers.handleRequestComponent.mockClear();
+    approvalHandlers.handleApprovalComponent.mockClear();
+  });
+
+  it('Approve / Deny buttons in the server go to the approval handler, not the /request one', async () => {
+    const id = 'rmab:apr:a:0b6f2c1e-4d6a-4c1e-9a8b-1f2e3d4c5b6a:abcdefghij';
+    expect(await routeInteraction(interaction('button', GUILD, { customId: id }), GUILD)).toBe('handled');
+    expect(approvalHandlers.handleApprovalComponent).toHaveBeenCalledTimes(1);
+    expect(requestHandlers.handleRequestComponent).not.toHaveBeenCalled();
+    expect(await routeInteraction(interaction('button', '999999999999999999', { customId: id }), GUILD)).toBe('ignored-foreign-guild');
+    expect(approvalHandlers.handleApprovalComponent).toHaveBeenCalledTimes(1);
   });
 
   it('registers /request (type required: audiobook or ebook; query optional), server-only', () => {

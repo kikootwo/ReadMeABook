@@ -9,7 +9,8 @@
  * or for Request / Cancel an update that removes the buttons) before any database or HTTP
  * work, except the command that opens the search form:
  * a form must be the first reply, so that step checks access (database only) and then shows it.
- * Replies are fixed texts; errors are logged, never shown.
+ * Replies are fixed texts; errors are logged, never shown. A new request's card (and approval
+ * message) is posted in the background after the reply.
  */
 
 import { getAudibleService } from '@/lib/integrations/audible.service';
@@ -20,6 +21,7 @@ import { errorForLog } from '@/lib/utils/zod-validation';
 import { REQUEST_QUERY_MAX_LENGTH } from '../discord-commands';
 import { decodeRequestCustomId, isAsin, isRequestMediaType, type RequestMediaType } from '../discord-custom-id';
 import { MessageFlags, NO_MENTIONS } from '../discord-format';
+import { announceDiscordRequest } from '../discord-runtime';
 import { bookEmbed, searchResultOptions } from '../discord-book-embed';
 import { checkRequestAccess, type RequestInteraction } from './discord-request-access';
 import {
@@ -204,25 +206,31 @@ async function confirmRequest(interaction: RequestInteraction, type: RequestMedi
       await interaction.editReply(textOnly(access.reply));
       return;
     }
-    const content = await createRequest(access.actor.userId, type, asin);
+    const { content, createdId } = await createRequest(access.actor.userId, type, asin);
     // Keep the book embed so the reply shows what was requested
     await interaction.editReply({ content, components: [], allowedMentions: NO_MENTIONS });
+    // A new request: its live card and, while it waits, the approval message (in the background)
+    if (createdId) announceDiscordRequest(createdId);
   } finally {
     confirmsInFlight.delete(key);
   }
 }
 
-/** Creates the request as `userId` with the shared creator; returns the fixed reply text. */
-async function createRequest(userId: string, type: RequestMediaType, asin: string): Promise<string> {
+/** Creates the request as `userId` with the shared creator; returns the fixed reply text and the new request's ID. */
+async function createRequest(
+  userId: string,
+  type: RequestMediaType,
+  asin: string
+): Promise<{ content: string; createdId?: string }> {
   if (type === 'ebook') {
     const result = await createEbookRequestForUser(userId, asin);
     logger.info('Discord ebook request', { userId, asin, outcome: result.outcome, requestId: result.requestId });
-    return ebookResultText(result);
+    return { content: ebookResultText(result), createdId: result.outcome === 'created' ? result.requestId : undefined };
   }
 
   // The creator reads no series fields, so skip the catalog series fill
   const book = await getAudibleService().getAudiobookDetails(asin, { fillSeries: false });
-  if (!book) return TEXT.bookNotFound;
+  if (!book) return { content: TEXT.bookNotFound };
   // The same options as POST /api/requests (a manual request skips the ignore list)
   const result = await createRequestForUser(
     userId,
@@ -236,11 +244,12 @@ async function createRequest(userId: string, type: RequestMediaType, asin: strin
     },
     { bypassIgnore: true }
   );
+  const createdId = result.success ? (result.request as { id?: unknown } | null)?.id : undefined;
   logger.info('Discord audiobook request', {
     userId,
     asin,
     outcome: result.success ? 'created' : result.reason,
-    requestId: result.success ? (result.request as { id?: string } | null)?.id : undefined,
+    requestId: createdId,
   });
-  return audiobookResultText(result);
+  return { content: audiobookResultText(result), createdId: typeof createdId === 'string' ? createdId : undefined };
 }

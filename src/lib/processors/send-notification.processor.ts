@@ -8,6 +8,7 @@
 
 import { getNotificationService } from '../services/notification';
 import { RMABLogger } from '../utils/logger';
+import { refreshDiscordRequestCards } from '../services/discord/discord-runtime';
 import type { SendNotificationPayload } from '../services/job-queue.service';
 
 // Re-export for consumers that import from this module
@@ -47,4 +48,7 @@ export async function processSendNotification(payload: SendNotificationPayload):
     });
     // Don't throw - non-blocking
   }
+
+  // The request's status changed: its Discord cards follow (bot running only; background, never awaited)
+  refreshDiscordRequestCards(requestId);
 }

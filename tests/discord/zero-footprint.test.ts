@@ -3,7 +3,8 @@
  * Documentation: documentation/integrations/discord-bot.md
  *
  * With the bot off, the web paths that later PRs hook into (approve, deny, cancel,
- * admin delete, app init) and the request creators /request shares must never load discord.js or a bot module. Static part:
+ * admin delete, app init), the request creators /request shares, the shared approval service
+ * and the processors that refresh Discord cards must never load discord.js or a bot module. Static part:
  * walk each entry's import graph and allow only the running-check facade. Runtime
  * part: the facade does nothing (no import) while the bot is not running and never
  * makes its caller wait.
@@ -30,6 +31,12 @@ const ENTRIES = [
   'src/lib/services/request-creator.service.ts',
   'src/app/api/audiobooks/[asin]/fetch-ebook/route.ts',
   'src/lib/services/ebook-request-creator.service.ts',
+  // The shared approval service and the card-refresh hooks reach Discord only through the facade
+  'src/lib/services/request-approval.service.ts',
+  'src/lib/services/request-approval-start.ts',
+  'src/lib/services/request-approval-selection.ts',
+  'src/lib/processors/send-notification.processor.ts',
+  'src/lib/processors/organize-files.processor.ts',
 ];
 
 /** Modules a core path may import: the facade (it loads the bot lazily, when running), the actor resolver and the ID check. */
@@ -116,8 +123,20 @@ describe('Discord zero footprint: core web paths', () => {
         'src/lib/services/discord/request/discord-request-access.ts',
         'src/lib/services/discord/discord-custom-id.ts',
         'src/lib/services/discord/discord-book-embed.ts',
+        'src/lib/services/discord/approval/discord-approval-handler.ts',
       ])
     );
+  });
+
+  it('the facade is the only way in: the walker sees the card modules only past it (control)', () => {
+    const { discordModules } = importGraph('src/lib/services/discord/approval/discord-approval-handler.ts');
+    expect([...discordModules.keys()]).toEqual(
+      expect.arrayContaining(['src/lib/services/discord/discord-runtime.ts', 'src/lib/services/discord/cards/discord-card-embeds.ts'])
+    );
+    // The facade loads the card modules lazily; the walker stops at it on purpose
+    const runtime = fs.readFileSync(path.join(SRC, 'lib/services/discord/discord-runtime.ts'), 'utf8');
+    expect(runtime).toContain("import('./cards/discord-cards')");
+    expect(runtime).toContain("import('./cards/discord-decision-sync')");
   });
 
   // A value import or re-export, a side-effect import, or a require of discord.js (a lazy import() is fine)
