@@ -119,7 +119,7 @@
 - **Job-aware database persistence** → [backend/services/logging.md](backend/services/logging.md)
 
 ## Discord Bot
-- **Discord bot: settings keys, gateway lifecycle, zero footprint when off, settings/test routes, invite permissions** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Discord bot: settings keys, gateway lifecycle, zero footprint when off, settings/test routes, invite permissions, `/request` (requester role, custom ids, fixed replies)** → [integrations/discord-bot.md](integrations/discord-bot.md)
 - **Discord settings tab** → [settings-pages.md](settings-pages.md), [integrations/discord-bot.md](integrations/discord-bot.md)
 
 ## Notifications
