@@ -45,8 +45,9 @@ describe('Discord approval custom ids', () => {
   });
 
   it('the encoder refuses anything but a request UUID and a valid nonce', () => {
-    expect(() => encodeApprovalCustomId('approve', 'req-1')).toThrow();
-    expect(() => encodeApprovalCustomId('approve', ID, 'bad')).toThrow();
+    expect(encodeApprovalCustomId('approve', ID, 'abcdefghij')).toBe(`rmab:apr:a:${ID}:abcdefghij`);
+    expect(() => encodeApprovalCustomId('approve', 'req-1')).toThrow('Invalid request ID');
+    expect(() => encodeApprovalCustomId('approve', ID, 'bad')).toThrow('Invalid nonce');
   });
 
   it('approval and /request ids never decode as each other', () => {
