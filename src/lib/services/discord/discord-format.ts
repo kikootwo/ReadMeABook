@@ -35,8 +35,8 @@ export function clip(value: string, max: number): string {
 }
 
 /**
- * Escapes Discord markdown so book text (any user can rename a book through a request)
- * shows as written: no formatting, links, headings, lists, quotes or spoilers. A
+ * Escapes Discord markdown so book text (which can contain markdown characters) shows
+ * as written: no formatting, links, headings, lists, quotes or spoilers. A
  * backslash before any ASCII punctuation is dropped by Discord, so over-escaping is safe.
  */
 export function escapeMarkdown(value: string): string {

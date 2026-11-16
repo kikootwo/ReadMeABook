@@ -50,7 +50,7 @@ Optional Discord bot. Off by default; with it off RMAB loads no Discord code and
 | Cancel | `deferUpdate` | access check, "Cancelled. Nothing was requested." |
 - **Access** (`request/discord-request-access.ts`, every step): `resolveDiscordActor(interaction.user.id)` (unlinked, pending, rejected, deleted → "not linked… ask an RMAB admin"); then the requester role from `interaction.member` (raw `roles[]` or cached `roles.cache`). Role set and no member → refused. Admin (DB role) skips the role check
 - **Replies:** fixed texts picked from result codes (`request/discord-request-replies.ts`); never a service `message`/`error` (the ebook creator's 500 body holds the raw error). Errors → logged, "Something went wrong. Try again in a moment."
-- **Embed** (`discord-book-embed.ts`): title, author, narrator, series, https cover, footer type. Book text markdown-escaped (`escapeMarkdown`; anyone can rename a book through a request) and cut to Discord limits. Menu text is plain (not rendered as markdown). Every reply sends `allowedMentions: { parse: [] }`
+- **Embed** (`discord-book-embed.ts`): title, author, narrator, series, https cover, footer type. Book text markdown-escaped (`escapeMarkdown`; book text can contain markdown) and cut to Discord limits. Menu text is plain (not rendered as markdown). Every reply sends `allowedMentions: { parse: [] }`
 - **Custom ids** (`discord-custom-id.ts`): `rmab:req:<modal|pick|ok|no>:<a|e>[:<ASIN>]:<nonce>`; ASIN only on `ok`, `[A-Z0-9]{10}`; nonce 10 × `[a-z0-9]`. Anything else, or > 100 chars → ignored (no defer, no read). Never carries who may act
 - **DMs:** commands and forms from a DM are dropped by the router; a `/request` button or menu used from a DM is ignored by the handler (no member to check)
 
