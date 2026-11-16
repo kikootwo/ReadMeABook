@@ -11,7 +11,6 @@ import { prisma } from '@/lib/db';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
-import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
 import { RequestWithTorrentSchema } from '@/lib/utils/request-with-torrent-body';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
@@ -23,7 +22,7 @@ import { hideStoredPick } from '@/lib/services/request-detail-query';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { resolveAutoApprove } from '@/lib/utils/permissions';
 import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
-import { detailsForNewBook, type BookDetailsSource } from '@/lib/services/request-book-details';
+import { detailsForNewBook, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -121,8 +120,7 @@ export async function POST(request: NextRequest) {
       let series: string | undefined;
       let seriesPart: string | undefined;
       try {
-        const audibleService = getAudibleService();
-        const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
+        const audnexusData = await lookUpBookDetails(audiobook.asin);
         lookedUp = audnexusData;
 
         if (audnexusData?.releaseDate) {

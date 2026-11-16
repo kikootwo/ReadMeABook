@@ -132,6 +132,19 @@ describe('createRequestForUser: a new book', () => {
     });
   });
 
+  it('a value that is not ASIN-shaped gets no lookup; the request values are used and the request still works', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(LOOKED_UP);
+
+    const result = await createRequestForUser(USER, { asin: 'B0SHORT', title: 'Book Title (Old Edition)', author: 'Another Author' });
+
+    expect(result.success).toBe(true);
+    expect(audibleServiceMock.getAudiobookDetails).not.toHaveBeenCalled();
+    expect(prismaMock.audiobook.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ audibleAsin: 'B0SHORT', title: 'Book Title (Old Edition)', author: 'Another Author' }),
+    });
+  });
+
   it('a failed lookup never blocks the request', async () => {
     prismaMock.audiobook.findFirst.mockResolvedValue(null);
     audibleServiceMock.getAudiobookDetails.mockRejectedValue(new Error('offline'));

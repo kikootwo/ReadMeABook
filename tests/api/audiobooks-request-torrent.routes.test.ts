@@ -285,7 +285,7 @@ describe('Request with torrent route', () => {
 
   it('updates year from Audnexus when audiobook already exists', async () => {
     authRequest.json.mockResolvedValue({
-      audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
+      audiobook: { asin: 'B0TORR0001', title: 'Title', author: 'Author' },
       torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);

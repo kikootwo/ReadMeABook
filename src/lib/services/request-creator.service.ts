@@ -11,14 +11,13 @@
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
-import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldWaitForRelease } from '@/lib/services/release-gate';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { decideAutoReRequest, removedFromLibrarySkip, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
-import { detailsForNewBook, lookedUpTitleAuthorUpdates, type BookDetailsSource } from '@/lib/services/request-book-details';
+import { detailsForNewBook, lookedUpTitleAuthorUpdates, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -117,8 +116,7 @@ export async function createRequestForUser(
   let seriesAsin: string | undefined;
   let releaseDate: Date | null = null;
   try {
-    const audibleService = getAudibleService();
-    const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
+    const audnexusData = await lookUpBookDetails(audiobook.asin);
     lookedUp = audnexusData;
 
     if (audnexusData?.releaseDate) {

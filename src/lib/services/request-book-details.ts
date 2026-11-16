@@ -7,6 +7,9 @@
  * where that lookup has nothing; an existing book's saved title and author are not changed by them.
  */
 
+import { getAudibleService, type AudibleAudiobook } from '@/lib/integrations/audible.service';
+import { ASIN_PATTERN } from '@/lib/utils/asin';
+
 /** Book details from the server's lookup or sent with a request (empty strings count as missing) */
 export interface BookDetailsSource {
   title?: string | null;
@@ -20,6 +23,16 @@ export interface NewBookDetails {
   author: string;
   narrator?: string;
   description?: string;
+}
+
+/**
+ * The Audible lookup for a book (`getAudiobookDetails`), made only for an ASIN-shaped value
+ * (10 letters/digits); any other value gets null, the same as a lookup that finds nothing.
+ */
+export async function lookUpBookDetails(asin: string, options?: { fillSeries?: boolean }): Promise<AudibleAudiobook | null> {
+  if (!ASIN_PATTERN.test(asin)) return null;
+  const audibleService = getAudibleService();
+  return options ? audibleService.getAudiobookDetails(asin, options) : audibleService.getAudiobookDetails(asin);
 }
 
 function present(value: string | null | undefined): value is string {
