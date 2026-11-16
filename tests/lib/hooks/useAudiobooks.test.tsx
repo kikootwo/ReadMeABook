@@ -117,4 +117,22 @@ describe('useAudiobooks hooks', () => {
     const parsed = JSON.parse(screen.getByTestId('details').textContent || '{}');
     expect(parsed.audiobook.asin).toBe('a2');
   });
+
+  it('audiobook details: SWR retries after an error unless retryOnError is false', async () => {
+    useSWRMock.mockReturnValue({ data: undefined, error: new Error('Not found'), isLoading: false });
+
+    const { useAudiobookDetails } = await import('@/lib/hooks/useAudiobooks');
+
+    const Probe = () => {
+      useAudiobookDetails('a3');
+      useAudiobookDetails('a4', { retryOnError: false });
+      return null;
+    };
+
+    render(<Probe />);
+
+    const optionsFor = (endpoint: string) => useSWRMock.mock.calls.find(([key]) => key === endpoint)?.[2];
+    expect(optionsFor('/api/audiobooks/a3')).toEqual({ revalidateOnFocus: false, dedupingInterval: 300000 });
+    expect(optionsFor('/api/audiobooks/a4')).toEqual({ revalidateOnFocus: false, dedupingInterval: 300000, shouldRetryOnError: false });
+  });
 });

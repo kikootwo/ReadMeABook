@@ -144,12 +144,14 @@ export function useSearch(query: string) {
 /** Pages loaded in a row, without a click, past pages the language filter emptied */
 export const MAX_AUTO_PAGE_LOADS = 4;
 
-export function useAudiobookDetails(asin: string | null) {
+/** `retryOnError: false` turns off SWR's retry after a failed lookup (default: SWR retries) */
+export function useAudiobookDetails(asin: string | null, { retryOnError = true }: { retryOnError?: boolean } = {}) {
   const endpoint = asin ? `/api/audiobooks/${asin}` : null;
 
   const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 300000, // Cache for 5 minutes
+    ...(retryOnError ? {} : { shouldRetryOnError: false }),
   });
 
   return {

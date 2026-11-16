@@ -29,6 +29,7 @@ interface RecentRequest {
   displayTitle?: string; // shown: the library's edition of a followed request (#325a)
   displayAuthor?: string;
   asin?: string | null;
+  libraryAsin?: string | null; // effective library ASIN: View details shows that edition (#325)
   status: string;
   progress?: number;
   type?: 'audiobook' | 'ebook';
@@ -987,6 +988,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       {viewDetailsAsin && (
         <AudiobookDetailsModal
           asin={viewDetailsAsin}
+          libraryAsin={requests.find((r) => r.requestId === viewDetailsRequestId)?.libraryAsin ?? null}
           isOpen={!!viewDetailsAsin}
           onClose={() => {
             setViewDetailsAsin(null);
