@@ -51,11 +51,11 @@ function searchAnswers(failed: string[], answered: number, results: unknown[]) {
 const jobLog = (level: string) =>
   prismaMock.jobEvent.create.mock.calls.map(([arg]) => arg.data).filter((d) => d.level === level).map((d) => d.message);
 
-/** The errorMessage the request was left with (stop-guarded write) */
-const requestMessage = () => {
-  const call = prismaMock.request.updateMany.mock.calls.at(-1)?.[0] ?? prismaMock.request.update.mock.calls.at(-1)?.[0];
-  return call?.data?.errorMessage;
-};
+/** The errorMessage the request was left with (stop-guarded write; the ebook job's guarded start write has none) */
+const lastMessageWrite = (fn: typeof prismaMock.request.update) =>
+  fn.mock.calls.map(([arg]) => arg).filter((arg) => arg?.data?.errorMessage !== undefined).at(-1);
+const requestMessage = () =>
+  (lastMessageWrite(prismaMock.request.updateMany) ?? lastMessageWrite(prismaMock.request.update))?.data?.errorMessage;
 
 beforeEach(() => {
   vi.clearAllMocks();

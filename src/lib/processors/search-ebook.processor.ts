@@ -11,11 +11,13 @@ import { SearchEbookPayload, EbookSearchResult, getJobQueueService } from '../se
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { buildEbookDownloadName } from '../utils/ebook-download-name';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { EBOOK_MAX_SIZE_MB, rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { getLanguageForRegion } from '../constants/language-config';
+import { SEARCH_JOB_REFUSED_STATUSES } from '../constants/request-statuses';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
 import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import type { AudibleRegion } from '../types/audible';
@@ -26,6 +28,18 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '../services/ebook-scraper';
+
+/** Status writes of this job refuse a request already past searching, like the audiobook search (#591, #601) */
+const KEEP_PICK = { notIn: SEARCH_JOB_REFUSED_STATUSES };
+
+/** Job result when a KEEP_PICK write found the request cancelled, deleted or past searching */
+async function keptResult(requestId: string, outcome: string, logger: RMABLogger) {
+  const row = await prisma.request.findUnique({ where: { id: requestId }, select: { status: true, deletedAt: true } });
+  const status = !row || row.deletedAt || row.status === 'cancelled' ? null : row.status;
+  const message = `Request ${status ? `is ${status}` : 'cancelled or deleted'}, ${outcome}`;
+  logger.info(`${message} (request ${requestId})`);
+  return { success: true, message, requestId };
+}
 
 /**
  * Process search ebook job
@@ -39,14 +53,13 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
   logger.info(`Processing ebook request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching and fetch custom search terms
-    const requestRecord = await prisma.request.update({
+    // Update request status to searching, unless cancelled, deleted or past searching while queued:
+    // a paced search waits, and another search may have started a download meanwhile (#601)
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }, KEEP_PICK))) {
+      return keptResult(requestId, 'search skipped', logger);
+    }
+    const requestRecord = await prisma.request.findUnique({
       where: { id: requestId },
-      data: {
-        status: 'searching',
-        searchAttempts: { increment: 1 },
-        updatedAt: new Date(),
-      },
       select: { customSearchTerms: true },
     });
 
@@ -110,15 +123,12 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
 
       logger.warn(`No ebook found for request ${requestId}, marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage: message,
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      // Unless a cancel, delete or another search's download landed during this search
+      if (!(await updateRequestUnlessStopped(
+        requestId, { status: 'awaiting_search', errorMessage: message, lastSearchAt: new Date() }, KEEP_PICK
+      ))) {
+        return keptResult(requestId, 'not re-queued', logger);
+      }
 
       return {
         success: false,
@@ -142,14 +152,12 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Unknown error during ebook search',
-        updatedAt: new Date(),
-      },
-    });
+    // Mark failed, unless a cancel, delete or another search's download landed meanwhile
+    await markRequestFailedUnlessStopped(
+      requestId,
+      error instanceof Error ? error.message : 'Unknown error during ebook search',
+      KEEP_PICK
+    );
 
     throw error;
   }
@@ -436,6 +444,11 @@ async function handleAnnasArchiveDownload(
   preferredFormat: string,
   logger: RMABLogger
 ): Promise<any> {
+  // A cancel, delete or another search's download during this search wins over this pick (#601)
+  if (!(await updateRequestUnlessStopped(requestId, {}, KEEP_PICK))) {
+    return keptResult(requestId, 'no download queued', logger);
+  }
+
   logger.info(`==================== EBOOK SEARCH RESULT ====================`);
   logger.info(`Source: Anna's Archive`);
   logger.info(`Title: "${audiobook.title}"`);
@@ -502,6 +515,11 @@ async function handleIndexerDownload(
   preferredFormat: string,
   logger: RMABLogger
 ): Promise<any> {
+  // A cancel, delete or another search's download during this search wins over this pick (#601)
+  if (!(await updateRequestUnlessStopped(requestId, {}, KEEP_PICK))) {
+    return keptResult(requestId, 'no download queued', logger);
+  }
+
   logger.info(`==================== EBOOK SEARCH RESULT ====================`);
   logger.info(`Source: Indexer (${result.indexer})`);
   logger.info(`Title: "${audiobook.title}"`);

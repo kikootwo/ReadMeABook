@@ -72,7 +72,8 @@ describe('processRetryMissingTorrents', () => {
     });
     expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
       'req-1',
-      expect.objectContaining({ id: 'a1', title: 'Book', author: 'Author' })
+      expect.objectContaining({ id: 'a1', title: 'Book', author: 'Author' }),
+      { delay: 0 } // first search of the sweep starts at once (#601)
     );
     expect(prismaMock.request.update).not.toHaveBeenCalled();
   });
@@ -125,7 +126,8 @@ describe('processRetryMissingTorrents', () => {
     });
     expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
       'req-3',
-      expect.objectContaining({ id: 'a3', title: 'Released Book', author: 'Some Author' })
+      expect.objectContaining({ id: 'a3', title: 'Released Book', author: 'Some Author' }),
+      { delay: 0 }
     );
     expect(result.transitioned).toBe(1);
     expect(result.triggered).toBe(1);

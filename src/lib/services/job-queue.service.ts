@@ -641,7 +641,7 @@ export class JobQueueService {
   async addSearchJob(
     requestId: string,
     audiobook: { id: string; title: string; author: string; asin?: string },
-    chain?: ClientFailureChain & { jobId?: string } // jobId: fixed Bull id, a duplicate add is ignored (#332)
+    chain?: ClientFailureChain & { jobId?: string; delay?: number } // jobId: fixed Bull id, a duplicate add is ignored (#332); delay: ms before it may start (#601)
   ): Promise<string> {
     return await this.addJob(
       'search_indexers',
@@ -653,6 +653,7 @@ export class JobQueueService {
       {
         priority: 10, // High priority for user-initiated requests
         ...(chain?.jobId && { jobId: chain.jobId }),
+        ...(chain?.delay && { delay: chain.delay }),
       }
     );
   }
@@ -956,7 +957,8 @@ export class JobQueueService {
   async addSearchEbookJob(
     requestId: string,
     audiobook: { id: string; title: string; author: string; asin?: string },
-    preferredFormat?: string
+    preferredFormat?: string,
+    options?: { delay?: number } // delay: ms before it may start (#601)
   ): Promise<string> {
     return await this.addJob(
       'search_ebook',
@@ -967,6 +969,7 @@ export class JobQueueService {
       } as SearchEbookPayload,
       {
         priority: 10, // High priority for user-initiated requests
+        ...(options?.delay && { delay: options.delay }),
       }
     );
   }

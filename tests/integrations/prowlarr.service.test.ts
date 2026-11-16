@@ -246,6 +246,7 @@ describe('ProwlarrService', () => {
         categories: [3030, 3040],
         indexerIds: [1, 2],
       }),
+      timeout: 180000,
     });
   });
 
@@ -466,5 +467,22 @@ describe('ProwlarrService', () => {
     } else {
       process.env.PROWLARR_API_KEY = originalApiKey;
     }
+  });
+
+  it('gives the indexer search its own 180 s timeout; other Prowlarr calls keep 60 s (#601)', async () => {
+    downloadClientManagerMock.hasClientForProtocol.mockResolvedValue(true);
+    clientMock.get.mockResolvedValue({ data: [] });
+    axiosMock.get.mockResolvedValue({ data: '<rss><channel></channel></rss>' });
+
+    const service = new ProwlarrService('http://prowlarr', 'key');
+    await service.search('Book');
+    await service.getIndexers();
+    await service.getRssFeed(1);
+
+    // The shared client keeps the 60 s download-client timeout (/indexer, /health, /indexerstats)
+    expect(axiosMock.create).toHaveBeenCalledWith(expect.objectContaining({ timeout: 60000 }));
+    expect(clientMock.get).toHaveBeenCalledWith('/search', expect.objectContaining({ timeout: 180000 }));
+    expect(clientMock.get).toHaveBeenCalledWith('/indexer');
+    expect(axiosMock.get).toHaveBeenCalledWith('http://prowlarr/1/api', expect.objectContaining({ timeout: 60000 }));
   });
 });

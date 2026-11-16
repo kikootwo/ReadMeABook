@@ -40,6 +40,7 @@ vi.mock('@/lib/services/ebook-scraper', () => ebookScraperMock);
 describe('processSearchEbook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // start-of-job guard (#601)
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
@@ -180,8 +181,8 @@ describe('processSearchEbook', () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('re-search');
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-4' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-4', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({
         status: 'awaiting_search',
         errorMessage: expect.stringContaining('No ebook found'),
@@ -189,6 +190,28 @@ describe('processSearchEbook', () => {
       }),
     });
     expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
+  });
+
+  it('leaves a request cancelled while its paced search waited untouched (#601)', async () => {
+    // The guarded write finds the request cancelled: no row matches
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+    const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
+    const result = await processSearchEbook({
+      requestId: 'req-c',
+      audiobook: { id: 'ab-c', title: 'Cancelled Book', author: 'Author', asin: 'B00CANCEL' },
+      jobId: 'job-c',
+    });
+
+    expect(result).toEqual(expect.objectContaining({ success: true, requestId: 'req-c' }));
+    expect(result.message).toContain('search skipped');
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-c', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
+      data: expect.objectContaining({ status: 'searching' }),
+    });
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(ebookScraperMock.searchByAsin).not.toHaveBeenCalled();
+    expect(ebookScraperMock.searchByTitle).not.toHaveBeenCalled();
   });
 
   it('marks request as awaiting_search when no download links available', async () => {
@@ -212,8 +235,8 @@ describe('processSearchEbook', () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('re-search');
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-5' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-5', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({
         status: 'awaiting_search',
         errorMessage: expect.stringContaining('No ebook found'),
@@ -280,8 +303,8 @@ describe('processSearchEbook', () => {
       jobId: 'job-7',
     })).rejects.toThrow('Network error');
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-7' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-7', deletedAt: null, status: { notIn: ['cancelled', 'downloading', 'processing', 'downloaded', 'available', 'awaiting_approval', 'denied'] } },
       data: expect.objectContaining({
         status: 'failed',
         errorMessage: 'Network error',

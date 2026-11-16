@@ -43,6 +43,7 @@ async function queuedName(title: string, author: string, format = 'epub'): Promi
 describe('automatic ebook search: queued download name (#474)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 }); // start-of-job guard (#601)
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
