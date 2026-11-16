@@ -114,7 +114,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 5. JWT tokens skip the allowlist entirely. `getOptionalAuthUser` checks the allowlist before the lookup and the permissions after it (null on any refusal).
 
 ## UI surfaces
-- `/api-docs` page (`src/app/api-docs/page.tsx`) — auto-renders `API_TOKEN_ENDPOINT_DOCS`. Endpoints with `isWrite: true` show an amber **Write** badge; the "Try it" button is disabled with a "use curl" hint to avoid sending mutating requests from a UI that cannot construct request bodies. Endpoints with `permission` show an **Opt-in** badge.
+- `/api-docs` page (`src/app/api-docs/page.tsx`) — auto-renders `API_TOKEN_ENDPOINT_DOCS`. Endpoints with `isWrite: true` show an amber **Write** badge; the "Try it" button is disabled with a "use curl" hint to avoid sending mutating requests from a UI that cannot construct request bodies. Endpoints with `permission` show an **Opt-in** badge beside the title.
 - Profile → API Tokens (`src/components/profile/ApiTokensSection.tsx`) — create/revoke UI. Includes a one-line warning that tokens act with the owner's full permissions.
 - Settings → API (`src/app/admin/settings/tabs/ApiTab/ApiTab.tsx`) — admin can create tokens on behalf of any user; the "Allow API tokens to approve requests" switch (`TokenApprovalSetting.tsx`, saves on toggle).
 - "Can approve requests" checkbox (`src/components/api-tokens/ApprovalTokenOption.tsx`) in both create forms, shown only when `approvalTokensAvailable` (Settings → API: only for "Current user" or the admin's own id); while ticked the expiry is 30 or 90 days (default 90; `useApiTokens`). Token lists show a "Can approve requests" badge.
