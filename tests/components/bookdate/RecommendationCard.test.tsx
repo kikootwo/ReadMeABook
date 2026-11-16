@@ -8,6 +8,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { textNodesEqualTo } from '../../helpers/stray-text';
 
 const swipeHandlers: {
   onSwipeStart?: () => void;
@@ -135,5 +136,35 @@ describe('RecommendationCard', () => {
     );
 
     expect(screen.queryByRole('button', { name: /Not Interested/ })).toBeNull();
+  });
+
+  // rating arrives as a number, or as a string when a Prisma Decimal is serialized to JSON
+  it.each([
+    ['number 0', 0],
+    ['string "0"', '0'],
+    ['string "0.00"', '0.00'],
+    ['null', null],
+  ])('renders no rating and no stray "0" for a %s rating', async (_label, rating) => {
+    const { RecommendationCard } = await import('@/components/bookdate/RecommendationCard');
+
+    const { container } = render(
+      <RecommendationCard recommendation={{ ...recommendation, rating }} onSwipe={vi.fn()} />
+    );
+
+    expect(screen.queryByText('⭐')).toBeNull();
+    expect(screen.queryByText('0.0')).toBeNull();
+    expect(textNodesEqualTo(container, '0')).toHaveLength(0);
+  });
+
+  it.each([
+    ['number 4.5', 4.5],
+    ['string "4.50"', '4.50'],
+  ])('renders a %s rating as "4.5"', async (_label, rating) => {
+    const { RecommendationCard } = await import('@/components/bookdate/RecommendationCard');
+
+    render(<RecommendationCard recommendation={{ ...recommendation, rating }} onSwipe={vi.fn()} />);
+
+    expect(screen.getByText('⭐')).toBeInTheDocument();
+    expect(screen.getByText('4.5')).toBeInTheDocument();
   });
 });

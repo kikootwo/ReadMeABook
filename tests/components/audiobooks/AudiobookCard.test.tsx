@@ -8,6 +8,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { textNodesEqualTo } from '../../helpers/stray-text';
 
 const createRequestMock = vi.hoisted(() => vi.fn());
 const authState = {
@@ -193,5 +194,24 @@ describe('AudiobookCard', () => {
       vi.advanceTimersByTime(5000);
     });
     expect(screen.queryByText('Request failed')).toBeNull();
+  });
+
+  it('renders no rating badge and no stray "0" when the rating is 0', async () => {
+    const { AudiobookCard } = await import('@/components/audiobooks/AudiobookCard');
+
+    const { container } = render(<AudiobookCard audiobook={{ ...baseAudiobook, rating: 0 }} />);
+
+    expect(container.querySelector('svg.text-amber-400')).toBeNull();
+    expect(textNodesEqualTo(container, '0')).toHaveLength(0);
+    expect(screen.queryByText('0.0')).toBeNull();
+  });
+
+  it('renders the rating badge for a positive rating', async () => {
+    const { AudiobookCard } = await import('@/components/audiobooks/AudiobookCard');
+
+    const { container } = render(<AudiobookCard audiobook={{ ...baseAudiobook, rating: 4.5 }} />);
+
+    expect(container.querySelector('svg.text-amber-400')).not.toBeNull();
+    expect(screen.getByText('4.5')).toBeInTheDocument();
   });
 });
