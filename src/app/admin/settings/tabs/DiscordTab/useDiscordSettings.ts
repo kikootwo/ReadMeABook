@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 
 export interface DiscordFormValues {
@@ -87,20 +87,24 @@ export function useDiscordSettings() {
     if (data.status) setStatus(data.status);
   };
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetchWithAuth('/api/admin/settings/discord');
-      if (response.ok) applyServerView(await response.json());
-    } catch (error) {
-      console.error('Failed to load Discord settings:', error);
-    } finally {
-      setLoaded(true);
-    }
-  }, []);
-
+  // One GET to RMAB on mount; never a call to Discord
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    fetchWithAuth('/api/admin/settings/discord')
+      .then(async (response) => {
+        const data = response.ok ? await response.json() : null;
+        if (!active || !data) return;
+        if (data.settings) setValues({ ...EMPTY, ...data.settings });
+        if (data.status) setStatus(data.status);
+      })
+      .catch((error) => console.error('Failed to load Discord settings:', error))
+      .finally(() => {
+        if (active) setLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const update = (patch: Partial<DiscordFormValues>) => setValues((current) => ({ ...current, ...patch }));
 
@@ -108,7 +112,14 @@ export function useDiscordSettings() {
     setTesting(true);
     setTestResult(null);
     try {
-      const { enabled: _enabled, ...payload } = trimmed(values);
+      const t = trimmed(values);
+      const payload = {
+        botToken: t.botToken,
+        guildId: t.guildId,
+        requestChannelId: t.requestChannelId,
+        adminRoleId: t.adminRoleId,
+        adminNotifyChannelId: t.adminNotifyChannelId,
+      };
       const response = await fetchWithAuth('/api/admin/settings/test-discord', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -147,5 +158,5 @@ export function useDiscordSettings() {
     }
   };
 
-  return { values, loaded, status, testResult, testing, saving, errors: idErrors(values), update, test, save, reload: load };
+  return { values, loaded, status, testResult, testing, saving, errors: idErrors(values), update, test, save };
 }

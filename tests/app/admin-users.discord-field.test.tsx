@@ -12,7 +12,7 @@ import AdminUsersPage from '@/app/admin/users/page';
 
 const fetchJSONMock = vi.hoisted(() => vi.fn());
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }));
-const swrState = new Map<string, { data?: any; error?: any; mutate: ReturnType<typeof vi.fn> }>();
+const swrState = new Map<string, { data?: unknown; error?: unknown; mutate: ReturnType<typeof vi.fn> }>();
 
 vi.mock('swr', () => ({
   default: (key: string | null) => (key && swrState.get(key)) || { data: undefined, error: undefined, mutate: vi.fn() },
@@ -26,7 +26,7 @@ vi.mock('@/components/ui/Toast', () => ({
 
 const LINKED = '123456789012345678';
 
-const makeUser = (overrides: Record<string, any> = {}) => ({
+const makeUser = (overrides: Record<string, unknown> = {}) => ({
   id: 'u1',
   plexUsername: 'Reader',
   plexId: 'plex-1',
@@ -47,7 +47,7 @@ const makeUser = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 
-function setup(opts: { configured: boolean | undefined; users: any[]; mutateUsers?: ReturnType<typeof vi.fn> }) {
+function setup(opts: { configured: boolean | undefined; users: unknown[]; mutateUsers?: ReturnType<typeof vi.fn> }) {
   swrState.clear();
   swrState.set('/api/admin/users', { data: { users: opts.users }, mutate: opts.mutateUsers ?? vi.fn() });
   swrState.set('/api/admin/users/pending', { data: { users: [] }, mutate: vi.fn() });

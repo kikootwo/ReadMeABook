@@ -102,7 +102,7 @@ describe('Discord zero footprint: the running-check facade', () => {
     vi.resetModules();
     botModule.evaluated = 0;
     botModule.run.mockReset();
-    delete (globalThis as any)[Symbol.for('rmab.singleton.discord-runtime')];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for('rmab.singleton.discord-runtime')];
   });
 
   it('bot not running: syncDiscord does not import the bot module or call the callback', async () => {

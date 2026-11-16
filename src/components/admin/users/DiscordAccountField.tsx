@@ -4,12 +4,13 @@
  *
  * Shown only when the Discord bot is configured. An admin links a user's Discord ID
  * (PUT /api/admin/users/[id]/discord) or unlinks it. The user acts in Discord as this
- * RMAB account, with this account's role.
+ * RMAB account, with this account's role. The parent keys it by user and saved ID, so a save
+ * or a different user starts it fresh.
  */
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { fetchJSON } from '@/lib/utils/api';
 
 const DISCORD_ID = /^[1-9]\d{14,19}$/;
@@ -29,11 +30,6 @@ export function DiscordAccountField({ user, onSaved }: DiscordAccountFieldProps)
   const [value, setValue] = useState(user.discordUserId ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setValue(user.discordUserId ?? '');
-    setError(null);
-  }, [user.id, user.discordUserId]);
 
   const trimmed = value.trim();
   const invalid = trimmed !== '' && !DISCORD_ID.test(trimmed);

@@ -48,7 +48,7 @@ describe('Discord bot lifecycle', () => {
     // Re-register so the factory (one evaluation of discord.js) runs again in this test
     vi.doMock('discord.js', () => fakeDiscordModule(discord.state));
     logLines.length = 0;
-    for (const key of ['discord-bot', 'discord-runtime']) delete (globalThis as any)[Symbol.for(`rmab.singleton.${key}`)];
+    for (const key of ['discord-bot', 'discord-runtime']) delete (globalThis as Record<symbol, unknown>)[Symbol.for(`rmab.singleton.${key}`)];
     configure({});
   });
 

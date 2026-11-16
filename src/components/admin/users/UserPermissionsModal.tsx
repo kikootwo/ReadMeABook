@@ -295,7 +295,7 @@ export function UserPermissionsModal({
                 onToggle={() => onToggleToken(user, !(user.hasLoginToken || generatedToken !== null))}
             />
 
-            {discordConfigured && <DiscordAccountField user={user} onSaved={() => onDiscordSaved?.()} />}
+            {discordConfigured && <DiscordAccountField key={`${user.id}:${user.discordUserId ?? ''}`} user={user} onSaved={() => onDiscordSaved?.()} />}
           </div>
         </div>
       </div>
