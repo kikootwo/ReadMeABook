@@ -27,6 +27,9 @@ export interface FakeStepOptions {
   order?: string[];
 }
 
+/** reply, deferReply, editReply and showModal take one payload. */
+type Send = (payload: Record<string, unknown>) => Promise<void>;
+
 export type FakeStep = ReturnType<typeof fakeStep>;
 
 export function fakeStep(kind: StepKind, opts: FakeStepOptions = {}) {
@@ -48,11 +51,11 @@ export function fakeStep(kind: StepKind, opts: FakeStepOptions = {}) {
     fields: { getTextInputValue: () => opts.query ?? '' },
     values: opts.values,
     order,
-    reply: vi.fn(async (_options: Record<string, unknown>) => {
+    reply: vi.fn<Send>(async () => {
       order.push('reply');
       step.replied = true;
     }),
-    deferReply: vi.fn(async (_options: Record<string, unknown>) => {
+    deferReply: vi.fn<Send>(async () => {
       order.push('deferReply');
       step.deferred = true;
     }),
@@ -60,10 +63,10 @@ export function fakeStep(kind: StepKind, opts: FakeStepOptions = {}) {
       order.push('deferUpdate');
       step.deferred = true;
     }),
-    editReply: vi.fn(async (_options: Record<string, unknown>) => {
+    editReply: vi.fn<Send>(async () => {
       order.push('editReply');
     }),
-    showModal: vi.fn(async (_modal: Record<string, unknown>) => {
+    showModal: vi.fn<Send>(async () => {
       order.push('showModal');
       step.replied = true;
     }),

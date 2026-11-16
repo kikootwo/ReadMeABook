@@ -195,7 +195,8 @@ describe('/api/admin/settings/discord', () => {
   });
 
   it('a body without the requester role ID is refused (400)', async () => {
-    const { requesterRoleId: _omitted, ...rest } = body();
+    const rest: Record<string, unknown> = body();
+    delete rest.requesterRoleId;
     expect((await put(rest)).status).toBe(400);
     expect(setManyAtomic).not.toHaveBeenCalled();
   });
