@@ -46,12 +46,16 @@ export interface CreatedToken {
   client: Rmab;
 }
 
-/** POST /api/user/api-tokens as `session`; returns the raw answer and, on 201, the token. */
+/**
+ * POST /api/user/api-tokens as `session`; returns the raw answer, `answer` (status + the `error` text
+ * the token routes send on a refusal) and, on 201, the token.
+ */
 export async function createToken(session: Rmab, body: Record<string, unknown>, path = '/api/user/api-tokens') {
   const res = await session.raw('POST', path, body);
   const json: { token?: { id: string }; fullToken?: string; error?: string } | null = await res.json().catch(() => null);
   const token: CreatedToken | null = res.status === 201 ? { id: json!.token!.id, secret: json!.fullToken!, client: new Rmab(json!.fullToken!) } : null;
-  return { status: res.status, error: json?.error ?? null, token, body: json };
+  const error = json?.error ?? null;
+  return { status: res.status, error, token, body: json, answer: { status: res.status, error } };
 }
 
 export const inDays = (days: number) => new Date(Date.now() + days * DAY_MS).toISOString();

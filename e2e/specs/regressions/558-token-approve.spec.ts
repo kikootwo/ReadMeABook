@@ -52,17 +52,17 @@ test('558: a flagged admin token approves; race, expiry, lifetime and create ref
 
   try {
     // Create refusals (the switch is off at first)
-    answers.createSettingOff = (await createToken(admin, { name: `e2e-558-off-${stamp}`, canApproveRequests: true, expiresAt: inDays(30) })).body;
+    answers.createSettingOff = (await createToken(admin, { name: `e2e-558-off-${stamp}`, canApproveRequests: true, expiresAt: inDays(30) })).answer;
     await setApprovalSetting(admin, true);
-    answers.createNoExpiry = (await createToken(admin, { name: `e2e-558-ne-${stamp}`, canApproveRequests: true, expiresAt: null })).body;
-    answers.createOneYear = (await createToken(admin, { name: `e2e-558-1y-${stamp}`, canApproveRequests: true, expiresAt: inDays(365) })).body;
-    answers.createNonAdmin = (await createToken(user.rmab, { name: `e2e-558-user-${stamp}`, canApproveRequests: true, expiresAt: inDays(30) })).body;
-    answers.createOtherUser = (await createToken(admin, { name: `e2e-558-other-${stamp}`, canApproveRequests: true, expiresAt: inDays(30), userId: user.id }, '/api/admin/api-tokens')).body;
-    expect.soft(answers.createSettingOff).toMatchObject({ error: 'Forbidden', message: 'Turn on "Allow API tokens to approve requests" in Settings → API first.' });
-    expect.soft(answers.createNoExpiry).toMatchObject({ message: MSG.createExpiry });
-    expect.soft(answers.createOneYear).toMatchObject({ message: MSG.createExpiry });
-    expect.soft(answers.createNonAdmin).toMatchObject({ error: 'Forbidden', message: MSG.createRole });
-    expect.soft(answers.createOtherUser).toMatchObject({ error: 'Forbidden', message: MSG.createOtherUser });
+    answers.createNoExpiry = (await createToken(admin, { name: `e2e-558-ne-${stamp}`, canApproveRequests: true, expiresAt: null })).answer;
+    answers.createOneYear = (await createToken(admin, { name: `e2e-558-1y-${stamp}`, canApproveRequests: true, expiresAt: inDays(365) })).answer;
+    answers.createNonAdmin = (await createToken(user.rmab, { name: `e2e-558-user-${stamp}`, canApproveRequests: true, expiresAt: inDays(30) })).answer;
+    answers.createOtherUser = (await createToken(admin, { name: `e2e-558-other-${stamp}`, canApproveRequests: true, expiresAt: inDays(30), userId: user.id }, '/api/admin/api-tokens')).answer;
+    expect.soft(answers.createSettingOff).toEqual({ status: 403, error: 'Turn on "Allow API tokens to approve requests" in Settings → API first.' });
+    expect.soft(answers.createNoExpiry).toEqual({ status: 400, error: MSG.createExpiry });
+    expect.soft(answers.createOneYear).toEqual({ status: 400, error: MSG.createExpiry });
+    expect.soft(answers.createNonAdmin).toEqual({ status: 403, error: MSG.createRole });
+    expect.soft(answers.createOtherUser).toEqual({ status: 403, error: MSG.createOtherUser });
     answers.refusedRows = psql(`select count(*) from api_tokens where name like ${sqlStr(`e2e-558-%-${stamp}`)}`);
     expect.soft(answers.refusedRows, 'no refused create stored a token').toBe('0');
 
@@ -72,9 +72,9 @@ test('558: a flagged admin token approves; race, expiry, lifetime and create ref
     seeded.push(stored.bookId);
     psql(`update requests set selected_torrent = ${sqlStr(JSON.stringify(PICK))}::jsonb where id = ${sqlStr(stored.requestId)}`);
     answers.storedPick = await approveWith(approver.client, stored.requestId);
-    answers.storedPickAfter = psql(`select concat_ws('|', status, (selected_torrent is null)::text) from requests where id = ${sqlStr(stored.requestId)}`);
+    answers.storedPickAfter = psql(`select concat_ws('|', status, coalesce(selected_torrent::text, 'sql-null')) from requests where id = ${sqlStr(stored.requestId)}`);
     expect(answers.storedPick).toEqual({ status: 200, error: null, message: 'Request approved and download started with pre-selected torrent', requestStatus: 'downloading' });
-    expect.soft(answers.storedPickAfter).toBe('downloading|true');
+    expect.soft(answers.storedPickAfter, 'pick cleared (JSON null, as for a session on main)').toBe('downloading|null');
 
     // Token and session at the same moment on one released request
     const race = seedRequest(user.id, `Q${stamp}`.slice(0, 4), 'awaiting_approval');
