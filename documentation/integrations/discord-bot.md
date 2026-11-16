@@ -15,7 +15,7 @@ Optional Discord bot. Off by default; with it off RMAB loads no Discord code and
 | `discord.admin_role_id` | Optional role pinged on approval messages; never grants rights |
 | `discord.admin_notify_channel_id` | Optional channel for approval messages (later part) |
 | `discord.request_card_mode` | `dm` (default) / `public` / `both`; read with default `dm`, not on the tab yet (cards come later) |
-| `discord.requester_role_id` | Optional role a member needs for `/request`; empty = every linked user; RMAB admins always may. Read on every `/request` step (`loadRequesterRoleId`) |
+| `discord.requester_role_id` | Optional role a member needs for `/request`; empty = every linked user; RMAB admins always may. Read on every `/request` step (`loadRequesterRoleId`: straight from the database, so a failed read throws and the step is refused) |
 - `isDiscordConfigured` = enabled && token && valid server ID (`src/lib/services/discord/discord-config.ts`)
 - IDs: 15-20 digits, no leading zero (same rule as Discord user IDs)
 - One RMAB instance per bot token (two instances on one token would both answer)
@@ -28,7 +28,7 @@ Optional Discord bot. Off by default; with it off RMAB loads no Discord code and
 - Failure: error log `Failed to start the Discord bot`, client destroyed, status `failed` + short reason (tab shows it); never throws
 - `stop()` destroys the client; `restart()` = stop + start. A generation counter discards a start superseded by a later stop/restart; a start also destroys any client an earlier start left (one gateway session per token)
 - Listeners: `error`, `shardError` (warn logs); `interactionCreate` → router (ignored once a later start/stop superseded the client)
-- Gateway closed for good (`shardDisconnect`: discord.js emits it only for unrecoverable close codes, e.g. 4004 token reset; no `invalidated` listener, 14.28.1 never emits it): error log `Discord gateway closed for good; save the settings to try again`, status `failed` (`Discord ended the session` / `Gateway closed (code N)`), running flag off, client destroyed. No automatic retry, also not for a failed start at boot: an admin's Save restarts it
+- Gateway closed for good (`shardDisconnect`: discord.js emits it only for unrecoverable close codes, e.g. 4004 token reset; no `invalidated` listener, 14.28.1 never emits it): error log `Discord gateway closed for good; save the settings to try again`, status `failed` (`Gateway closed (code N)`), running flag off, client destroyed. No automatic retry, also not for a failed start at boot: an admin's Save restarts it
 - Shutdown: the coordinator peeks `processSingleton('discord-bot')` (`DISCORD_BOT_SINGLETON_KEY`, `src/lib/constants/shutdown.ts`) and calls its `stop()` alongside the drain, limit 0.4 s, errors swallowed; it never creates the state or loads discord.js ([unified.md](../deployment/unified.md#shutdown-sequence))
 - State on `globalThis` (`processSingleton('discord-bot')`): one client per process
 - Intents: `Guilds` only (no privileged intents); roles will come from `interaction.member`
@@ -44,19 +44,20 @@ Optional Discord bot. Off by default; with it off RMAB loads no Discord code and
 | Step | Discord | Does |
 |---|---|---|
 | Command, no query | first reply = search form | access check (DB only), then `showModal` (a form must be the first reply, so no defer here) |
-| Command with query / form submit | `deferReply` | access check, `getAudibleService().search(query, 1)` (language filter applies), results menu (≤ 25, one per ASIN). No results → "No books found…"; all hidden by the filter → says so |
+| Command with query / form submit | `deferReply` | access check, `getAudibleService().search(query, 1)` (language filter applies), results menu (≤ 25, one per ASIN). No results → "No books found…" (also what an Audible outage shows: the search returns no results on error); all hidden by the filter → says so |
 | Menu pick | `deferUpdate` | access check, `getAudiobookDetails(asin)`, book embed + Request / Cancel |
-| Request | `deferUpdate` | access check (role again), then audiobook: `createRequestForUser(actor.userId, {asin,title,author,narrator,description,coverArtUrl}, {bypassIgnore: true})` (as `POST /api/requests`); ebook: `createEbookRequestForUser(actor.userId, asin)` ([ebook-sidecar.md](ebook-sidecar.md)). Buttons removed, embed kept |
-| Cancel | `deferUpdate` | access check, "Cancelled. Nothing was requested." |
-- **Access** (`request/discord-request-access.ts`, every step): `resolveDiscordActor(interaction.user.id)` (unlinked, pending, rejected, deleted → "not linked… ask an RMAB admin"); then the requester role from `interaction.member` (raw `roles[]` or cached `roles.cache`). Role set and no member → refused. Admin (DB role) skips the role check
+| Request | `update` ("Requesting…", buttons removed, embed kept) | in-flight guard, access check (role again), then audiobook: `getAudiobookDetails(asin, {fillSeries: false})` + `createRequestForUser(actor.userId, {asin,title,author,narrator,description,coverArtUrl}, {bypassIgnore: true})` (as `POST /api/requests`); ebook: `createEbookRequestForUser(actor.userId, asin)` ([ebook-sidecar.md](ebook-sidecar.md)). Result text, embed kept |
+| Cancel | `update` ("Cancelling…", buttons removed) | access check, "Cancelled. Nothing was requested." |
+- **In-flight guard** (Request): a process-local set keyed `discordUserId:type:asin`, released in `finally`. A second press while the first is still running (a double click lands before the buttons go) → new ephemeral reply "Already working on that request. One moment.", no access read, no creator call (the creators check then create, not atomic)
+- **Access** (`request/discord-request-access.ts`, every step): `resolveDiscordActor(interaction.user.id)` and `loadRequesterRoleId()` read together (`Promise.all`); either read failing → the step's generic error, refused. Unlinked, pending, rejected, deleted → "not linked… ask an RMAB admin"; then the requester role from `interaction.member` (raw `roles[]` or cached `roles.cache`). Role ID = server ID (@everyone) → any member passes. Role set and no member → refused. Admin (DB role) skips the role check
 - **Replies:** fixed texts picked from result codes (`request/discord-request-replies.ts`); never a service `message`/`error` (the ebook creator's 500 body holds the raw error). Errors → logged, "Something went wrong. Try again in a moment."
-- **Embed** (`discord-book-embed.ts`): title, author, narrator, series, https cover, footer type. Book text markdown-escaped (`escapeMarkdown`; book text can contain markdown) and cut to Discord limits. Menu text is plain (not rendered as markdown). Every reply sends `allowedMentions: { parse: [] }`
+- **Embed** (`discord-book-embed.ts`): title, author, narrator, series, https cover, footer type. Book text markdown-escaped (`escapeMarkdown`; book text can contain markdown) and cut to Discord limits (`clip` cuts between code points, never inside a surrogate pair). Menu text is plain (not rendered as markdown). Every reply sends `allowedMentions: { parse: [] }`
 - **Custom ids** (`discord-custom-id.ts`): `rmab:req:<modal|pick|ok|no>:<a|e>[:<ASIN>]:<nonce>`; ASIN only on `ok`, `[A-Z0-9]{10}`; nonce 10 × `[a-z0-9]`. Anything else, or > 100 chars → ignored (no defer, no read). Never carries who may act
 - **DMs:** commands and forms from a DM are dropped by the router; a `/request` button or menu used from a DM is ignored by the handler (no member to check)
 
 ## Running-check facade (`discord-runtime.ts`)
 - The only Discord module core code imports: `isDiscordBotRunning()`, `syncDiscord(label, work)` (bot off → no import, nothing runs; on → runs in the background, never throws or blocks), `startDiscordBotInBackground()`
-- `tests/discord/zero-footprint.test.ts` walks the import graphs (static, `import()`, `require()`, plain template-literal imports) of approve, PATCH/cancel request, admin request delete, `request-delete.service`, `request-cancel.service`, app init, the shutdown coordinator, `POST /api/requests`, `request-creator.service`, fetch-ebook and `ebook-request-creator.service`: only `discord-runtime`/`discord-actor`/`discord-snowflake` may appear, never discord.js
+- `tests/discord/zero-footprint.test.ts` walks the import graphs (static, `import()`, `require()`, plain template-literal imports) of approve, PATCH/cancel request, admin request delete, `request-delete.service`, `request-cancel.service`, app init, the shutdown coordinator, `POST /api/requests`, `request-creator.service`, fetch-ebook and `ebook-request-creator.service`: only `discord-runtime`/`discord-actor`/`discord-snowflake` may appear, never discord.js. It also checks that no file under `src/lib/services/discord/` imports, re-exports or `require()`s a discord.js value (type-only imports and lazy `import()` are fine)
 
 ## API (admin session; not on the API-token allowlist)
 | Route | Does |
