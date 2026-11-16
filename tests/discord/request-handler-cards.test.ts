@@ -3,13 +3,13 @@
  * Documentation: documentation/integrations/discord-bot.md
  *
  * A new request made with the Request button gets its card and approval message posted in
- * the background (through the facade, after the reply); a refused, duplicate or failed
- * request posts nothing.
+ * the background (through the facade, after the reply, even when the reply fails); a refused,
+ * duplicate or failed request posts nothing.
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ASIN } from './discord-request-fakes';
-import { PATH_ERROR, creator, linkAs, loadRequestHandlers, press, resetRequestHarness, toConfirm } from './request-handler-harness';
+import { ASIN, fakeStep } from './discord-request-fakes';
+import { PATH_ERROR, creator, h, linkAs, loadRequestHandlers, press, resetRequestHarness, state, toConfirm } from './request-handler-harness';
 
 vi.mock('@/lib/db', async () => ({ prisma: (await import('./request-handler-harness')).prismaMock }));
 vi.mock('@/lib/services/config.service', async () => {
@@ -50,6 +50,17 @@ describe('/request posts the new request\'s card', () => {
 
     expect(announce).toHaveBeenCalledWith('req-1');
     expect(announce.mock.invocationCallOrder[0]).toBeGreaterThan(button.editReply.mock.invocationCallOrder.at(-1)!);
+  });
+
+  it('the reply fails after the request was made: still announced', async () => {
+    creator.createRequestForUser.mockResolvedValue({ success: true, request: { id: 'req-1', status: 'awaiting_approval' } });
+    const { confirmId } = await toConfirm('audiobook');
+    const button = fakeStep('button', { customId: confirmId, order: state.order });
+    button.editReply.mockRejectedValue(new Error('Unknown interaction'));
+    await h.handleRequestComponent(button);
+
+    expect(creator.createRequestForUser).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('req-1');
   });
 
   it('ebook created: announced with its ID', async () => {

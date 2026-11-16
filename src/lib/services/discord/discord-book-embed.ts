@@ -27,7 +27,10 @@ export interface SelectOption {
   description?: string;
 }
 
-const TYPE_LABEL: Record<RequestMediaType, string> = { audiobook: 'Audiobook', ebook: 'Ebook' };
+/** "Audiobook" or "Ebook", as shown on embeds and in DMs. */
+export function mediaTypeLabel(type: string): string {
+  return type === 'ebook' ? 'Ebook' : 'Audiobook';
+}
 
 /** Only an https image URL is used as the cover; anything else is left out. */
 export function coverUrl(url: string | null | undefined): string | undefined {
@@ -60,7 +63,7 @@ export function bookEmbed(book: BookFields, type: RequestMediaType): DiscordEmbe
     title: safeText(book.title, DISCORD_LIMITS.embedTitle) || 'Untitled',
     fields,
     ...(thumbnail && { thumbnail: { url: thumbnail } }),
-    footer: { text: `${TYPE_LABEL[type]} request` },
+    footer: { text: `${mediaTypeLabel(type)} request` },
   };
 }
 

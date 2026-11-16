@@ -8,7 +8,7 @@
  * every body says which mentions may ping (none, or only the configured admin role).
  */
 
-import { coverUrl } from '../discord-book-embed';
+import { coverUrl, mediaTypeLabel } from '../discord-book-embed';
 import { encodeApprovalCustomId } from '../discord-custom-id';
 import { ButtonStyle, ComponentType, DISCORD_LIMITS, safeText } from '../discord-format';
 
@@ -84,8 +84,6 @@ export function statusLabel(request: Pick<CardRequest, 'status' | 'deletedAt'>):
   return STATUS_LABELS[request.status] ?? 'Unknown';
 }
 
-const typeLabel = (type: string) => (type === 'ebook' ? 'Ebook' : 'Audiobook');
-
 function field(name: string, value: string | null | undefined) {
   return { name, value: safeText(value, DISCORD_LIMITS.embedFieldValue), inline: true };
 }
@@ -98,7 +96,7 @@ function bookEmbedBase(request: CardRequest, extraFields: { name: string; value:
     fields: [field('Author', request.audiobook.author), ...extraFields, { name: 'Status', value: statusLabel(request), inline: true }]
       .filter((f) => f.value.length > 0),
     ...(thumbnail && { thumbnail: { url: thumbnail } }),
-    footer: { text: `${typeLabel(request.type)} request` },
+    footer: { text: `${mediaTypeLabel(request.type)} request` },
   };
 }
 
@@ -150,7 +148,7 @@ export function decisionDmBody(request: CardRequest, decision: 'approved' | 'den
   const title = safeText(request.audiobook.title, 200) || 'Untitled';
   const outcome = decision === 'approved' ? 'was approved' : 'was denied';
   return {
-    content: `Your ${typeLabel(request.type).toLowerCase()} request for **${title}** ${outcome}.`,
+    content: `Your ${mediaTypeLabel(request.type).toLowerCase()} request for **${title}** ${outcome}.`,
     embeds: [],
     components: [],
     allowed_mentions: NO_MENTIONS_RAW,

@@ -20,7 +20,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { errorForLog } from '@/lib/utils/zod-validation';
 import { REQUEST_QUERY_MAX_LENGTH } from '../discord-commands';
 import { decodeRequestCustomId, isAsin, isRequestMediaType, type RequestMediaType } from '../discord-custom-id';
-import { MessageFlags, NO_MENTIONS } from '../discord-format';
+import { MessageFlags, NO_MENTIONS, textOnly } from '../discord-format';
 import { announceDiscordRequest } from '../discord-runtime';
 import { bookEmbed, searchResultOptions } from '../discord-book-embed';
 import { checkRequestAccess, type RequestInteraction } from './discord-request-access';
@@ -39,10 +39,6 @@ const logger = RMABLogger.create('Discord.Request');
 
 const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 
-/** Replaces the step's message (or deferred reply) with plain text and no buttons or embed. */
-function textOnly(content: string) {
-  return { content, embeds: [], components: [], allowedMentions: NO_MENTIONS };
-}
 
 /** Shows the fixed error text, whatever state the interaction is in; never throws. */
 async function failQuietly(interaction: RequestInteraction, step: string, error: unknown): Promise<void> {
@@ -198,6 +194,7 @@ async function confirmRequest(interaction: RequestInteraction, type: RequestMedi
     return;
   }
   confirmsInFlight.add(key);
+  let createdId: string | undefined;
   try {
     // The buttons go with the acknowledgement; the book embed stays
     await interaction.update({ content: TEXT.requesting, components: [], allowedMentions: NO_MENTIONS });
@@ -206,13 +203,15 @@ async function confirmRequest(interaction: RequestInteraction, type: RequestMedi
       await interaction.editReply(textOnly(access.reply));
       return;
     }
-    const { content, createdId } = await createRequest(access.actor.userId, type, asin);
+    const created = await createRequest(access.actor.userId, type, asin);
+    createdId = created.createdId;
     // Keep the book embed so the reply shows what was requested
-    await interaction.editReply({ content, components: [], allowedMentions: NO_MENTIONS });
-    // A new request: its live card and, while it waits, the approval message (in the background)
-    if (createdId) announceDiscordRequest(createdId);
+    await interaction.editReply({ content: created.content, components: [], allowedMentions: NO_MENTIONS });
   } finally {
     confirmsInFlight.delete(key);
+    // A new request: its live card and, while it waits, the approval message (in the background),
+    // even when the reply above could not be shown
+    if (createdId) announceDiscordRequest(createdId);
   }
 }
 

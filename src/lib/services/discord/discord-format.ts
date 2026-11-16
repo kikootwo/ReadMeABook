@@ -28,6 +28,11 @@ export const DISCORD_LIMITS = {
 /** Mentions are never parsed from bot text (the client default too). */
 export const NO_MENTIONS = { parse: [] as never[] };
 
+/** Replaces a message (or deferred reply) with plain text and no buttons or embed. */
+export function textOnly(content: string) {
+  return { content, embeds: [], components: [], allowedMentions: NO_MENTIONS };
+}
+
 /**
  * Single line, trimmed, at most `max` UTF-16 units (an ellipsis marks a cut). Cuts between
  * code points, so an emoji or other surrogate pair is never split in half.

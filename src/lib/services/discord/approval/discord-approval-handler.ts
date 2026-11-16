@@ -15,7 +15,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { errorForLog } from '@/lib/utils/zod-validation';
 import { resolveDiscordActor } from '../discord-actor';
 import { decodeApprovalCustomId } from '../discord-custom-id';
-import { MessageFlags, NO_MENTIONS } from '../discord-format';
+import { MessageFlags, textOnly } from '../discord-format';
 import { refreshDiscordRequestCards } from '../discord-runtime';
 import { statusLabel } from '../cards/discord-card-embeds';
 
@@ -63,8 +63,6 @@ export function approvalReplyText(result: ApprovalResult): string {
       return APPROVAL_TEXT.generic;
   }
 }
-
-const textOnly = (content: string) => ({ content, embeds: [], components: [], allowedMentions: NO_MENTIONS });
 
 export async function handleApprovalComponent(interaction: ApprovalInteraction): Promise<void> {
   // Approval messages live in the admin channel; a DM click has nothing to decide

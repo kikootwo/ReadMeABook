@@ -102,6 +102,14 @@ describe('Discord hooks never delay their caller', () => {
     await vi.waitFor(() => expect(hang.refresh).toHaveBeenCalledWith(expect.anything(), ID));
   });
 
+  it('the approval notification starts no refresh (the decision sync updates the cards, with the decision)', async () => {
+    const { processSendNotification } = await import('@/lib/processors/send-notification.processor');
+    await processSendNotification({ event: 'request_approved', requestId: ID, title: 'T', author: 'A', userName: 'u' } as never);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(hang.refresh).not.toHaveBeenCalled();
+    expect(notificationService.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
   it('a notification without a request starts no refresh', async () => {
     const { processSendNotification } = await import('@/lib/processors/send-notification.processor');
     await processSendNotification({ event: 'issue_reported', issueId: 'i-1', title: 'T', author: 'A', userName: 'u' } as never);
