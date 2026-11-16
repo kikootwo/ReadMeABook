@@ -12,7 +12,8 @@ import { sameAsin } from '@/lib/utils/asin';
  * The Audible record of the edition the library holds, when it differs from the requested one.
  * Display only: callers keep every action on the requested ASIN. With no library ASIN, or the
  * same one (case-insensitive), nothing extra is looked up. A failed lookup is not retried, so the
- * modal settles on the requested edition and never swaps to the library's one later.
+ * modal settles on the requested edition instead of going back to loading (a later open or a
+ * network reconnect looks it up again).
  *
  * - `libraryAsin`: the library ASIN when it differs from `asin`, else null
  * - `libraryBook`: its Audible record once loaded, else null
