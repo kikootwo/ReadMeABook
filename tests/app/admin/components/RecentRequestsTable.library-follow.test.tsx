@@ -4,17 +4,19 @@
  *
  * The row shows the library's edition (`displayTitle`/`displayAuthor`), while every action keeps
  * the requested title and author: both interactive search modals and Adjust Search Terms.
+ * View details opens the details modal on the requested ASIN with the row's `libraryAsin` (#325).
  */
 
 // @vitest-environment jsdom
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const useSWRMock = vi.hoisted(() => vi.fn());
 const searchModalProps = vi.hoisted(() => [] as Record<string, unknown>[]);
 const adjustModalProps = vi.hoisted(() => [] as Record<string, unknown>[]);
+const detailsModalProps = vi.hoisted(() => [] as Record<string, unknown>[]);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -29,6 +31,15 @@ vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
     searchModalProps.push(props);
     return null;
   },
+}));
+vi.mock('@/components/audiobooks/AudiobookDetailsModal', () => ({
+  AudiobookDetailsModal: (props: Record<string, unknown>) => {
+    detailsModalProps.push(props);
+    return null;
+  },
+}));
+vi.mock('@/hooks/useSmartDropdownPosition', () => ({
+  useSmartDropdownPosition: () => ({ containerRef: { current: null }, dropdownRef: { current: null }, positionAbove: false, style: { position: 'fixed', top: 0, left: 0 } }),
 }));
 vi.mock('@/app/admin/components/AdjustSearchTermsModal', () => ({
   AdjustSearchTermsModal: (props: Record<string, unknown>) => {
@@ -67,6 +78,7 @@ describe('RecentRequestsTable: a followed request (#325a)', () => {
   beforeEach(() => {
     searchModalProps.length = 0;
     adjustModalProps.length = 0;
+    detailsModalProps.length = 0;
     useSWRMock.mockImplementation(swrFor(FOLLOWED));
   });
 
@@ -95,5 +107,15 @@ describe('RecentRequestsTable: a followed request (#325a)', () => {
     render(<RecentRequestsTable />);
     expect(screen.getByText('The Martian')).toBeInTheDocument();
     expect(screen.getByText('Andy Weir')).toBeInTheDocument();
+  });
+
+  it('View details opens the modal on the requested ASIN with the library ASIN (#325)', async () => {
+    const { RecentRequestsTable } = await import('@/app/admin/components/RecentRequestsTable');
+    render(<RecentRequestsTable />);
+
+    fireEvent.click(screen.getAllByTitle('Actions')[0]);
+    fireEvent.click(screen.getByRole('menuitem', { name: /View Details/ }));
+
+    expect(detailsModalProps.at(-1)).toMatchObject({ asin: 'B082BHJMFF', libraryAsin: 'B072R1CY4P', requestId: 'req-1' });
   });
 });

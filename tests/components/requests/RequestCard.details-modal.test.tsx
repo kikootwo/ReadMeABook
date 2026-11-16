@@ -1,5 +1,5 @@
 /**
- * Component: Request Card details modal label tests (#298)
+ * Component: Request Card details modal tests (#298 label, #325 library edition)
  * Documentation: documentation/frontend/components.md
  *
  * Renders the real RequestCard with the real AudiobookDetailsModal, so the props the card
@@ -23,9 +23,15 @@ vi.mock('@/lib/hooks/useRequests', () => ({
   useFetchEbookByAsin: () => ({ fetchEbook: vi.fn(), isLoading: false }),
 }));
 
+// Keyed by ASIN: the requested edition, and the edition the library holds (#325)
+const DETAILS: Record<string, Record<string, string>> = {
+  ASIN123: { asin: 'ASIN123', title: 'Detail Book', author: 'Detail Author', narrator: 'Requested Narrator', description: 'Summary' },
+  B072R1CY4P: { asin: 'B072R1CY4P', title: 'Library Book', author: 'Library Author', narrator: 'Library Narrator', description: 'Library summary' },
+};
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
-  useAudiobookDetails: () => ({
-    audiobook: { asin: 'ASIN123', title: 'Detail Book', author: 'Detail Author', description: 'Summary' },
+  useAudiobookDetails: (asin: string | null) => ({
+    audiobook: (asin && DETAILS[asin]) || null,
+    audibleBaseUrl: 'https://www.audible.com',
     isLoading: false,
     error: null,
   }),
@@ -48,18 +54,18 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'user-1', role: 'user' }, accessToken: 'test-token', isLoading: false }),
 }));
 
-const request = (status: string) => ({
+const request = (status: string, libraryAsin: string | null = null) => ({
   id: 'req-1',
   status,
   progress: 100,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
-  audiobook: { id: 'book-1', title: 'Test Book', author: 'Test Author', audibleAsin: 'ASIN123', coverArtUrl: '/cover.jpg' },
+  audiobook: { id: 'book-1', title: 'Test Book', author: 'Test Author', audibleAsin: 'ASIN123', libraryAsin, coverArtUrl: '/cover.jpg' },
 });
 
-async function openDetails(status: string) {
+async function openDetails(status: string, libraryAsin: string | null = null) {
   const { RequestCard } = await import('@/components/requests/RequestCard');
-  render(<RequestCard request={request(status)} />);
+  render(<RequestCard request={request(status, libraryAsin)} />);
   fireEvent.click(screen.getByRole('button', { name: 'Test Book' }));
   await act(async () => {});
 }
@@ -79,5 +85,26 @@ describe('RequestCard details modal label (#298)', () => {
 
     expect(screen.getByText('Detail Book')).toBeInTheDocument();
     expect(screen.getAllByText('In Your Library').length).toBeGreaterThan(0);
+  });
+});
+
+describe('RequestCard details modal of a followed request (#325)', () => {
+  it('shows the edition the library holds and names the requested one', async () => {
+    await openDetails('available', 'B072R1CY4P');
+
+    expect(screen.getByRole('heading', { name: 'Library Book' })).toBeInTheDocument();
+    expect(screen.getByText('Narrated by Library Narrator')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'B072R1CY4P' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Audible/ })).toHaveAttribute('href', 'https://www.audible.com/pd/B072R1CY4P');
+    expect(screen.getByTestId('requested-edition')).toHaveTextContent(
+      'Requested edition: Detail Book · narrated by Requested Narrator · ASIN123',
+    );
+  });
+
+  it('a request without a library ASIN shows the requested edition with no extra line', async () => {
+    await openDetails('available');
+
+    expect(screen.getByRole('heading', { name: 'Detail Book' })).toBeInTheDocument();
+    expect(screen.queryByTestId('requested-edition')).toBeNull();
   });
 });

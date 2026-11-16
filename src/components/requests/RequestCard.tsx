@@ -38,6 +38,7 @@ interface RequestCardProps {
     audiobook: {
       id: string;
       audibleAsin?: string;
+      libraryAsin?: string | null; // effective library ASIN: the details show that edition (#325)
       title: string;
       author: string;
       coverArtUrl?: string;
@@ -300,6 +301,7 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
       {request.audiobook.audibleAsin && (
         <AudiobookDetailsModal
           asin={request.audiobook.audibleAsin}
+          libraryAsin={request.audiobook.libraryAsin}
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
           onRequestSuccess={onChanged}

@@ -44,7 +44,7 @@
 - **Requester tags `req:<username>` on ABS items (#232), backfill job, eligibility, shared-name warnings** → [features/requester-tags.md](features/requester-tags.md)
 - **Explicit mark on requests → ABS item Explicit flag (#542), admin setting (off by default), API-key access guard, mark/clear rules, `requests.explicit`** → [features/explicit-flag.md](features/explicit-flag.md)
 - **Delivered request stuck in `downloaded` when ABS holds another ASIN (#284), library link by path / files hash** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-link-to-the-library-item-284)
-- **Request card shows the edition ABS matched (#325a), `audiobooks.library_asin`, follow on rematch** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)
+- **Request card and details window show the edition ABS matched (#325a, #325), `audiobooks.library_asin`, follow on rematch** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
 
 ## Reading Shelves (Goodreads, Hardcover)

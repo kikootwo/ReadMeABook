@@ -28,9 +28,13 @@ import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE
 import { statusLabel } from '@/components/requests/StatusBadge';
 import { ExplicitCheckbox } from '@/components/requests/ExplicitCheckbox';
 import { useExplicitMarkEnabled, useSetExplicit } from '@/lib/hooks/useExplicitMark';
+import { useLibraryEdition } from '@/lib/hooks/useLibraryEdition';
+import { RequestedEditionLine } from '@/components/audiobooks/RequestedEditionLine';
 
 interface AudiobookDetailsModalProps {
   asin: string;
+  /** Effective library ASIN of a delivered request (#325): when it differs, the details show that edition; every action keeps `asin` */
+  libraryAsin?: string | null;
   isOpen: boolean;
   onClose: () => void;
   onRequestSuccess?: () => void;
@@ -86,6 +90,7 @@ const getStatusInfo = (isAvailable: boolean, requestStatus: string | null, reque
 
 export function AudiobookDetailsModal({
   asin,
+  libraryAsin = null,
   isOpen,
   onClose,
   onRequestSuccess,
@@ -106,7 +111,12 @@ export function AudiobookDetailsModal({
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { squareCovers } = usePreferences();
-  const { audiobook, audibleBaseUrl, isLoading, error } = useAudiobookDetails(isOpen ? asin : null);
+  const { audiobook, audibleBaseUrl, isLoading: isLoadingRequested, error } = useAudiobookDetails(isOpen ? asin : null);
+  // Display only (#325): the library's edition when it differs; actions below keep `asin` and `audiobook`
+  const library = useLibraryEdition(asin, libraryAsin, isOpen);
+  const shown = library.libraryBook ?? audiobook;
+  const shownAsin = library.libraryBook ? library.libraryAsin ?? asin : asin;
+  const isLoading = isLoadingRequested || library.isLoading;
   const { createRequest, isLoading: isRequesting } = useCreateRequest();
   const { ebookStatus, revalidate: revalidateEbookStatus } = useEbookStatus(isOpen && isAvailable ? asin : null);
   const { downloadAvailable, requestId: downloadRequestId } = useDownloadStatus(isOpen ? asin : null);
@@ -145,7 +155,7 @@ export function AudiobookDetailsModal({
 
   const effectiveStatus = localRequestStatus;
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
-  const summaryText = audiobook?.description?.trim() ?? '';
+  const summaryText = shown?.description?.trim() ?? '';
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
   // Explicit mark (#542): wherever Request shows, Audiobookshelf with the setting on, never on a denied request
   const showExplicit = explicitMarkOn && !!user && status.canRequest && effectiveStatus !== 'denied' && requestType !== 'ebook';
@@ -241,7 +251,7 @@ export function AudiobookDetailsModal({
 
   const handleCopyAsin = async () => {
     try {
-      await navigator.clipboard.writeText(asin);
+      await navigator.clipboard.writeText(shownAsin);
       setAsinCopied(true);
       setTimeout(() => setAsinCopied(false), 2000);
     } catch (err) {
@@ -371,7 +381,7 @@ export function AudiobookDetailsModal({
           )}
 
           {/* Content */}
-          {audiobook && !isLoading && (
+          {audiobook && shown && !isLoading && (
             <div className="px-4 pt-4 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 flex flex-col min-h-0 after:block after:shrink-0 after:h-4 sm:after:h-6 lg:after:h-8">
               {/* Hero Section - Cover + Title/Author */}
               <div className="flex flex-col sm:flex-row gap-5 sm:gap-6">
@@ -382,9 +392,9 @@ export function AudiobookDetailsModal({
                     ${squareCovers ? 'w-40 sm:w-44 lg:w-52 aspect-square' : 'w-32 sm:w-40 lg:w-48 aspect-[2/3]'}
                     ${status.type === 'available' ? 'ring-2 ring-emerald-400/60' : ''}
                   `}>
-                    {audiobook.coverArtUrl && !coverError ? (
+                    {shown.coverArtUrl && !coverError ? (
                       <Image
-                        src={audiobook.coverArtUrl}
+                        src={shown.coverArtUrl}
                         alt=""
                         fill
                         className="object-cover"
@@ -403,12 +413,12 @@ export function AudiobookDetailsModal({
                     )}
 
                     {/* Rating Badge */}
-                    {audiobook.rating != null && audiobook.rating > 0 && (
+                    {shown.rating != null && shown.rating > 0 && (
                       <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-white text-xs font-medium">
                         <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span>{audiobook.rating.toFixed(1)}</span>
+                        <span>{shown.rating.toFixed(1)}</span>
                       </div>
                     )}
                   </div>
@@ -417,47 +427,48 @@ export function AudiobookDetailsModal({
                 {/* Title & Author */}
                 <div className="flex-1 text-center sm:text-left min-w-0">
                   <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-gray-100 leading-tight">
-                    {audiobook.title}
+                    {shown.title}
                   </h2>
                   <p className="mt-2 text-base sm:text-lg text-gray-600 dark:text-gray-300">
-                    {audiobook.authorAsin ? (
+                    {shown.authorAsin ? (
                       <Link
-                        href={`/authors/${audiobook.authorAsin}`}
+                        href={`/authors/${shown.authorAsin}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           onClose();
                         }}
                         className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
                       >
-                        {audiobook.author}
+                        {shown.author}
                       </Link>
                     ) : (
-                      audiobook.author
+                      shown.author
                     )}
                   </p>
-                  {audiobook.narrator && (
+                  {shown.narrator && (
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      Narrated by {audiobook.narrator}
+                      Narrated by {shown.narrator}
                     </p>
                   )}
-                  {audiobook.series && (
+                  {shown.series && (
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {audiobook.seriesAsin ? (
+                      {shown.seriesAsin ? (
                         <Link
-                          href={`/series/${audiobook.seriesAsin}`}
+                          href={`/series/${shown.seriesAsin}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             onClose();
                           }}
                           className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                         >
-                          {audiobook.series}{audiobook.seriesPart ? `, Book ${audiobook.seriesPart}` : ''}
+                          {shown.series}{shown.seriesPart ? `, Book ${shown.seriesPart}` : ''}
                         </Link>
                       ) : (
-                        <span>{audiobook.series}{audiobook.seriesPart ? `, Book ${audiobook.seriesPart}` : ''}</span>
+                        <span>{shown.series}{shown.seriesPart ? `, Book ${shown.seriesPart}` : ''}</span>
                       )}
                     </p>
                   )}
+                  <RequestedEditionLine requested={audiobook} requestedAsin={asin} libraryAsin={library.libraryAsin} libraryShown={!!library.libraryBook} />
 
                   {/* Status Badge */}
                   {status.type !== 'none' && (
@@ -515,25 +526,25 @@ export function AudiobookDetailsModal({
 
                   {/* Quick Metadata */}
                   <div className="mt-4 flex flex-wrap items-center justify-center sm:justify-start gap-3 text-sm text-gray-500 dark:text-gray-400">
-                    {audiobook.durationMinutes != null && audiobook.durationMinutes > 0 && (
+                    {shown.durationMinutes != null && shown.durationMinutes > 0 && (
                       <span className="flex items-center gap-1">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        {formatDuration(audiobook.durationMinutes)}
+                        {formatDuration(shown.durationMinutes)}
                       </span>
                     )}
-                    {audiobook.releaseDate && (
-                      <span>{formatDate(audiobook.releaseDate)}</span>
+                    {shown.releaseDate && (
+                      <span>{formatDate(shown.releaseDate)}</span>
                     )}
                   </div>
                 </div>
               </div>
 
               {/* Genres */}
-              {audiobook.genres && audiobook.genres.length > 0 && (
+              {shown.genres && shown.genres.length > 0 && (
                 <div className="mt-6 flex flex-wrap gap-2">
-                  {audiobook.genres.map((genre: string) => (
+                  {shown.genres.map((genre: string) => (
                     <span
                       key={genre}
                       className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm rounded-full"
@@ -574,7 +585,7 @@ export function AudiobookDetailsModal({
                       onClick={handleCopyAsin}
                       className="flex items-center gap-1.5 font-mono text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                     >
-                      {asin}
+                      {shownAsin}
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         {asinCopied ? (
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -589,7 +600,7 @@ export function AudiobookDetailsModal({
                   <div>
                     <p className="text-gray-500 dark:text-gray-400">Source</p>
                     <a
-                      href={`${audibleBaseUrl}/pd/${asin}`}
+                      href={`${audibleBaseUrl}/pd/${shownAsin}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-orange-600 dark:text-orange-400 hover:underline"
@@ -602,26 +613,26 @@ export function AudiobookDetailsModal({
                   </div>
 
                   {/* Language */}
-                  {audiobook.language && (
+                  {shown.language && (
                     <div>
                       <p className="text-gray-500 dark:text-gray-400">Language</p>
-                      <p className="text-gray-900 dark:text-gray-100 capitalize">{audiobook.language}</p>
+                      <p className="text-gray-900 dark:text-gray-100 capitalize">{shown.language}</p>
                     </div>
                   )}
 
                   {/* Format */}
-                  {audiobook.formatType && (
+                  {shown.formatType && (
                     <div>
                       <p className="text-gray-500 dark:text-gray-400">Format</p>
-                      <p className="text-gray-900 dark:text-gray-100 capitalize">{audiobook.formatType}</p>
+                      <p className="text-gray-900 dark:text-gray-100 capitalize">{shown.formatType}</p>
                     </div>
                   )}
 
                   {/* Publisher */}
-                  {audiobook.publisherName && (
+                  {shown.publisherName && (
                     <div>
                       <p className="text-gray-500 dark:text-gray-400">Publisher</p>
-                      <p className="text-gray-900 dark:text-gray-100">{audiobook.publisherName}</p>
+                      <p className="text-gray-900 dark:text-gray-100">{shown.publisherName}</p>
                     </div>
                   )}
 

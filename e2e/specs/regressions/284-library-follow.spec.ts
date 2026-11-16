@@ -9,8 +9,9 @@
  *    ONE plex_library_scan: `available`, library_asin Y, the requested fields unchanged in SQL; the request
  *    list and detail show artemis with `audibleAsin` X, `libraryAsin` Y and cover A from the library cache;
  *    the admin list and /recent keep the requested title with artemis as `displayTitle`. Screenshots.
- *    The card's details modal asks for X. "Get ebook" (X), with an ebook source on, creates no audiobooks
- *    row (reported as not reached when RMAB cannot load X's details offline).
+ *    The card's details modal (1280 light, 375 dark) looks up X and Y and shows Y with a "Requested edition"
+ *    line naming X (#325). "Get ebook" (X), with an ebook source on, creates no audiobooks row (reported as
+ *    not reached when RMAB cannot load X's details offline).
  * 2. Rematch to phm Z (B08G9PRS1K) + cover B, one scan: library_asin Z, the API title is phm, and the cover
  *    URL changed to a file holding B (the old URL is gone).
  * 3. Ownership: POST /api/requests X and Z → 409; request-with-torrent X → 409 AlreadyAvailable.
@@ -20,7 +21,7 @@
  * so a run on main (no column) shows every value.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { Abs, authState, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackExecSync, stackLogsSync, urls, waitFor, writeEvidence } from '../../lib/harness';
 import { dbNow, markJobs, MEDIA, psql, sqlStr, waitOrganized } from './242-helpers';
 import { absItem, disableSchedules, FAKE_PROXY, printenv, rmabCover, SCAN_TYPES, session, waitStartupSettled, type FixtureBook } from './284-helpers';
@@ -126,24 +127,37 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
   const followLog = (stackLogsSync('rmab').match(/Following Audiobookshelf: "[^"]*" library ASIN \S+ -> \S+/g) || []);
   writeEvidence(`${DIR}/step1.json`, { s1, requested, listed, adminRow, recentRow, adminSearchIds: adminSearch.requests.map((r) => r.requestId), detail, cover1, coverA, followLog });
 
-  // 1d. Screenshots (before Get ebook adds an ebook card). The modal's details response is a labelled replay:
-  // RMAB's own Audible calls are refused under abs-fake-metadata; the point is which ASIN the modal asks for.
-  const asked: string[] = [];
+  // 1d. Screenshots (before Get ebook adds an ebook card). The modal's details responses are a labelled replay:
+  // RMAB's own Audible calls are refused under abs-fake-metadata; the point is which ASINs the modal asks for
+  // and which edition it shows (#325). Covers are not exercised: the replay sets none.
+  const asked = new Set<string>();
+  const replayDetails = (page: Page) => page.route(/\/api\/audiobooks\/[A-Z0-9]{10}$/, async (route) => {
+    const asin = route.request().url().split('/').pop()!;
+    asked.add(asin);
+    const book = asin === martian.asin ? martian : asin === artemis.asin ? artemis : null;
+    if (!book) return route.fulfill({ status: 404, json: { error: 'NotFound' } });
+    await route.fulfill({ json: { success: true, audibleBaseUrl: 'https://www.audible.com', audiobook: { ...book, description: `(replayed details of ${book.title}, e2e)`, coverArtUrl: null, durationMinutes: book === artemis ? 535 : 653 } } });
+  });
+  /** Open the card's details modal and read what it shows. */
+  const openModal = async (page: Page) => {
+    await page.getByRole('button', { name: artemis.title }).first().click();
+    await expect(page.getByRole('heading', { name: 'Details', exact: true })).toBeVisible({ timeout: 15_000 });
+    const line = page.getByTestId('requested-edition');
+    return {
+      title: (await page.getByRole('heading', { level: 2 }).allTextContents()).map((t) => t.trim()).filter((t) => t === artemis.title || t === martian.title),
+      requestedLine: (await line.count()) ? (await line.textContent())?.trim() : null,
+      asinShown: (await page.getByRole('button', { name: /^(B0[A-Z0-9]{8})$/ }).allTextContents()).map((t) => t.trim()),
+    };
+  };
+  const modals: Record<string, unknown> = {};
   {
     const { ctx, page, settled } = await session(browser, 1280, 900, false);
-    await page.route(/\/api\/audiobooks\/[A-Z0-9]{10}$/, async (route) => {
-      const asin = route.request().url().split('/').pop()!;
-      asked.push(asin);
-      const book = asin === martian.asin ? martian : asin === artemis.asin ? artemis : null;
-      if (!book) return route.fulfill({ status: 404, json: { error: 'NotFound' } });
-      await route.fulfill({ json: { success: true, audibleBaseUrl: 'https://www.audible.com', audiobook: { ...book, description: '(replayed details, e2e)', coverArtUrl: null, durationMinutes: 600 } } });
-    });
+    await replayDetails(page);
     await page.goto('/requests');
     await expect(page.getByRole('heading', { name: artemis.title }).first()).toBeVisible({ timeout: 30_000 });
     await settled(DIR, 'card-1280-light');
-    await page.getByRole('button', { name: artemis.title }).first().click();
-    await expect(page.getByText(martian.title).first()).toBeVisible({ timeout: 15_000 });
-    await settled(DIR, 'modal-requested');
+    modals['1280-light'] = await openModal(page);
+    await settled(DIR, 'modal-1280-light');
     await page.goto('/admin');
     const row = page.getByText(artemis.title).first();
     await row.scrollIntoViewIfNeeded();
@@ -153,11 +167,15 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
   }
   {
     const { ctx, page, settled } = await session(browser, 375, 812, true);
+    await replayDetails(page);
     await page.goto('/requests');
     await expect(page.getByRole('heading', { name: artemis.title }).first()).toBeVisible({ timeout: 30_000 });
     await settled(DIR, 'card-375-dark');
+    modals['375-dark'] = await openModal(page);
+    await settled(DIR, 'modal-375-dark');
     await ctx.close();
   }
+  writeEvidence(`${DIR}/modal.json`, { asked: [...asked].sort(), modals });
 
   // 1e. "Get ebook" from the modal keys on X: it must not create a Y audiobooks row. An ebook source is
   // turned on for this step, so the 400 "not enabled" answer cannot pass it vacuously.
@@ -218,7 +236,11 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
   expect.soft(adminSearch.requests.map((r) => r.requestId), 'admin search by the library title').toContain(requestId);
   expect.soft(detail, 'GET /api/requests/:id').toMatchObject({ audibleAsin: martian.asin, libraryAsin: artemis.asin, title: artemis.title, coverArtUrl: listed.coverArtUrl });
   expect.soft(followLog, 'one follow so far').toEqual([`Following Audiobookshelf: "${delivered.title}" library ASIN ${martian.asin} -> ${artemis.asin}`]);
-  expect.soft(asked, 'the card modal asked for the requested ASIN only').toEqual([martian.asin]);
+  expect.soft([...asked].sort(), 'the card modal looked up the requested and the library ASIN').toEqual([martian.asin, artemis.asin].sort());
+  const requestedLine = `Requested edition: ${martian.title} · narrated by ${martian.narrator} · ${martian.asin}`;
+  for (const [view, shown] of Object.entries(modals)) {
+    expect.soft(shown, `modal ${view}: the library edition, naming the requested one`).toEqual({ title: [artemis.title], requestedLine, asinShown: [artemis.asin] });
+  }
   if (ebookReached) {
     expect.soft(booksAfterEbook, 'Get ebook created no audiobooks row').toBe(booksBefore);
     expect.soft(yRows, 'no row for the library ASIN').toBe(0);
