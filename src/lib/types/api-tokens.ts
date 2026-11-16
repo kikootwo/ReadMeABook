@@ -12,6 +12,8 @@ export interface ApiToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+  /** May approve requests (opt-in, set at create) */
+  canApproveRequests: boolean;
 }
 
 /** Extended API token with cross-user fields, returned by admin endpoints */

@@ -12,6 +12,9 @@ import { useApiTokens } from '@/lib/hooks/useApiTokens';
 import { getInstanceUrl } from '@/lib/utils/client-url';
 import Link from 'next/link';
 import type { AdminApiToken } from '@/lib/types/api-tokens';
+import { useAuth } from '@/contexts/AuthContext';
+import { ApprovalTokenBadge, ApprovalTokenOption } from '@/components/api-tokens/ApprovalTokenOption';
+import { TokenApprovalSetting } from './TokenApprovalSetting';
 
 interface UserOption {
   id: string;
@@ -25,6 +28,14 @@ export function ApiTab() {
   // Admin-specific state
   const [users, setUsers] = useState<UserOption[]>([]);
   const [newTokenUserId, setNewTokenUserId] = useState('');
+  const currentUserId = useAuth().user?.id ?? null;
+  // Approval tokens: only for the admin's own account
+  const approvalOffered = api.approvalTokensAvailable && (newTokenUserId === '' || newTokenUserId === currentUserId);
+
+  const selectUser = (userId: string) => {
+    setNewTokenUserId(userId);
+    if (userId !== '' && userId !== currentUserId) api.setNewTokenCanApprove(false);
+  };
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -76,6 +87,8 @@ export function ApiTab() {
           </Link>
         </p>
       </div>
+
+      <TokenApprovalSetting onChanged={() => api.fetchTokens()} />
 
       {/* Error display */}
       {api.error && (
@@ -148,10 +161,9 @@ export function ApiTab() {
                 onChange={(e) => api.setNewTokenExpiry(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
-                <option value="never">Never</option>
-                <option value="30d">30 days</option>
-                <option value="90d">90 days</option>
-                <option value="1y">1 year</option>
+                {api.expiryOptions.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -160,7 +172,7 @@ export function ApiTab() {
               </label>
               <select
                 value={newTokenUserId}
-                onChange={(e) => setNewTokenUserId(e.target.value)}
+                onChange={(e) => selectUser(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="">Current user (default)</option>
@@ -175,6 +187,11 @@ export function ApiTab() {
               </p>
             </div>
           </div>
+          <ApprovalTokenOption
+            available={approvalOffered}
+            checked={api.newTokenCanApprove}
+            onChange={api.setNewTokenCanApprove}
+          />
           <div className="flex gap-2">
             <button
               onClick={handleCreate}
@@ -227,7 +244,10 @@ export function ApiTab() {
             <tbody>
               {api.tokens.map((token) => (
                 <tr key={token.id} className="border-b border-gray-100 dark:border-gray-800">
-                  <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">{token.name}</td>
+                  <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">
+                    {token.name}
+                    {token.canApproveRequests && <ApprovalTokenBadge />}
+                  </td>
                   <td className="py-3 px-2">
                     <code className="text-xs bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded text-gray-600 dark:text-gray-400 font-mono">
                       {token.tokenPrefix}...
