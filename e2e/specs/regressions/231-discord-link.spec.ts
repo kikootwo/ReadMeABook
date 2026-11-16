@@ -8,7 +8,7 @@
  *   2  the same ID for a second user: 409; a malformed ID: 400; nothing written
  *   3  refusals: the user's own session 403, an admin API token 403 (not on the allowlist)
  *   4  deleting the linked user clears the column, and the second user can then take the ID
- *   cleanup: links removed, the admin API token revoked
+ *   cleanup: links removed (the first user's too when the run stops before step 4), the admin API token revoked
  */
 
 import { test, expect } from '@playwright/test';
@@ -35,6 +35,7 @@ test('231: admin-only Discord link; duplicate 409; user and API token 403; delet
   const result: Record<string, unknown> = { selfId: SELF_ID, otherId: OTHER_ID };
   let tokenId = '';
   let adminId = '';
+  let firstId = '';
   let second = '';
 
   try {
@@ -42,6 +43,7 @@ test('231: admin-only Discord link; duplicate 409; user and API token 403; delet
     adminId = users.users.find((u) => u.plexUsername === env('E2E_ADMIN_USER'))?.id ?? '';
     expect(adminId, 'admin row').not.toBe('');
     const first = await viewer(admin, `d231a${stamp.toString(36)}`);
+    firstId = first.id;
     second = (await viewer(admin, `d231b${stamp.toString(36)}`)).id;
 
     // 1 links
@@ -91,6 +93,8 @@ test('231: admin-only Discord link; duplicate 409; user and API token 403; delet
   } finally {
     const cleanup: Record<string, number> = {};
     if (adminId) cleanup.self = (await put(admin, adminId, null)).status;
+    // Deleting the first user clears its link; unlink it here only when the run stopped before that
+    if (firstId && result.deleteStatus !== 200) cleanup.first = (await put(admin, firstId, null)).status;
     if (second) cleanup.second = (await put(admin, second, '')).status;
     if (tokenId) cleanup.token = (await admin.raw('DELETE', `/api/user/api-tokens/${tokenId}`)).status;
     result.cleanup = cleanup;

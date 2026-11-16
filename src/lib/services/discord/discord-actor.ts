@@ -13,14 +13,13 @@ import { getSessionRefusal } from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('DiscordActor');
 
-/** A Discord user ID (snowflake): digits only. */
-export const DISCORD_USER_ID_PATTERN = /^\d{15,25}$/;
+/** A Discord user ID (snowflake): 15 to 20 digits, no leading zero. */
+export const DISCORD_USER_ID_PATTERN = /^[1-9]\d{14,19}$/;
 
 /** The RMAB account a Discord user acts as. */
 export interface DiscordActor {
   userId: string;
   username: string;
-  role: string;
   /** From the account role only (the setup-admin flag does not make an account admin). */
   isAdmin: boolean;
 }
@@ -28,6 +27,10 @@ export interface DiscordActor {
 /**
  * Resolves the account linked to a Discord user ID, or null when none is linked or the
  * account is refused. Callers resolve again for every interaction.
+ *
+ * Pass only the ID Discord reports for the person acting (`interaction.user.id`), never an
+ * ID taken from command options, a component custom_id or message text (the sender
+ * chooses those).
  */
 export async function resolveDiscordActor(discordUserId: string): Promise<DiscordActor | null> {
   if (typeof discordUserId !== 'string' || !DISCORD_USER_ID_PATTERN.test(discordUserId)) return null;
@@ -47,7 +50,6 @@ export async function resolveDiscordActor(discordUserId: string): Promise<Discor
   return {
     userId: user.id,
     username: user.plexUsername,
-    role: user.role,
     isAdmin: user.role === 'admin',
   };
 }

@@ -352,11 +352,14 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 ## Discord Identity Link
 
-**Status:** groundwork for the Discord bot (#231): no bot yet, nothing reads the link outside the resolver
+**Status:** groundwork for the Discord bot (#231): no bot yet. The link is resolved to an account only through `resolveDiscordActor`; listed (admin only) by `GET /api/admin/users`
 - `User.discordUserId` (Discord user ID, unique), set only by an admin: `PUT /api/admin/users/[id]/discord` (admin session; not on the API-token allowlist). API: [admin-dashboard.md](../../admin-dashboard.md)
-- `resolveDiscordActor(discordUserId)` (`src/lib/services/discord/discord-actor.ts`): the only path from a Discord user to an account. A second identity path with the same refusal as `requireAuth` (`getSessionRefusal`: missing, deleted, pending, rejected) → `null`; anything that is not 15-25 digits → `null` without a query. Returns `{ userId, username, role, isAdmin }`
+- `resolveDiscordActor(discordUserId)` (`src/lib/services/discord/discord-actor.ts`): the only path from a Discord user to an account. A second identity path with the same refusal as `requireAuth` (`getSessionRefusal`: missing, deleted, pending, rejected) → `null`; anything that is not 15-20 digits with no leading zero → `null` without a query. Returns `{ userId, username, isAdmin }` (no role). Pass only `interaction.user.id`, never an ID from command options, a custom_id or message text
+- Guard test `tests/services/discord/discord-user-id-lookup-guard.test.ts`: `discordUserId` in a Prisma `where` (or raw `discord_user_id`) anywhere under `src/` outside `discord-actor.ts` fails
 - Admin = DB role only (`role === 'admin'`; `isSetupAdmin` does not count, same as `requireAdmin`), read on every call, never cached
-- Removing a user's Plex server or OIDC group access does not cut off the Discord link (a web session re-checks it at the next sign-in, within 7 days when the refresh token expires; API tokens behave like the link). Cut off by unlinking, deleting the user, or removing them from the Discord server
+- Removing a user's Plex server or OIDC group access does not cut off the Discord link (a web session re-checks it at the next sign-in, within 7 days when the refresh token expires; API tokens behave like the link). Cut off by unlinking or deleting the user; removing them from the Discord server does not (clicks on DM cards carry no server)
+- Revoking a user's sessions or login token (`sessionsInvalidatedAt`) does not cut off Discord: unlink or delete the user
+- Link an admin account only when its Discord account has 2FA on
 
 ## Admin-Generated Login Token
 

@@ -72,9 +72,9 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 
 **PUT /api/admin/users/[id]/discord** (#231, groundwork: no bot and no Users page field yet)
 - Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403). An admin may link their own account: only `discordUserId` is written, never the role
-- Body `{ discordUserId }` (`AUTH_JSON_BODY_LIMIT_BYTES`; other keys ignored): a Discord user ID, trimmed, 15-25 digits; `null` or `''` unlinks
-- One write, `updateMany` on `{ id, deletedAt: null }`: 200 `{ user: { id, discordUserId } }`
-- Errors: 400 `ValidationError` (`Discord user ID must be 15 to 25 digits, or empty to unlink`; missing field, wrong type, bad JSON); 404 `User not found` (missing or deleted); 409 `Conflict` `This Discord account is already linked to another user` (unique index); 413 over the limit; 500 `Failed to update Discord link`
+- Body `{ discordUserId }` (`AUTH_JSON_BODY_LIMIT_BYTES`; other keys ignored): a Discord user ID, trimmed, 15-20 digits, no leading zero (`^[1-9]\d{14,19}$`); `null` or `''` unlinks
+- One write, `updateMany` on `{ id, deletedAt: null }`: 200 `{ user: { id, discordUserId } }`; info log `Discord account linked`/`unlinked` with `userId`, `adminId`, `discordUserId` (null on unlink)
+- Errors: 400 `ValidationError` (`Discord user ID must be 15 to 20 digits, not starting with 0, or empty to unlink`; missing field, wrong type, bad JSON); 404 `User not found` (missing or deleted); 409 `Conflict` `This Discord account is already linked to another user` (unique index); 413 over the limit; 500 `Failed to update Discord link`
 - Rules for using the link: [backend/services/auth.md](backend/services/auth.md#discord-identity-link)
 
 **GET /api/admin/settings/auto-approve**

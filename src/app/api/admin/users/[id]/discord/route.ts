@@ -11,10 +11,11 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { DISCORD_USER_ID_PATTERN } from '@/lib/services/discord/discord-actor';
+import { isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
 
 const logger = RMABLogger.create('API.Admin.Users.Discord');
 
-const INVALID_ID_MESSAGE = 'Discord user ID must be 15 to 25 digits, or empty to unlink';
+const INVALID_ID_MESSAGE = 'Discord user ID must be 15 to 20 digits, not starting with 0, or empty to unlink';
 
 /** `discordUserId`: a Discord user ID (trimmed), or null / empty to unlink. Other fields are ignored. */
 const DiscordLinkSchema = z.object({
@@ -24,11 +25,6 @@ const DiscordLinkSchema = z.object({
     .refine((value) => value === '' || DISCORD_USER_ID_PATTERN.test(value), { message: INVALID_ID_MESSAGE })
     .nullable(),
 });
-
-/** Prisma unique-constraint violation (P2002): the Discord ID is linked to another user */
-function isUniqueViolation(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002';
-}
 
 /**
  * PUT /api/admin/users/[id]/discord
@@ -60,6 +56,7 @@ export async function PUT(
         logger.info(discordUserId ? 'Discord account linked' : 'Discord account unlinked', {
           userId: id,
           adminId: req.user?.sub,
+          discordUserId,
         });
         return NextResponse.json({ user: { id, discordUserId } });
       } catch (error) {
@@ -72,7 +69,8 @@ export async function PUT(
         if (error instanceof SyntaxError) {
           return NextResponse.json({ error: 'ValidationError', message: INVALID_ID_MESSAGE }, { status: 400 });
         }
-        if (isUniqueViolation(error)) {
+        // P2002 on the unique index: the Discord ID is linked to another user
+        if (isUniqueConstraintError(error)) {
           return NextResponse.json(
             { error: 'Conflict', message: 'This Discord account is already linked to another user' },
             { status: 409 }

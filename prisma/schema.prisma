@@ -64,7 +64,8 @@ model User {
   sessionsInvalidatedAt DateTime? @map("sessions_invalidated_at")
 
   // Discord identity link: Discord user ID (snowflake), set only by an admin; null = not linked.
-  // Cleared when the user is deleted. Read only through resolveDiscordActor.
+  // Cleared when the user is deleted. Resolved to an account only through resolveDiscordActor;
+  // listed (admin only) by GET /api/admin/users.
   discordUserId String? @unique @map("discord_user_id")
 
   // Soft delete support

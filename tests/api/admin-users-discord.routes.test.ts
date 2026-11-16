@@ -13,6 +13,7 @@ import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
 const verifyAccessTokenMock = vi.hoisted(() => vi.fn());
+const logLines = vi.hoisted(() => [] as unknown[][]);
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
@@ -22,7 +23,13 @@ vi.mock('@/lib/utils/jwt', () => ({
   verifyAccessToken: verifyAccessTokenMock,
 }));
 
+vi.mock('@/lib/utils/logger', () => {
+  const record = (...args: unknown[]) => { logLines.push(args); };
+  return { RMABLogger: { create: () => ({ info: record, debug: record, warn: record, error: record }) } };
+});
+
 const LINK_ID = '123456789012345678';
+const INVALID_ID_MESSAGE = 'Discord user ID must be 15 to 20 digits, not starting with 0, or empty to unlink';
 const API_TOKEN = 'rmab_discord1234567890abcd';
 const API_TOKEN_HASH = crypto.createHash('sha256').update(API_TOKEN).digest('hex');
 
@@ -60,6 +67,7 @@ async function put(id: string, body: unknown, auth?: string) {
 
 describe('PUT /api/admin/users/[id]/discord', () => {
   beforeEach(() => {
+    logLines.length = 0;
     signInAs('admin');
     prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.apiToken.update.mockResolvedValue({});
@@ -74,6 +82,31 @@ describe('PUT /api/admin/users/[id]/discord', () => {
       where: { id: 'user-2', deletedAt: null },
       data: { discordUserId: LINK_ID },
     });
+  });
+
+  it('logs the linked Discord ID with the user and the admin', async () => {
+    await put('user-2', { discordUserId: LINK_ID });
+
+    expect(logLines).toContainEqual([
+      'Discord account linked',
+      { userId: 'user-2', adminId: 'admin-1', discordUserId: LINK_ID },
+    ]);
+  });
+
+  it('logs an unlink with a null Discord ID', async () => {
+    await put('user-2', { discordUserId: null });
+
+    expect(logLines).toContainEqual([
+      'Discord account unlinked',
+      { userId: 'user-2', adminId: 'admin-1', discordUserId: null },
+    ]);
+  });
+
+  it.each([['15 digits', '1'.repeat(15)], ['20 digits', '9'.repeat(20)]])('accepts %s', async (_label, value) => {
+    const { status, payload } = await put('user-2', { discordUserId: value });
+
+    expect(status).toBe(200);
+    expect(payload.user.discordUserId).toBe(value);
   });
 
   it('trims surrounding spaces before storing', async () => {
@@ -106,6 +139,9 @@ describe('PUT /api/admin/users/[id]/discord', () => {
 
   it.each([
     ['too short', '12345'],
+    ['14 digits', '1'.repeat(14)],
+    ['21 digits', '1'.repeat(21)],
+    ['a leading zero', `0${LINK_ID}`],
     ['too long', '1'.repeat(26)],
     ['not digits', '12345678901234567a'],
     ['a mention', `<@${LINK_ID}>`],
@@ -115,6 +151,7 @@ describe('PUT /api/admin/users/[id]/discord', () => {
 
     expect(status).toBe(400);
     expect(payload.error).toBe('ValidationError');
+    expect(payload.message).toBe(INVALID_ID_MESSAGE);
     expect(prismaMock.user.updateMany).not.toHaveBeenCalled();
   });
 
