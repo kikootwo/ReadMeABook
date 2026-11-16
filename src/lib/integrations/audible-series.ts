@@ -72,8 +72,15 @@ export async function scrapeSeriesPage(
 
     const description = parseSeriesDescription($);
 
-    // Parse all books from the series page
-    const books = parseSeriesBooks($, langConfig.scraping.authorPrefixes, langConfig.scraping.narratorPrefixes, langConfig);
+    // Parse all books from the series page; every row is stamped with this series (#599)
+    const books = parseSeriesBooks($, langConfig.scraping.authorPrefixes, langConfig.scraping.narratorPrefixes, langConfig)
+      .map((book) => ({ ...book, seriesAsin: asin }));
+
+    // Positions tell same-titled volumes apart; this shows how often each layout carries the label
+    const modernLayout = $('adbl-product-row').filter((_i, el) => $(el).closest('adbl-product-carousel').length === 0).length > 0;
+    logger.debug(
+      `Series ${asin} page ${page}: ${modernLayout ? 'modern' : 'legacy'} layout, ${books.filter((b) => b.seriesPart !== undefined).length}/${books.length} rows with a position label`,
+    );
 
     // Layout-drift detector: the header says the series has books but no rows
     // parsed, which means Audible changed its markup again.

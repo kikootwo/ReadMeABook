@@ -7,11 +7,13 @@
  * - scanAuthorBooks(): one author catalog scan, relevance order (entire catalog, as before)
  *   or newest first with an early stop at the cutoff (new releases only).
  * - scanAuthorLegs(): runs the scans an author's watchers need and feeds each watcher its own.
+ * - healDedupeAndPersist(): both watched paths heal wrongly linked volumes before dedup (#599).
  */
 
 import { getAudibleService, AudibleAudiobook, AuthorBooksResult, AUDIBLE_PAGE_SIZE } from '@/lib/integrations/audible.service';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups } from '@/lib/services/works.service';
+import { detachVetoedAsins } from '@/lib/services/works-heal';
 import { toReleaseDay } from '@/lib/utils/release-date';
 import { isNewRelease, newReleaseFloorDay } from '@/lib/utils/watch-mode';
 import type { RMABLogger } from '@/lib/utils/logger';
@@ -26,20 +28,19 @@ interface Watch {
   newReleasesSince?: Date | null;
 }
 
-/**
- * Dedupe a scraped list. Its dedup groups are persisted in the background once `after` settles,
- * so two lists of the same author never write the same works at the same time.
- */
-export function dedupeAndPersist(
-  books: AudibleAudiobook[],
-  after: Promise<void> = Promise.resolve()
-): { books: AudibleAudiobook[]; persisted: Promise<void> } {
-  if (books.length === 0) return { books: [], persisted: after };
-  const { books: deduped, groups } = deduplicateAndCollectGroups(books);
-  const persisted = groups.length > 0
-    ? after.then(() => persistDedupGroups(groups)).catch(() => {})
-    : after;
+/** Dedupe a scraped list; its dedup groups are persisted in the background (`persisted` never rejects) */
+export function dedupeAndPersist(books: AudibleAudiobook[]): { books: AudibleAudiobook[]; persisted: Promise<void> } {
+  const { books: deduped, groups } = books.length > 0 ? deduplicateAndCollectGroups(books) : { books: [], groups: [] };
+  const persisted = groups.length > 0 ? persistDedupGroups(groups).catch(() => {}) : Promise.resolve();
   return { books: deduped, persisted };
+}
+
+/** Both watched paths: fill positions (series), heal wrongly linked volumes (#599) before the owned check, dedupe */
+export async function healDedupeAndPersist(
+  books: AudibleAudiobook[],
+  { seriesAsin }: { seriesAsin?: string } = {}
+): Promise<{ books: AudibleAudiobook[]; persisted: Promise<void> }> {
+  return dedupeAndPersist(await detachVetoedAsins(books, seriesAsin));
 }
 
 /**
@@ -144,8 +145,9 @@ export async function scanAuthorLegs(
   const entireAsins = new Set(entireRaw.map((b) => b.asin));
   const found = entireRaw.length + newRaw.filter((b) => !entireAsins.has(b.asin)).length;
 
-  const entire = dedupeAndPersist(entireRaw);
-  const newOnly = entireScan.complete ? entire : dedupeAndPersist(newRaw, entire.persisted);
+  const entire = await healDedupeAndPersist(entireRaw);
+  // The second heal writes too: it starts once the first list's groups are written
+  const newOnly = entireScan.complete ? entire : await entire.persisted.then(() => healDedupeAndPersist(newRaw));
   return { found, booksFor: (watch) => (watch.newReleasesSince != null ? newOnly.books : entire.books) };
 }
 

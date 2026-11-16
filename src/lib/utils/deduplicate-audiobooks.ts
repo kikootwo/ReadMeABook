@@ -8,9 +8,11 @@
  * Dedup key: normalized title + normalized narrator
  * Duration tolerance: max(longerDuration * 0.05, 10) minutes
  * Missing duration treated as compatible (graceful degradation).
+ * Known different volumes of one series never merge (series-volume.ts, #599).
  */
 
 import type { AudibleAudiobook } from '../integrations/audible.service';
+import { isDifferentVolume, positionsSettled } from './series-volume';
 
 // ---------------------------------------------------------------------------
 // Title / narrator normalization
@@ -138,6 +140,8 @@ export interface DedupGroup {
   author: string;            // Author from the canonical entry
   narrator?: string;         // Narrator from the canonical entry
   durationMinutes?: number;  // Duration from the canonical entry
+  /** false: positions not settled (a series member has no position), the merge is display-only */
+  persistable?: boolean;
 }
 
 /** Result of deduplication with group collection. */
@@ -199,6 +203,7 @@ export function deduplicateAndCollectGroups(books: AudibleAudiobook[]): Deduplic
     // compatibility. Build sub-groups where all members are compatible with
     // the representative (first member). A book joins the first compatible sub-group.
     // This prevents false dedup of series entries like "Series: Book A" vs "Series: Book B".
+    // Known different volumes are checked against every member, not just the first (#599).
     const subGroups: AudibleAudiobook[][] = [];
 
     for (const book of group) {
@@ -207,7 +212,8 @@ export function deduplicateAndCollectGroups(books: AudibleAudiobook[]): Deduplic
         // Check both duration and subtitle compatibility against the representative
         if (
           areDurationsCompatible(sg[0].durationMinutes, book.durationMinutes) &&
-          areSubtitlesCompatible(sg[0].title, book.title)
+          areSubtitlesCompatible(sg[0].title, book.title) &&
+          !sg.some(member => isDifferentVolume(member, book, 'dedup'))
         ) {
           sg.push(book);
           placed = true;
@@ -241,6 +247,7 @@ export function deduplicateAndCollectGroups(books: AudibleAudiobook[]): Deduplic
           author: best.author,
           narrator: best.narrator,
           durationMinutes: best.durationMinutes,
+          persistable: positionsSettled(sg),
         });
       }
     }

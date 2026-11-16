@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   infos: [] as string[],
 }));
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async (rows: unknown[]) => rows }));
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({ getAudibleLanguageFilter: async () => state.filter }),

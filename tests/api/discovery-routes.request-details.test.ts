@@ -33,6 +33,8 @@ const BOOK_OTHER = 'B0BOOK0001'; // requested by another user
 const BOOK_OWN = 'B0BOOK0002'; // requested by the caller, and ignored by the caller
 const BOOK_FREE = 'B0BOOK0003'; // not requested
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async (rows: unknown[]) => rows }));
 vi.mock('@/lib/db', () => ({
   prisma: {
     user: {

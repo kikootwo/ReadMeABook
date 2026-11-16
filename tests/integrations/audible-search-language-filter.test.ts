@@ -18,6 +18,8 @@ const axiosMock = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn() }));
 // Plain holders: the config's mockReset clears vi.fn implementations per test
 const state = vi.hoisted(() => ({ region: 'fr', filter: null as string | null }));
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async (rows: unknown[]) => rows }));
 vi.mock('axios', () => ({ default: axiosMock, ...axiosMock }));
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({

@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const searchByAuthorAsin = vi.hoisted(() => vi.fn());
 const dedup = vi.hoisted(() => vi.fn());
 const persistDedupGroups = vi.hoisted(() => vi.fn());
+const heal = vi.hoisted(() => vi.fn(async (rows: unknown[]) => rows));
 
+// The #599 heal and the series position fallback are covered in their own suites
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: heal }));
 vi.mock('@/lib/integrations/audible.service', () => ({
   AUDIBLE_PAGE_SIZE: 50,
   getAudibleService: () => ({ searchByAuthorAsin }),
@@ -187,7 +190,7 @@ describe('scanAuthorLegs', () => {
     expect(booksForWatch(scan.booksFor(newWatch), newWatch, 'x', stats, logger).map((b) => b.asin)).toEqual(['NEW']);
   });
 
-  it('persists the second scan dedup groups only after the first scan groups are written', async () => {
+  it('heals and persists the second scan only after the first scan groups are written', async () => {
     searchByAuthorAsin.mockImplementation(async (_n: string, _a: string, p: number, opts?: { newestFirst?: boolean }) =>
       opts?.newestFirst ? page([book('OLD', '2024-01-01')], 200, true) : page(p === 1 ? [book('BACK1', '1999-01-01')] : [], 200, true));
     dedup.mockImplementation((books: AudibleAudiobook[]) => ({ books, groups: [{ asins: books.map((b) => b.asin) }] }));
@@ -195,13 +198,17 @@ describe('scanAuthorLegs', () => {
     persistDedupGroups.mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }));
     persistDedupGroups.mockImplementationOnce(async () => undefined);
 
-    await run(scanAuthorLegs('Name', 'AUTH', [entireWatch, newWatch], logger));
+    const scan = scanAuthorLegs('Name', 'AUTH', [entireWatch, newWatch], logger);
     await vi.runAllTimersAsync();
 
+    // The second heal writes too: it waits for the first scan's persist
+    expect(heal).toHaveBeenCalledTimes(1);
     expect(persistDedupGroups).toHaveBeenCalledTimes(1);
     expect(persistDedupGroups.mock.calls[0][0]).toEqual([{ asins: ['BACK1'] }]);
     finishFirst();
+    await run(scan);
     await vi.runAllTimersAsync();
+    expect(heal.mock.calls.map((c) => (c[0] as AudibleAudiobook[]).map((b) => b.asin))).toEqual([['BACK1'], ['OLD']]);
     expect(persistDedupGroups).toHaveBeenCalledTimes(2);
     expect(persistDedupGroups.mock.calls[1][0]).toEqual([{ asins: ['OLD'] }]);
   });

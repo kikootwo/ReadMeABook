@@ -8,6 +8,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups, collapseByExistingWorks } from '@/lib/services/works.service';
+import { detachVetoedAsins } from '@/lib/services/works-heal';
 import { getOptionalAuthUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
@@ -44,6 +45,7 @@ export async function GET(request: NextRequest) {
     // Two-pass dedup: local title/narrator/duration matching first, then collapse
     // any remaining duplicates that the works table already knows are the same book
     // (handles cases where source metadata diverges across paths or pages).
+    await detachVetoedAsins(results.results); // wrongly linked volumes (#599)
     const { books: dedupedResults, groups } = deduplicateAndCollectGroups(results.results);
 
     if (groups.length > 0) {

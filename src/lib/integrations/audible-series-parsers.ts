@@ -24,6 +24,7 @@ import {
 } from '../constants/language-config';
 import { parseRuntime } from '../utils/parse-runtime';
 import { extractAllNarrators } from '../utils/extract-narrator';
+import { normalizePosition } from '../utils/series-volume';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -173,6 +174,7 @@ function parseModernSeriesBooks(
       durationMinutes: meta?.duration ? parseRuntime(meta.duration, langConfig) : undefined,
       releaseDate: meta?.releaseDate || undefined,
       language: meta?.language || undefined,
+      seriesPart: normalizePosition($el.attr('series-header')),
     });
   });
 
@@ -202,10 +204,10 @@ function parseLegacySeriesBooks(
     if (!bookAsin || seenAsins.has(bookAsin)) return;
     seenAsins.add(bookAsin);
 
-    // Title: h3 a / .bc-heading a hold the real book title;
-    // h2 on series pages is the position label ("Book 1"), so try it last.
-    const title = $el.find('h3 a').first().text().trim() ||
-      $el.find('.bc-heading a').first().text().trim() ||
+    // Title: h3 a / .bc-heading a hold the real book title; h2 on series pages is the
+    // position label ("Book 1"), so it is the title only as a last resort, never both.
+    const headTitle = $el.find('h3 a').first().text().trim() || $el.find('.bc-heading a').not('h2 a').first().text().trim();
+    const title = headTitle ||
       $el.find('h2 a').first().text().trim() ||
       $el.find('h2').first().text().trim() ||
       '';
@@ -246,6 +248,7 @@ function parseLegacySeriesBooks(
       coverArtUrl,
       rating,
       durationMinutes,
+      seriesPart: headTitle ? normalizePosition($el.find('h2').first().text()) : undefined,
     });
   });
 
