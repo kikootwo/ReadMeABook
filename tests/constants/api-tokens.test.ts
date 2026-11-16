@@ -8,7 +8,69 @@ import {
   API_TOKEN_ALLOWED_ENDPOINTS,
   API_TOKEN_ENDPOINT_DOCS,
   isEndpointAllowed,
+  getEndpointPermissions,
+  collectEndpointPermissions,
+  findMatchingEndpoints,
+  type AllowedEndpoint,
 } from '@/lib/constants/api-tokens';
+
+describe('endpoint permissions (opt-in entries)', () => {
+  const APPROVE = '/api/admin/requests/req-123/approve';
+
+  it('the approve route needs approve_requests on the real allowlist', () => {
+    expect(getEndpointPermissions('POST', APPROVE)).toEqual(['approve_requests']);
+    expect(getEndpointPermissions('post', APPROVE)).toEqual(['approve_requests']);
+    expect(isEndpointAllowed('POST', APPROVE)).toBe(true);
+  });
+
+  it('only POST on the approve route is allowed; other methods and neighbours are not', () => {
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) expect(isEndpointAllowed(method, APPROVE)).toBe(false);
+    expect(isEndpointAllowed('POST', '/api/admin/requests/req-123/approve/extra')).toBe(false);
+    expect(isEndpointAllowed('POST', '/api/admin/requests//approve')).toBe(false);
+    expect(isEndpointAllowed('POST', '/api/admin/requests/a/b/approve')).toBe(false);
+  });
+
+  it('the approve doc entry carries the same permission and is an admin write', () => {
+    const doc = API_TOKEN_ENDPOINT_DOCS.find((d) => d.method === 'POST' && d.path === '/api/admin/requests/:id/approve');
+    expect(doc).toMatchObject({ permission: 'approve_requests', requiresAdmin: true, isWrite: true });
+    expect(doc?.description).toContain('Approve only');
+    expect(doc?.description).toContain('90 days');
+    expect(doc?.description).toContain('status=awaiting_approval');
+  });
+
+  it('untagged endpoints need no permission', () => {
+    expect(getEndpointPermissions('GET', '/api/requests')).toEqual([]);
+    expect(getEndpointPermissions('POST', '/api/requests/abc/cancel')).toEqual([]);
+    expect(getEndpointPermissions('GET', '/api/nowhere')).toEqual([]);
+  });
+
+  it('collects the permissions of every match, even after a broader untagged entry', () => {
+    const list: AllowedEndpoint[] = [
+      { method: 'POST', path: '/api/admin/requests/:id/:action' },
+      { method: 'POST', path: '/api/admin/requests/:id/approve', permission: 'approve_requests' },
+    ];
+    expect(collectEndpointPermissions(list, 'POST', APPROVE)).toEqual(['approve_requests']);
+    expect(collectEndpointPermissions(list, 'POST', '/api/admin/requests/req-123/other')).toEqual([]);
+  });
+
+  it('each tagged entry is matched by exactly one entry, so no untagged entry overlaps it', () => {
+    const tagged = API_TOKEN_ALLOWED_ENDPOINTS.filter((ep) => ep.permission);
+    expect(tagged.length).toBeGreaterThan(0);
+    for (const ep of tagged) {
+      const sample = ep.path.replace(/:[A-Za-z_][A-Za-z0-9_]*/g, 'x');
+      const matches = findMatchingEndpoints(API_TOKEN_ALLOWED_ENDPOINTS, ep.method, sample);
+      expect(matches, `${ep.method} ${ep.path}`).toEqual([ep]);
+    }
+  });
+
+  it('the approval setting route and the pending-approval list stay off the allowlist', () => {
+    for (const method of ['GET', 'PATCH', 'PUT', 'POST']) {
+      expect(isEndpointAllowed(method, '/api/admin/settings/api-tokens')).toBe(false);
+    }
+    expect(isEndpointAllowed('GET', '/api/admin/requests/pending-approval')).toBe(false);
+    expect(isEndpointAllowed('POST', '/api/admin/requests/pending-approval')).toBe(false);
+  });
+});
 
 describe('isEndpointAllowed', () => {
   describe('positive matches (every allowlisted endpoint)', () => {
