@@ -109,4 +109,35 @@ describe('fillSeriesPositions', () => {
     await fill(positionless(), SERIES);
     expect(fakeAudible.fetch).not.toHaveBeenCalled();
   });
+
+  it('keys the cache per series: a book in two series gets each series its own position', async () => {
+    const S1 = 'B0SERIES01';
+    const S2 = 'B0SERIES02';
+    // The catalog lists both ASINs in S1 (8, 9) and S2 (1, 2), never in S3
+    const answer = { data: { data: { products: [['B0H36S85HC', '8', '1'], ['B0H6N477LX', '9', '2']].map(([asin, inS1, inS2]) => ({
+      asin, series: [{ asin: S1, sequence: inS1 }, { asin: S2, sequence: inS2 }],
+    })) } } };
+    fakeAudible.fetch.mockResolvedValue(answer);
+    const fill = await load();
+    const pair = (seriesAsin: string) => [row('B0H36S85HC', { seriesAsin }), row('B0H6N477LX', { seriesAsin })];
+
+    expect((await fill(pair('B0SERIES03'), 'B0SERIES03')).map((b) => b.seriesPart)).toEqual([undefined, undefined]);
+    expect((await fill(pair(S1), S1)).map((b) => b.seriesPart)).toEqual(['8', '9']);
+    expect((await fill(pair(S2), S2)).map((b) => b.seriesPart)).toEqual(['1', '2']);
+    expect(fakeAudible.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('remembers a non-transient failure (HTTP 400) as unknown: no repeat call within the TTL, no pause', async () => {
+    fakeAudible.fetch.mockRejectedValue({ response: { status: 400 }, isAxiosError: true });
+    const fill = await load();
+
+    expect((await fill(positionless(), SERIES)).map((b) => b.seriesPart)).toEqual([undefined, undefined, undefined]);
+    fakeAudible.fetch.mockClear();
+    await fill(positionless(), SERIES);
+    expect(fakeAudible.fetch).not.toHaveBeenCalled();
+
+    // Not a pause: another series still makes its call
+    await fill(positionless().map((r) => ({ ...r, seriesAsin: 'B0SERIES02' })), 'B0SERIES02');
+    expect(fakeAudible.fetch).toHaveBeenCalledTimes(1);
+  });
 });

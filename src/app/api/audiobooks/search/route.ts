@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     // Two-pass dedup: local title/narrator/duration matching first, then collapse
     // any remaining duplicates that the works table already knows are the same book
     // (handles cases where source metadata diverges across paths or pages).
-    await detachVetoedAsins(results.results).catch(() => {}); // wrongly linked volumes (#599)
+    await detachVetoedAsins(results.results); // wrongly linked volumes (#599)
     const { books: dedupedResults, groups } = deduplicateAndCollectGroups(results.results);
 
     if (groups.length > 0) {

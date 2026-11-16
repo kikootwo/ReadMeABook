@@ -13,6 +13,8 @@ const warn = vi.fn();
 vi.mock('@/lib/utils/logger', () => ({
   RMABLogger: { create: () => ({ debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() }) },
 }));
+const fakeAudible = vi.hoisted(() => ({ getRegion: vi.fn(() => 'de'), fetch: vi.fn() }));
+vi.mock('@/lib/integrations/audible.service', () => ({ getAudibleService: () => fakeAudible }));
 
 const SERIES = 'B0H3C5X19W';
 const [V1, V2, V3] = ['B0H36S85HC', 'B0H6N477LX', 'B0H6N6TH8T'];
@@ -26,9 +28,9 @@ const entry = (asin: string, isCanonical = false, source = 'dedup_auto'): Entry 
 const outcomes: Array<'committed' | 'rolled back'> = [];
 let workSeq = 0;
 
-async function heal(rows: AudibleAudiobook[]) {
+async function heal(rows: AudibleAudiobook[], seriesAsin?: string) {
   const { detachVetoedAsins } = await import('@/lib/services/works-heal');
-  await detachVetoedAsins(rows);
+  return detachVetoedAsins(rows, seriesAsin);
 }
 
 describe('detachVetoedAsins', () => {
@@ -92,7 +94,8 @@ describe('detachVetoedAsins', () => {
     prismaMock.workAsin.findMany.mockResolvedValue([entry(V1, true), entry(V2)]);
     prismaMock.workAsin.updateMany.mockResolvedValue({ count: 0 });
 
-    await expect(heal([vol(V1, '1'), vol(V2, '2')])).resolves.toBeUndefined();
+    const rows = [vol(V1, '1'), vol(V2, '2')];
+    await expect(heal(rows)).resolves.toEqual(rows);
 
     expect(outcomes).toEqual(['rolled back']);
     expect(warn).not.toHaveBeenCalled();
@@ -100,7 +103,8 @@ describe('detachVetoedAsins', () => {
 
   it('resolves without throwing on a database error', async () => {
     prismaMock.workAsin.findMany.mockRejectedValue(new Error('connection lost'));
-    await expect(heal([vol(V1, '1'), vol(V2, '2')])).resolves.toBeUndefined();
+    const rows = [vol(V1, '1'), vol(V2, '2')];
+    await expect(heal(rows)).resolves.toEqual(rows);
     expect(warn).toHaveBeenCalled();
   });
 
@@ -117,6 +121,49 @@ describe('detachVetoedAsins', () => {
       { asin: 'B', title: 'T', author: 'X', subtitle: 'Series, Band 2' },
     ]);
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('series view: fills unlabelled rows a stale work links although titles differ, then splits them', async () => {
+    prismaMock.workAsin.findMany.mockResolvedValue([entry(V1, true), entry(V2), entry(V3)]);
+    fakeAudible.fetch.mockResolvedValue({ data: { data: { products: [V1, V2, V3].map((asin, i) => ({
+      asin, series: [{ asin: SERIES, sequence: String(i + 1) }],
+    })) } } });
+    const rows = [V1, V2, V3].map((asin, i): AudibleAudiobook => ({
+      asin, title: `Die Tagebücher der Apothekerin ${i + 1}`, author: 'Author', narrator: 'Narrator One', durationMinutes: 500, seriesAsin: SERIES,
+    }));
+
+    const out = await heal(rows, SERIES);
+
+    expect(fakeAudible.fetch).toHaveBeenCalledTimes(1);
+    expect(out.map((b) => b.seriesPart)).toEqual(['1', '2', '3']);
+    expect(outcomes).toEqual(['committed', 'committed']);
+  });
+
+  it('skips a work whose canonical ASIN is not in view', async () => {
+    prismaMock.workAsin.findMany.mockResolvedValue([entry(V2), entry(V3)]);
+    await heal([vol(V2, '2'), vol(V3, '3')]);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('anchors a legacy work with several canonical rows the way the collapse does (lowest ASIN)', async () => {
+    prismaMock.workAsin.findMany.mockResolvedValue([entry(V2, true), entry(V1, true), entry(V3)]);
+
+    await heal([vol(V2, '2'), vol(V1, '1'), vol(V3, '3')]);
+
+    const moved = prismaMock.workAsin.updateMany.mock.calls.flatMap((c) => c[0].where.asin?.in ?? []);
+    expect(moved).toEqual([V2, V3]);
+  });
+
+  it('names the new work after the class anchor, even when the anchor row cannot move', async () => {
+    prismaMock.workAsin.findMany.mockResolvedValue([entry(V1, true), entry(V2, false, 'admin_manual'), entry('V2PRIME')]);
+
+    await heal([vol(V1, '1'), vol(V2, '2'), vol('V2PRIME', '2', 'Vol 2 (re-listing)')]);
+
+    expect(prismaMock.work.create).toHaveBeenCalledWith({ data: { title: 'Vol 2', author: 'Author 2' } });
+    expect(prismaMock.workAsin.updateMany).toHaveBeenCalledWith({
+      where: { asin: { in: ['V2PRIME'] }, workId: 'STALE' },
+      data: { workId: 'NEW1', isCanonical: false },
+    });
   });
 
   it('never moves a row that is not dedup_auto', async () => {

@@ -9,8 +9,7 @@ import { createPrismaMock } from '../helpers/prisma';
 const prismaMock = createPrismaMock();
 
 // The #599 heal and the series position fallback are covered in their own suites
-vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async () => {} }));
-vi.mock('@/lib/integrations/audible-series-positions', () => ({ fillSeriesPositions: async (rows: unknown[]) => rows }));
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async (rows: unknown[]) => rows }));
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
 }));

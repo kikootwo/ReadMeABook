@@ -206,7 +206,7 @@ function parseLegacySeriesBooks(
 
     // Title: h3 a / .bc-heading a hold the real book title; h2 on series pages is the
     // position label ("Book 1"), so it is the title only as a last resort, never both.
-    const headTitle = $el.find('h3 a').first().text().trim() || $el.find('.bc-heading a').first().text().trim();
+    const headTitle = $el.find('h3 a').first().text().trim() || $el.find('.bc-heading a').not('h2 a').first().text().trim();
     const title = headTitle ||
       $el.find('h2 a').first().text().trim() ||
       $el.find('h2').first().text().trim() ||

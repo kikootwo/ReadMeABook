@@ -180,7 +180,7 @@ Modern rows yield strictly richer data (`releaseDate` as `YYYY-MM-DD`, `language
 
 `scrapeSeriesPage()` logs a warning when the header reports books but zero rows parse — that signals Audible changed its markup again.
 
-Positions are stored normalized in `seriesPart` ("1", "1.5"; ranges = unknown) via `normalizePosition()`; every row is stamped `seriesAsin` = the page's series ASIN. A debug line logs the layout and how many rows carry a label. Fallback `fillSeriesPositions()` (`audible-series-positions.ts`): only when local dedup would merge an unlabelled row, one catalog batch call (`asins=…&response_groups=series&num_results=N`, chunks of 50, one attempt, 3 s) reads the `series[]` entry matching the page's series ASIN. 24 h cache per region:ASIN; 15 min pause after 429/5xx/timeout; failure = positions unknown.
+Positions are stored normalized in `seriesPart` ("1", "1.5"; ranges = unknown) via `normalizePosition()`; every row is stamped `seriesAsin` = the page's series ASIN. Catalog rows (search, author books) run the sequence through `normalizePosition()` too (`pickCatalogSeries`); a range stays raw, so it reads as unknown. A debug line logs the layout and how many rows carry a label. Fallback `fillSeriesPositions()` (`audible-series-positions.ts`, run inside the heal on series views): candidates = unlabelled rows local dedup would merge, plus unlabelled rows a work links to another row in view (from the heal's one `work_asins` lookup, titles may differ). One catalog batch call per 50 candidates (`asins=…&response_groups=series&num_results=N`, 3 s deadline each, no retry) reads the `series[]` entry matching the page's series ASIN. 24 h cache per region:series ASIN:ASIN (a book in two series keeps each position); a non-transient failure (e.g. HTTP 400) is cached as unknown for that chunk; 15 min pause after 429/401/403/5xx/timeout, separate from the details fill pause (each pauses on its own failures); failure = positions unknown.
 
 ## Unified Matching (`audiobook-matcher.ts`)
 
@@ -220,8 +220,10 @@ Discovery views (search, author books, series detail) collapse duplicate Audible
    - Never collapses known different volumes: `partitionVolumes()` (collapse level, anchor = canonical ASIN in view, else first) splits each work in memory. No writes.
 
 3. **Heal — `detachVetoedAsins()`** (`src/lib/services/works-heal.ts`, #599)
-   - Runs on the pre-dedup rows, awaited before persist/collapse (series, search, author routes) and before the owned check (watched series and authors, `healDedupeAndPersist()`). Route calls add `.catch(() => {})`: a failed heal never fails the page. Search is optional-auth, so unauthenticated GETs can trigger it (bounded, idempotent).
-   - Per work with 2+ rows in view: `partitionVolumes()` at heal level; each non-anchor class moves to a new work (title/author from the class anchor) in one transaction: `work.create` → `updateMany where asin in class AND workId = stale`; count 0 → rollback (concurrent view or rerun). Sequential, only `source = 'dedup_auto'` rows move, the anchor never moves. Partial count commits (benign split).
+   - Runs on the pre-dedup rows, awaited before persist/collapse (series, search, author routes) and before the owned check (watched series and authors, `healDedupeAndPersist()`). `detachVetoedAsins(rows, seriesAsin?)` never throws and returns the rows; with `seriesAsin` it fills positions first (see the fallback above). Search is optional-auth, so unauthenticated GETs can trigger it (bounded, idempotent). Watched authors: the new-only list heals only after the entire list's groups are written (no concurrent writes).
+   - Per work with 2+ rows in view and its canonical ASIN in view (`canonicalByWork()`: the lowest flagged ASIN, same rule as the collapse; a work whose canonical is out of view is skipped): `partitionVolumes()` at heal level; each non-anchor class moves to a new work (title/author from the class anchor, even when that row cannot move) in one transaction: `work.create` → `updateMany where asin in class AND workId = stale`; count 0 → rollback (concurrent view or rerun). Sequential, only `source = 'dedup_auto'` rows move, the anchor never moves. Partial count commits (benign split).
+   - Known flap (bounded, self-correcting): when the catalog has no series data for two volumes they count as settled (`positionsSettled`), so search can save their merge; the next series view (labels or the fallback) heals it again.
+   - Re-listing into an outside work: a group joins a single touched work that holds outside ASINs without checking those ASINs (as before #599); if that work wrongly links another volume, the next series view heals it.
 
 ### Works Table Schema
 - `Work { id, title, author }` — one row per logical book
@@ -241,7 +243,7 @@ Discovery views (search, author books, series detail) collapse duplicate Audible
 ### Wired Routes
 - `src/app/api/audiobooks/search/route.ts`
 - `src/app/api/authors/[asin]/books/route.ts`
-- `src/app/api/series/[asin]/route.ts` (also `fillSeriesPositions()` first)
+- `src/app/api/series/[asin]/route.ts` (the heal gets the series ASIN, so it fills positions first)
 
 Five dedup call sites persist groups: the three routes above, watched series and watched authors (`watched-lists-releases.ts`). All five heal first. Watched-list jobs run the local pass only (no collapse) — they don't render a view, and the downstream `request-creator.service.ts` already does sibling-aware dedup at request creation time.
 

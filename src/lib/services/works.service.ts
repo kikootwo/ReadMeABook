@@ -10,7 +10,7 @@
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { metadataScore, type DedupGroup } from '@/lib/utils/deduplicate-audiobooks';
-import { partitionVolumes } from '@/lib/utils/series-volume';
+import { canonicalByWork, partitionVolumes } from '@/lib/utils/series-volume';
 import type { AudibleAudiobook } from '@/lib/integrations/audible.service';
 
 const logger = RMABLogger.create('WorksService');
@@ -207,12 +207,8 @@ export async function collapseByExistingWorks(
 
     if (entries.length === 0) return books;
 
-    const asinToWorkId = new Map<string, string>();
-    const canonicalByWork = new Map<string, string>();
-    for (const entry of entries) {
-      asinToWorkId.set(entry.asin, entry.workId);
-      if (entry.isCanonical) canonicalByWork.set(entry.workId, entry.asin);
-    }
+    const asinToWorkId = new Map(entries.map(entry => [entry.asin, entry.workId]));
+    const canonical = canonicalByWork(entries);
 
     // Each work's books in view, split into classes of compatible volumes
     const booksByWork = new Map<string, AudibleAudiobook[]>();
@@ -222,7 +218,7 @@ export async function collapseByExistingWorks(
     }
     const classKey = new Map<AudibleAudiobook, string>();
     for (const [workId, members] of booksByWork) {
-      partitionVolumes(members, canonicalByWork.get(workId), 'collapse')
+      partitionVolumes(members, canonical.get(workId), 'collapse')
         .forEach((cls, i) => cls.forEach(book => classKey.set(book, `${workId}#${i}`)));
     }
 

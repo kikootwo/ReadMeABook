@@ -95,6 +95,12 @@ export function positionsSettled(members: VolumeFields[]): boolean {
   return members.every((m) => normalizePosition(m.seriesPart) !== undefined) || !members.some(inSeries);
 }
 
+/** Each work's canonical ASIN among `entries`, shared by collapse and heal: the lowest flagged ASIN
+ *  (a legacy work can hold several flagged rows) */
+export function canonicalByWork(entries: Array<{ asin: string; workId: string; isCanonical: boolean }>): Map<string, string> {
+  return new Map(entries.filter((e) => e.isCanonical).sort((a, b) => (a.asin < b.asin ? 1 : -1)).map((e) => [e.workId, e.asin]));
+}
+
 /** Split one work's books into classes of compatible volumes, shared by collapse and heal: the anchor
  *  (canonical ASIN, else the first book) starts class 0; others join the first class with no veto */
 export function partitionVolumes<T extends VolumeFields>(books: T[], canonicalAsin: string | undefined, level: VetoLevel): T[][] {

@@ -34,8 +34,7 @@ const BOOK_OWN = 'B0BOOK0002'; // requested by the caller, and ignored by the ca
 const BOOK_FREE = 'B0BOOK0003'; // not requested
 
 // The #599 heal and the series position fallback are covered in their own suites
-vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async () => {} }));
-vi.mock('@/lib/integrations/audible-series-positions', () => ({ fillSeriesPositions: async (rows: unknown[]) => rows }));
+vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: async (rows: unknown[]) => rows }));
 vi.mock('@/lib/db', () => ({
   prisma: {
     user: {

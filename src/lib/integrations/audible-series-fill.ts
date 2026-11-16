@@ -5,6 +5,7 @@
 
 import type { AudibleAudiobook } from './audible.service';
 import type { RMABLogger } from '../utils/logger';
+import { normalizePosition } from '../utils/series-volume';
 
 export interface CatalogSeriesEntry {
   asin?: string;
@@ -31,7 +32,9 @@ export function pickCatalogSeries(entries: CatalogSeriesEntry[] | undefined): Se
 
     if (preferred.sequence && preferred.sequence.trim() !== '') {
       const digitMatch = preferred.sequence.match(/\d+(?:\.\d+)?/);
-      seriesPart = digitMatch ? digitMatch[0] : preferred.sequence;
+      // A range ("1-3") stays raw: normalizePosition reads it as unknown, so it never vetoes (#599)
+      const range = /\d\s*[-–]\s*\d/.test(preferred.sequence);
+      seriesPart = normalizePosition(preferred.sequence) ?? (digitMatch && !range ? digitMatch[0] : preferred.sequence);
     }
   }
 

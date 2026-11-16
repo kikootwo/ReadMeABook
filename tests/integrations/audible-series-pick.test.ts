@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { pickCatalogSeries } from '@/lib/integrations/audible-series-fill';
+import { normalizePosition } from '@/lib/utils/series-volume';
 
 const NONE = { series: undefined, seriesPart: undefined, seriesAsin: undefined };
 
@@ -43,6 +44,11 @@ describe('pickCatalogSeries', () => {
     ['Prequel', 'Prequel'],
   ])('reads the part from sequence %j as %j', (sequence, part) => {
     expect(pickCatalogSeries([{ asin: 'S030', title: 'Series', sequence }]).seriesPart).toBe(part);
+  });
+
+  it('keeps a range ("1-3") as an unknown position, so it never vetoes (#599)', () => {
+    const { seriesPart } = pickCatalogSeries([{ asin: 'S040', title: 'Series', sequence: '1-3' }]);
+    expect(normalizePosition(seriesPart)).toBeUndefined();
   });
 
   it('keeps a missing title or asin missing', () => {

@@ -41,12 +41,12 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 }));
 
 const order: string[] = [];
-const mockHeal = vi.fn(async () => { order.push('heal'); });
-vi.mock('@/lib/services/works-heal', () => ({ detachVetoedAsins: (...a: unknown[]) => mockHeal(...(a as [])) }));
-
-const mockFill = vi.fn(async (rows: AudibleAudiobook[]) => rows);
-vi.mock('@/lib/integrations/audible-series-positions', () => ({
-  fillSeriesPositions: (...a: unknown[]) => mockFill(...(a as [AudibleAudiobook[]])),
+const mockHeal = vi.fn<(rows: AudibleAudiobook[], seriesAsin?: string) => Promise<AudibleAudiobook[]>>(async (rows) => {
+  order.push('heal');
+  return rows;
+});
+vi.mock('@/lib/services/works-heal', () => ({
+  detachVetoedAsins: (...a: unknown[]) => mockHeal(...(a as [AudibleAudiobook[], string?])),
 }));
 
 // Siblings as the works table answers them: vols 2/3 link to vol 1 until the heal has run
@@ -91,8 +91,8 @@ describe('watched sync heals wrongly linked volumes before the owned check', () 
     const { processWatchedLists } = await import('@/lib/services/watched-lists.service');
     await processWatchedLists();
 
-    expect(mockFill).toHaveBeenCalledWith(expect.any(Array), SERIES);
     expect(mockHeal).toHaveBeenCalledTimes(1);
+    expect(mockHeal).toHaveBeenCalledWith(expect.any(Array), SERIES);
     expect(order.indexOf('heal')).toBeLessThan(order.indexOf('owned-check'));
     expect(mockCreateRequestForUser.mock.calls.map((c) => c[1].asin)).toEqual([V2, V3]);
   });

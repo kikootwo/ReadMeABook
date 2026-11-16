@@ -14,7 +14,6 @@ import { getAudibleService, AudibleAudiobook, AuthorBooksResult, AUDIBLE_PAGE_SI
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups } from '@/lib/services/works.service';
 import { detachVetoedAsins } from '@/lib/services/works-heal';
-import { fillSeriesPositions } from '@/lib/integrations/audible-series-positions';
 import { toReleaseDay } from '@/lib/utils/release-date';
 import { isNewRelease, newReleaseFloorDay } from '@/lib/utils/watch-mode';
 import type { RMABLogger } from '@/lib/utils/logger';
@@ -29,30 +28,19 @@ interface Watch {
   newReleasesSince?: Date | null;
 }
 
-/**
- * Dedupe a scraped list. Its dedup groups are persisted in the background once `after` settles,
- * so two lists of the same author never write the same works at the same time.
- */
-export function dedupeAndPersist(
-  books: AudibleAudiobook[],
-  after: Promise<void> = Promise.resolve()
-): { books: AudibleAudiobook[]; persisted: Promise<void> } {
-  if (books.length === 0) return { books: [], persisted: after };
-  const { books: deduped, groups } = deduplicateAndCollectGroups(books);
-  const persisted = groups.length > 0
-    ? after.then(() => persistDedupGroups(groups)).catch(() => {})
-    : after;
+/** Dedupe a scraped list; its dedup groups are persisted in the background (`persisted` never rejects) */
+export function dedupeAndPersist(books: AudibleAudiobook[]): { books: AudibleAudiobook[]; persisted: Promise<void> } {
+  const { books: deduped, groups } = books.length > 0 ? deduplicateAndCollectGroups(books) : { books: [], groups: [] };
+  const persisted = groups.length > 0 ? persistDedupGroups(groups).catch(() => {}) : Promise.resolve();
   return { books: deduped, persisted };
 }
 
 /** Both watched paths: fill positions (series), heal wrongly linked volumes (#599) before the owned check, dedupe */
 export async function healDedupeAndPersist(
   books: AudibleAudiobook[],
-  { after = Promise.resolve(), seriesAsin }: { after?: Promise<void>; seriesAsin?: string } = {}
+  { seriesAsin }: { seriesAsin?: string } = {}
 ): Promise<{ books: AudibleAudiobook[]; persisted: Promise<void> }> {
-  const rows = seriesAsin ? await fillSeriesPositions(books, seriesAsin) : books;
-  await detachVetoedAsins(rows).catch(() => {});
-  return dedupeAndPersist(rows, after);
+  return dedupeAndPersist(await detachVetoedAsins(books, seriesAsin));
 }
 
 /**
@@ -158,7 +146,8 @@ export async function scanAuthorLegs(
   const found = entireRaw.length + newRaw.filter((b) => !entireAsins.has(b.asin)).length;
 
   const entire = await healDedupeAndPersist(entireRaw);
-  const newOnly = entireScan.complete ? entire : await healDedupeAndPersist(newRaw, { after: entire.persisted });
+  // The second heal writes too: it starts once the first list's groups are written
+  const newOnly = entireScan.complete ? entire : await entire.persisted.then(() => healDedupeAndPersist(newRaw));
   return { found, booksFor: (watch) => (watch.newReleasesSince != null ? newOnly.books : entire.books) };
 }
 

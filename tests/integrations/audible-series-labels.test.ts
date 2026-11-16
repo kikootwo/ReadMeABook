@@ -73,6 +73,12 @@ describe('series page position labels', () => {
     expect(books[0].seriesPart).toBeUndefined();
   });
 
+  it('takes no position from an h2 whose own .bc-heading link holds a numeric title', () => {
+    const books = parse(legacyPage(legacyItem('B0NUMERIC1', '<h2 class="bc-heading"><a href="/pd/x/B0NUMERIC1">1984</a></h2>')));
+    expect(books[0]).toMatchObject({ title: '1984' });
+    expect(books[0].seriesPart).toBeUndefined();
+  });
+
   it('takes no position from a non-label h2 next to an h3 title', () => {
     const books = parse(legacyPage(legacyItem('B0H36S85HC', '<h2>Keeping 13</h2><h3 class="bc-heading"><a href="/pd/x/B0H36S85HC">Title</a></h3>')));
     expect(books[0].seriesPart).toBeUndefined();
