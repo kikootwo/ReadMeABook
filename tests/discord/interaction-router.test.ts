@@ -13,6 +13,10 @@ const requestHandlers = vi.hoisted(() => ({
 vi.mock('@/lib/services/discord/request/discord-request-handlers', () => requestHandlers);
 const approvalHandlers = vi.hoisted(() => ({ handleApprovalComponent: vi.fn(async () => undefined) }));
 vi.mock('@/lib/services/discord/approval/discord-approval-handler', () => approvalHandlers);
+const statusHandlers = vi.hoisted(() => ({ handleStatusCommand: vi.fn(async () => undefined), handleStatusComponent: vi.fn(async () => undefined) }));
+vi.mock('@/lib/services/discord/manage/discord-status-handler', () => statusHandlers);
+const deleteHandlers = vi.hoisted(() => ({ handleDeleteCommand: vi.fn(async () => undefined), handleDeleteComponent: vi.fn(async () => undefined) }));
+vi.mock('@/lib/services/discord/manage/discord-delete-handler', () => deleteHandlers);
 
 const GUILD = '222222222222222222';
 const REQUEST_ID = 'rmab:req:pick:a:abcdefghij';
@@ -40,6 +44,7 @@ describe('Discord interaction router', () => {
     requestHandlers.handleRequestCommand.mockClear();
     requestHandlers.handleRequestComponent.mockClear();
     approvalHandlers.handleApprovalComponent.mockClear();
+    for (const fn of [...Object.values(statusHandlers), ...Object.values(deleteHandlers)]) fn.mockClear();
   });
 
   it('Approve / Deny buttons in the server go to the approval handler, not the /request one', async () => {
@@ -52,10 +57,37 @@ describe('Discord interaction router', () => {
   });
 
   it('registers /request (type required: audiobook or ebook; query optional), server-only', () => {
-    expect(DISCORD_COMMANDS.map((command) => command.name)).toEqual(['request']);
+    expect(DISCORD_COMMANDS.map((command) => command.name)).toEqual(['request', 'status', 'delete']);
     const [request] = DISCORD_COMMANDS as Array<{ options: Array<Record<string, unknown>> }>;
     expect(request.options.map((o) => [o.name, o.required])).toEqual([['type', true], ['query', false]]);
     expect((request.options[0].choices as Array<{ value: string }>).map((c) => c.value)).toEqual(['audiobook', 'ebook']);
+  });
+
+  it('registers /status with no options, and /delete hidden from members without Administrator', () => {
+    const [, status, del] = DISCORD_COMMANDS as Array<Record<string, unknown>>;
+    expect(status).not.toHaveProperty('options');
+    expect(status).not.toHaveProperty('default_member_permissions');
+    expect(del).not.toHaveProperty('options');
+    expect(del.default_member_permissions).toBe('8');
+  });
+
+  it('/status and /delete go to their handlers; status and delete components by prefix, Cancel also from a DM', async () => {
+    const command = (name: string) => interaction('command', GUILD, { commandName: name });
+    expect(await routeInteraction(command('status'), GUILD)).toBe('handled');
+    expect(await routeInteraction(command('delete'), GUILD)).toBe('handled');
+    expect(statusHandlers.handleStatusCommand).toHaveBeenCalledTimes(1);
+    expect(deleteHandlers.handleDeleteCommand).toHaveBeenCalledTimes(1);
+
+    const cancel = 'rmab:sts:x:0b6f2c1e-4d6a-4c1e-9a8b-1f2e3d4c5b6a:abcdefghij';
+    expect(await routeInteraction(interaction('button', null, { customId: cancel }), GUILD)).toBe('handled');
+    expect(await routeInteraction(interaction('select', GUILD, { customId: 'rmab:del:m:0:abcdefghij' }), GUILD)).toBe('handled');
+    expect(statusHandlers.handleStatusComponent).toHaveBeenCalledTimes(1);
+    expect(deleteHandlers.handleDeleteComponent).toHaveBeenCalledTimes(1);
+    expect(requestHandlers.handleRequestComponent).not.toHaveBeenCalled();
+    expect(approvalHandlers.handleApprovalComponent).not.toHaveBeenCalled();
+    // A command from a DM is still dropped
+    expect(await routeInteraction(interaction('command', null, { commandName: 'delete' }), GUILD)).toBe('ignored-foreign-guild');
+    expect(deleteHandlers.handleDeleteCommand).toHaveBeenCalledTimes(1);
   });
 
   it('the server command carries no global-command fields (dm_permission, contexts)', () => {

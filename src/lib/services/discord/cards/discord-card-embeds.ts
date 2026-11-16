@@ -8,8 +8,9 @@
  * every body says which mentions may ping (none, or only the configured admin role).
  */
 
+import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { coverUrl, mediaTypeLabel } from '../discord-book-embed';
-import { encodeApprovalCustomId } from '../discord-custom-id';
+import { encodeApprovalCustomId, encodeRequestActionCustomId } from '../discord-custom-id';
 import { ButtonStyle, ComponentType, DISCORD_LIMITS, safeText } from '../discord-format';
 
 /** The request fields a card reads (a narrow select; see discord-cards.ts). */
@@ -100,12 +101,25 @@ function bookEmbedBase(request: CardRequest, extraFields: { name: string; value:
   };
 }
 
-/** The live card (request channel and/or the requester's DMs): book and status, no buttons. */
+/**
+ * The Cancel button (only the requester or an RMAB admin may use it: the handler checks the
+ * clicking user's account on every click).
+ */
+function cancelButton(requestId: string) {
+  return { type: ComponentType.Button, style: ButtonStyle.Secondary, label: 'Cancel request', custom_id: encodeRequestActionCustomId('status', requestId) };
+}
+
+/** True while the request can still be cancelled (not deleted, a cancellable status). */
+export function canStillCancel(request: Pick<CardRequest, 'status' | 'deletedAt'>): boolean {
+  return !request.deletedAt && (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
+}
+
+/** The live card (request channel and/or the requester's DMs): book and status, Cancel while it can be. */
 export function requestCardBody(request: CardRequest): MessageBody {
   return {
     content: '',
     embeds: [bookEmbedBase(request, [])],
-    components: [],
+    components: canStillCancel(request) ? [{ type: ComponentType.ActionRow, components: [cancelButton(request.id)] }] : [],
     allowed_mentions: NO_MENTIONS_RAW,
   };
 }
@@ -122,6 +136,7 @@ export function approvalBody(request: CardRequest, adminRoleId: string): Message
         components: [
           { type: ComponentType.Button, style: ButtonStyle.Success, label: 'Approve', custom_id: encodeApprovalCustomId('approve', request.id) },
           { type: ComponentType.Button, style: ButtonStyle.Danger, label: 'Deny', custom_id: encodeApprovalCustomId('deny', request.id) },
+          cancelButton(request.id),
         ],
       },
     ],
@@ -133,6 +148,7 @@ export function approvalBody(request: CardRequest, adminRoleId: string): Message
 export function decidedApprovalBody(request: CardRequest, decision?: 'approved' | 'denied'): MessageBody {
   let content = 'No longer waiting for approval.';
   if (request.deletedAt) content = 'This request was removed.';
+  else if (request.status === 'cancelled') content = 'Cancelled.';
   else if (decision === 'approved') content = 'Approved.';
   else if (decision === 'denied' || request.status === 'denied') content = 'Denied.';
   return {

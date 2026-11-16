@@ -49,6 +49,7 @@ export async function processSendNotification(payload: SendNotificationPayload):
     // Don't throw - non-blocking
   }
 
-  // The request's status changed: its Discord cards follow (bot running only; background, never awaited)
-  refreshDiscordRequestCards(requestId);
+  // The request's status changed: its Discord cards follow (bot running only; background, never awaited).
+  // A cancel refreshes them itself, right after the status flip
+  if (event !== 'request_cancelled') refreshDiscordRequestCards(requestId);
 }

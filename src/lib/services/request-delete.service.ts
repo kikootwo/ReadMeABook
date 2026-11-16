@@ -19,6 +19,7 @@ import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-de
 import { clearRemovedEbookFolder, findChildRequests, keepDeliveredChildren, type ChildRequests } from './request-delete-children';
 import type { KeptFile } from '../utils/book-folder-delete';
 import { BEING_IMPORTED_WHERE, deleteTouchesLibrary } from '../utils/delete-touches-library';
+import { refreshDiscordRequestCards } from './discord/discord-runtime';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -75,7 +76,8 @@ export interface DeleteRequestResult {
  *    format). If files were kept: none of that, and filesKeptReason says why
  * 5. Child ebook requests (linked, or parentless on the same book): undelivered ones
  *    are soft-deleted; delivered ones stay, unlinked (parentRequestId null)
- * 6. Soft delete request (set deletedAt, deletedBy)
+ * 6. Soft delete request (set deletedAt, deletedBy); its Discord cards (and those of the child
+ *    requests deleted with it) show it removed, in the background (bot running only, never awaited)
  *
  * Logic (ebook requests):
  * 1. Check if request exists and is not already deleted
@@ -268,6 +270,7 @@ export async function deleteRequest(
     logger.info(
       `Request ${requestId} soft-deleted by admin ${adminUserId}`
     );
+    for (const id of [requestId, ...children.undelivered]) refreshDiscordRequestCards(id);
 
     return {
       success: true,

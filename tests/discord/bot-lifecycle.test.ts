@@ -93,7 +93,7 @@ describe('Discord bot lifecycle', () => {
     expect(service.getStatus()).toMatchObject({ state: 'running', botTag: 'RMAB Bot#0001' });
   });
 
-  it('registers the current command list (/request) for the configured guild', async () => {
+  it('registers the current command list (/request, /status, /delete) for the configured guild', async () => {
     const { service } = await load();
 
     await service.start();
@@ -102,7 +102,7 @@ describe('Discord bot lifecycle', () => {
     await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
     const { DISCORD_COMMANDS } = await import('@/lib/services/discord/discord-commands');
     expect(set).toHaveBeenCalledWith(DISCORD_COMMANDS, GUILD);
-    expect(set.mock.calls[0][0].map((command: { name: string }) => command.name)).toEqual(['request']);
+    expect(set.mock.calls[0][0].map((command: { name: string }) => command.name)).toEqual(['request', 'status', 'delete']);
   });
 
   it('listens for client error and shardError, and logs them without throwing', async () => {

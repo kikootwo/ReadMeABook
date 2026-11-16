@@ -2,9 +2,10 @@
  * Component: Request Cancel Service
  * Documentation: documentation/admin-features/request-cancel.md
  *
- * The one cancel path (web UI, admin table, API tokens). Authorization stays with the
+ * The one cancel path (web UI, admin table, API tokens, Discord). Authorization stays with the
  * caller. Order: one conditional write flips the status (committed before any client call), the
- * notification is queued, then the download step runs inline under a deadline and never throws.
+ * request's Discord cards are refreshed in the background (never awaited), the notification is
+ * queued, then the download step runs inline under a deadline and never throws.
  */
 
 import { Prisma } from '@/generated/prisma/client';
@@ -13,6 +14,7 @@ import { RMABLogger } from '../utils/logger';
 import { CANCELLABLE_STATUSES } from '../constants/request-statuses';
 import { CANCEL_STEP_BUDGET_MS, CancelDeadline } from './cancel-deadline';
 import { handleCancelledDownload, newestSelectedRow, type CancelDownloadOutcome } from './cancelled-download';
+import { refreshDiscordRequestCards } from './discord/discord-runtime';
 
 const logger = RMABLogger.create('RequestCancel');
 
@@ -90,6 +92,9 @@ export async function cancelLoadedRequest(record: CancellableRequest, options: C
     if (!current) return { success: false, reason: 'not_found' };
     return alreadyCancelledOr(record.id, current.status);
   }
+
+  // Bot running only, in the background: cards and the approval message show the cancel
+  refreshDiscordRequestCards(record.id);
 
   try {
     const { getJobQueueService } = await import('./job-queue.service');
