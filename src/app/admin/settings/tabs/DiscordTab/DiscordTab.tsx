@@ -8,7 +8,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { useDiscordSettings, type DiscordBotStatusView, type DiscordIdKey } from './useDiscordSettings';
+import { useDiscordSettings, type DiscordBotStatusView, type DiscordCardModeValue, type DiscordIdKey } from './useDiscordSettings';
 
 interface DiscordTabProps {
   onSuccess: (message: string) => void;
@@ -31,7 +31,17 @@ const ID_FIELDS: { key: DiscordIdKey; label: string; help: string }[] = [
     label: 'Requester role ID',
     help: 'Optional. Only members with this role can use /request. Empty means every linked user may request; RMAB admins always can.',
   },
-  { key: 'adminNotifyChannelId', label: 'Admin notification channel ID', help: 'Optional. Where approval messages will be posted.' },
+  {
+    key: 'adminNotifyChannelId',
+    label: 'Admin notification channel ID',
+    help: 'Optional. Where approval messages are posted. With none set, no approval message is posted and admins approve on the web.',
+  },
+];
+
+const CARD_MODES: { value: DiscordCardModeValue; label: string }[] = [
+  { value: 'dm', label: "The requester's DMs" },
+  { value: 'public', label: 'The request channel' },
+  { value: 'both', label: 'Both' },
 ];
 
 export function DiscordTab({ onSuccess, onError }: DiscordTabProps) {
@@ -130,6 +140,25 @@ export function DiscordTab({ onSuccess, onError }: DiscordTabProps) {
           )}
         </div>
       ))}
+
+      <div>
+        <label htmlFor="discord-requestCardMode" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Request cards
+        </label>
+        <select
+          id="discord-requestCardMode"
+          value={values.requestCardMode}
+          onChange={(e) => update({ requestCardMode: e.target.value as DiscordCardModeValue })}
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        >
+          {CARD_MODES.map((mode) => (
+            <option key={mode.value} value={mode.value}>{mode.label}</option>
+          ))}
+        </select>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          Where a request made in Discord gets its live status card. The request channel needs a request channel ID.
+        </p>
+      </div>
 
       <p className="text-xs text-gray-500 dark:text-gray-400">
         To copy an ID, turn on Developer Mode in Discord (User Settings, Advanced), then right-click the server, channel

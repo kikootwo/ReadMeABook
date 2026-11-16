@@ -204,6 +204,31 @@ describe('/api/admin/settings/discord', () => {
     expect(written('discord.guild_id')).toBeDefined();
   });
 
+  it('saves the request card mode in the same transaction and GET returns it (DM when none is saved; omitted keeps it)', async () => {
+    expect((await get()).json.settings.requestCardMode).toBe('dm');
+
+    const { status, json } = await put(body({ requestCardMode: 'both' }));
+    expect(status).toBe(200);
+    expect(setManyAtomic).toHaveBeenCalledTimes(1);
+    expect(written('discord.request_card_mode')).toEqual({ key: 'discord.request_card_mode', value: 'both', category: 'discord' });
+    expect(written('discord.guild_id')).toBeDefined();
+    expect(json.settings).toHaveProperty('requestCardMode');
+    saved.values['discord.request_card_mode'] = 'public';
+    expect((await get()).json.settings.requestCardMode).toBe('public');
+
+    setManyAtomic.mockClear();
+    expect((await put(body())).status).toBe(200);
+    expect(written('discord.request_card_mode')).toBeUndefined();
+  });
+
+  it.each(['channel', 'DM', '', 3])('refuses an unknown request card mode (%j) with 400 and writes nothing', async (requestCardMode) => {
+    const { status, json } = await put(body({ requestCardMode }));
+    expect(status).toBe(400);
+    expect(json.message).toBe('Request cards must be DM, channel or both');
+    expect(setManyAtomic).not.toHaveBeenCalled();
+    expect(bot.stop).not.toHaveBeenCalled();
+  });
+
   it('refuses a body that is not JSON (400)', async () => {
     expect((await put('{not json')).status).toBe(400);
   });

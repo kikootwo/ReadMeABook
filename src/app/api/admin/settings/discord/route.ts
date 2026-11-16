@@ -42,6 +42,8 @@ const DiscordSettingsSchema = z.object({
   adminNotifyChannelId: discordId,
   /** Empty: every linked user may /request. Omitted: the saved value stays (older clients send six fields). */
   requesterRoleId: discordId.optional(),
+  /** Where a Discord request's live card goes. Omitted: the saved value stays. */
+  requestCardMode: z.enum(['dm', 'public', 'both'], { message: 'Request cards must be DM, channel or both' }).optional(),
 });
 
 /** What the tab shows: the token masked, never its value. */
@@ -55,6 +57,7 @@ function view(config: DiscordConfig) {
       adminRoleId: config.adminRoleId,
       adminNotifyChannelId: config.adminNotifyChannelId,
       requesterRoleId: config.requesterRoleId,
+      requestCardMode: config.requestCardMode,
     },
     isConfigured: isDiscordConfigured(config),
     status: getDiscordBotService().getStatus(),
@@ -106,6 +109,7 @@ export async function PUT(request: NextRequest) {
             const value = input[field];
             return value === undefined ? [] : [{ key: DISCORD_KEYS[field], value, category }];
           }),
+          ...(input.requestCardMode ? [{ key: DISCORD_KEYS.requestCardMode, value: input.requestCardMode, category }] : []),
           ...(keepToken ? [] : [{ key: DISCORD_KEYS.botToken, value: effectiveToken, encrypted: true, category }]),
         ];
         await getConfigService().setManyAtomic(updates);

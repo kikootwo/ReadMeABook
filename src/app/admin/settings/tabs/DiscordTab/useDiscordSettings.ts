@@ -22,7 +22,11 @@ export interface DiscordFormValues {
   adminRoleId: string;
   adminNotifyChannelId: string;
   requesterRoleId: string;
+  requestCardMode: DiscordCardModeValue;
 }
+
+/** Where a Discord request's live card goes: the requester's DMs, the request channel, or both. */
+export type DiscordCardModeValue = 'dm' | 'public' | 'both';
 
 export type DiscordIdKey = 'guildId' | 'requestChannelId' | 'adminRoleId' | 'adminNotifyChannelId' | 'requesterRoleId';
 
@@ -54,6 +58,7 @@ const EMPTY: DiscordFormValues = {
   adminRoleId: '',
   adminNotifyChannelId: '',
   requesterRoleId: '',
+  requestCardMode: 'dm',
 };
 
 const SETTINGS_URL = '/api/admin/settings/discord';
@@ -154,7 +159,7 @@ export function useDiscordSettings() {
   const update = (patch: Partial<DiscordFormValues>) => {
     setValues((current) => ({ ...current, ...patch }));
     // A result for other IDs or another token would mislead
-    if (Object.keys(patch).some((key) => key !== 'enabled')) setTestResult(null);
+    if (Object.keys(patch).some((key) => key !== 'enabled' && key !== 'requestCardMode')) setTestResult(null);
   };
 
   /** Reads the bot status a few times after a Save, until it is running or failed. */

@@ -6,7 +6,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchWithAuthMock = vi.hoisted(() => vi.fn());
@@ -108,8 +108,50 @@ describe('Discord settings tab', () => {
       adminRoleId: '',
       adminNotifyChannelId: '',
       requesterRoleId: '555555555555555555',
+      requestCardMode: 'dm',
       clearBotToken: false,
     });
+  });
+
+  it('the Request cards choice: shows the saved mode (DM when none), and Save sends the one picked', async () => {
+    const { onSuccess } = await renderTab(savedSettings({ requestCardMode: 'public' }));
+    const select = screen.getByLabelText('Request cards') as HTMLSelectElement;
+    expect(select.value).toBe('public');
+    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+      ['dm', "The requester's DMs"],
+      ['public', 'The request channel'],
+      ['both', 'Both'],
+    ]);
+
+    fireEvent.change(select, { target: { value: 'both' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+    const put = fetchWithAuthMock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(put![1].body as string).requestCardMode).toBe('both');
+
+    cleanup();
+    await renderTab(savedSettings());
+    expect((screen.getByLabelText('Request cards') as HTMLSelectElement).value).toBe('dm');
+  });
+
+  it('the Request cards choice: a save the server refuses shows its message', async () => {
+    const { onError, onSuccess } = await renderTab(savedSettings());
+    const loaded = savedSettings();
+    fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') return response({ error: 'ValidationError', message: 'Request cards must be DM, channel or both' }, false, 400);
+      if (url === '/api/admin/settings/discord') return response(loaded);
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    fireEvent.change(screen.getByLabelText('Request cards'), { target: { value: 'public' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('Request cards must be DM, channel or both'));
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('the admin channel hint says that with none set, admins approve on the web', async () => {
+    await renderTab(savedSettings());
+    expect(screen.getByText(/With none set, no approval message is posted and admins approve on the web/)).toBeTruthy();
   });
 
   it('emptying a saved token asks the server to clear it on purpose', async () => {
