@@ -8,7 +8,7 @@
  * every body says which mentions may ping (none, or only the configured admin role).
  */
 
-import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { isCancellableStatus } from '@/lib/constants/request-statuses';
 import { coverUrl, mediaTypeLabel } from '../discord-book-embed';
 import { encodeApprovalCustomId, encodeRequestActionCustomId } from '../discord-custom-id';
 import { ButtonStyle, ComponentType, DISCORD_LIMITS, safeText } from '../discord-format';
@@ -101,17 +101,22 @@ function bookEmbedBase(request: CardRequest, extraFields: { name: string; value:
   };
 }
 
+/** What a cancel is called, as on the web: a request awaiting approval is withdrawn. */
+export function cancelLabel(status: string): 'Withdraw request' | 'Cancel request' {
+  return status === 'awaiting_approval' ? 'Withdraw request' : 'Cancel request';
+}
+
 /**
- * The Cancel button (only the requester or an RMAB admin may use it: the handler checks the
- * clicking user's account on every click).
+ * The Cancel button. It only opens a confirmation; only the requester or an RMAB admin may
+ * confirm (the handler checks the clicking user's account on every click).
  */
-function cancelButton(requestId: string) {
-  return { type: ComponentType.Button, style: ButtonStyle.Secondary, label: 'Cancel request', custom_id: encodeRequestActionCustomId('status', requestId) };
+function cancelButton(request: Pick<CardRequest, 'id' | 'status'>) {
+  return { type: ComponentType.Button, style: ButtonStyle.Secondary, label: cancelLabel(request.status), custom_id: encodeRequestActionCustomId('status', request.id) };
 }
 
 /** True while the request can still be cancelled (not deleted, a cancellable status). */
 export function canStillCancel(request: Pick<CardRequest, 'status' | 'deletedAt'>): boolean {
-  return !request.deletedAt && (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
+  return !request.deletedAt && isCancellableStatus(request.status);
 }
 
 /** The live card (request channel and/or the requester's DMs): book and status, Cancel while it can be. */
@@ -119,7 +124,7 @@ export function requestCardBody(request: CardRequest): MessageBody {
   return {
     content: '',
     embeds: [bookEmbedBase(request, [])],
-    components: canStillCancel(request) ? [{ type: ComponentType.ActionRow, components: [cancelButton(request.id)] }] : [],
+    components: canStillCancel(request) ? [{ type: ComponentType.ActionRow, components: [cancelButton(request)] }] : [],
     allowed_mentions: NO_MENTIONS_RAW,
   };
 }
@@ -136,7 +141,7 @@ export function approvalBody(request: CardRequest, adminRoleId: string): Message
         components: [
           { type: ComponentType.Button, style: ButtonStyle.Success, label: 'Approve', custom_id: encodeApprovalCustomId('approve', request.id) },
           { type: ComponentType.Button, style: ButtonStyle.Danger, label: 'Deny', custom_id: encodeApprovalCustomId('deny', request.id) },
-          cancelButton(request.id),
+          cancelButton(request),
         ],
       },
     ],

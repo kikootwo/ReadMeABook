@@ -169,6 +169,24 @@ describe('announceRequest', () => {
     expect(storedCards().map((c) => c.kind)).toEqual(['dm']);
   });
 
+  it('a request deleted while its cards were being posted: they are refreshed once to Removed, buttons gone', async () => {
+    seedRequest(db);
+    const calls: Call[] = [];
+    // The delete lands during the approval post (its own refresh found no cards yet)
+    const deleteDuringPost = (route: string) => {
+      if (route === `/channels/${ADMIN_CHANNEL}/messages`) db.rows.get(ID)!.deletedAt = new Date();
+      return false;
+    };
+    const { announceRequest } = await import('@/lib/services/discord/cards/discord-cards');
+    await announceRequest(fakeBot(calls, deleteDuringPost), ID);
+
+    const edits = calls.filter((c) => c.method === 'patch');
+    expect(edits).toHaveLength(2);
+    for (const edit of edits) expect(edit.body.components).toEqual([]);
+    expect(edits.map((e) => e.body.content)).toContain('This request was removed.');
+    expect(calls.filter((c) => c.route === '/users/@me/channels')).toHaveLength(1);
+  });
+
   it('bot client not ready: nothing posted, nothing written', async () => {
     seedRequest(db);
     const { announceRequest } = await import('@/lib/services/discord/cards/discord-cards');
@@ -251,7 +269,7 @@ describe('Cancel buttons and the final state after a cancel or delete', () => {
   ];
   const buttonsOf = (body: Record<string, any>) => (body.components as any[]).flatMap((row) => row.components);
 
-  it('the card carries Cancel while the request can be cancelled; the approval message carries Approve, Deny and Cancel', async () => {
+  it('while it awaits approval, the card offers Withdraw request (as on the web) and the approval message Approve, Deny and Withdraw request', async () => {
     const { decodeManageCustomId } = await import('@/lib/services/discord/discord-custom-id');
     seedRequest(db);
     const calls: Call[] = [];
@@ -259,9 +277,9 @@ describe('Cancel buttons and the final state after a cancel or delete', () => {
     await announceRequest(fakeBot(calls), ID);
 
     const [card, approval] = messageSends(calls);
-    expect(buttonsOf(card.body).map((b) => b.label)).toEqual(['Cancel request']);
+    expect(buttonsOf(card.body).map((b) => b.label)).toEqual(['Withdraw request']);
     expect(decodeManageCustomId(buttonsOf(card.body)[0].custom_id)).toMatchObject({ area: 'status', action: 'cancel', requestId: ID });
-    expect(buttonsOf(approval.body).map((b) => b.label)).toEqual(['Approve', 'Deny', 'Cancel request']);
+    expect(buttonsOf(approval.body).map((b) => b.label)).toEqual(['Approve', 'Deny', 'Withdraw request']);
   });
 
   it.each(['available', 'processing', 'denied', 'failed'])('a request that moves on to %s loses its Cancel button', async (status) => {
@@ -292,7 +310,7 @@ describe('Cancel buttons and the final state after a cancel or delete', () => {
     const { requestCardBody } = await import('@/lib/services/discord/cards/discord-card-embeds');
     const { readCardRequest } = await import('@/lib/services/discord/cards/discord-cards');
     seedRequest(db, { status: 'awaiting_approval', discordCards: CARDS });
-    expect(buttonsOf(requestCardBody((await readCardRequest(ID))!)).map((b) => b.label)).toEqual(['Cancel request']);
+    expect(buttonsOf(requestCardBody((await readCardRequest(ID))!)).map((b) => b.label)).toEqual(['Withdraw request']);
     seedRequest(db, { status: 'awaiting_approval', deletedAt: new Date(), discordCards: CARDS });
     const calls: Call[] = [];
     const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');

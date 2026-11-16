@@ -7,6 +7,8 @@
  * plain JSON shapes for components, modals and embeds).
  */
 
+import { errorForLog } from '@/lib/utils/zod-validation';
+
 /** discord-api-types v10 values used by the handlers. */
 export const ComponentType = { ActionRow: 1, Button: 2, StringSelect: 3, TextInput: 4 } as const;
 export const ButtonStyle = { Primary: 1, Secondary: 2, Success: 3, Danger: 4 } as const;
@@ -67,4 +69,43 @@ export function safeText(value: string | null | undefined, max: number): string 
     text = escapeMarkdown(clip(value, cut));
   }
   return text;
+}
+
+/** Replies the approval, /status, Cancel and /delete handlers word the same way. */
+export const SHARED_TEXT = {
+  notLinked: 'Your Discord account is not linked to an RMAB account. Ask an RMAB admin to link it.',
+  notFound: 'This request no longer exists.',
+  generic: 'Something went wrong. Try again in a moment.',
+} as const;
+
+/** The parts of an interaction (and of a logger) failQuietly uses. */
+interface ErrorReplyTarget {
+  deferred?: boolean;
+  replied?: boolean;
+  reply(options: object): Promise<unknown>;
+  editReply(options: object): Promise<unknown>;
+}
+interface ErrorLog {
+  warn(message: string, metadata?: Record<string, unknown>): void;
+  debug(message: string, metadata?: Record<string, unknown>): void;
+}
+
+/**
+ * Logs `message` with the error, then shows the fixed generic text (never the error), whatever
+ * state the interaction is in; never throws.
+ */
+export async function failQuietly(
+  interaction: ErrorReplyTarget,
+  log: ErrorLog,
+  message: string,
+  metadata: Record<string, unknown>,
+  error: unknown
+): Promise<void> {
+  log.warn(message, { ...metadata, error: errorForLog(error) });
+  try {
+    if (interaction.deferred || interaction.replied) await interaction.editReply(textOnly(SHARED_TEXT.generic));
+    else await interaction.reply({ ...textOnly(SHARED_TEXT.generic), flags: MessageFlags.Ephemeral });
+  } catch (replyError) {
+    log.debug('Could not show the error', { error: errorForLog(replyError) });
+  }
 }

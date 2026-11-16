@@ -125,16 +125,18 @@ export function decodeApprovalCustomId(id: unknown): ApprovalCustomId | null {
 
 /*
  * /status, Cancel and /delete: `rmab:sts:<p|m>:<page>:<nonce>` (status page buttons, the cancel
- * menu on a page), `rmab:sts:x:<request id>:<nonce>` (a Cancel button), `rmab:del:<p|m>:<page>:<nonce>`
- * (delete page buttons, the delete menu) and `rmab:del:y:<request id>:<nonce>` (Delete confirm).
- * A menu's request ID is the selected value, never the custom_id. None of them says whose requests
- * a page lists or who may act: every step reads the clicking user's account (and its role) again.
+ * menu on a page), `rmab:sts:x:<request id>:<nonce>` (a Cancel button: opens the confirmation),
+ * `rmab:sts:y:<request id>:<nonce>` (its Cancel request / Withdraw request confirm),
+ * `rmab:del:<p|m>:<page>:<nonce>` (delete page buttons, the delete menu) and
+ * `rmab:del:y:<request id>:<nonce>` (Delete confirm). A menu's request ID is the selected value,
+ * never the custom_id. None of them says whose requests a page lists or who may act: every step
+ * reads the clicking user's account (and its role) again.
  */
 
 export type ManageArea = 'status' | 'delete';
 export type ManageCustomId =
   | { area: ManageArea; action: 'page' | 'menu'; page: number; nonce: string }
-  | { area: 'status'; action: 'cancel'; requestId: string; nonce: string }
+  | { area: 'status'; action: 'cancel' | 'confirm'; requestId: string; nonce: string }
   | { area: 'delete'; action: 'confirm'; requestId: string; nonce: string };
 
 export const STATUS_CUSTOM_ID_PREFIX = 'rmab:sts:';
@@ -142,11 +144,14 @@ export const DELETE_CUSTOM_ID_PREFIX = 'rmab:del:';
 /** Highest page number a custom_id may carry. */
 export const MAX_PAGE = 999;
 
+type RequestAction = 'cancel' | 'confirm';
+
 const AREA_PREFIX: Record<ManageArea, string> = { status: STATUS_CUSTOM_ID_PREFIX, delete: DELETE_CUSTOM_ID_PREFIX };
 const PAGE_PATTERN = /^(0|[1-9]\d{0,2})$/;
-const REQUEST_ACTION: Record<ManageArea, { code: string; action: 'cancel' | 'confirm' }> = {
-  status: { code: 'x', action: 'cancel' },
-  delete: { code: 'y', action: 'confirm' },
+/** The request actions each area has, by code. */
+const REQUEST_ACTIONS: Record<ManageArea, Partial<Record<RequestAction, string>>> = {
+  status: { cancel: 'x', confirm: 'y' },
+  delete: { confirm: 'y' },
 };
 
 /** A page button (`page`) or the menu on a page (`menu`). */
@@ -156,11 +161,20 @@ export function encodePageCustomId(area: ManageArea, action: 'page' | 'menu', pa
   return `${AREA_PREFIX[area]}${action === 'page' ? 'p' : 'm'}:${page}:${nonce}`;
 }
 
-/** A Cancel button (`status`) or the Delete confirm button (`delete`) for one request. */
-export function encodeRequestActionCustomId(area: ManageArea, requestId: string, nonce = newNonce()): string {
+function encodeRequestAction(area: ManageArea, action: RequestAction, requestId: string, nonce: string): string {
   if (!isRequestId(requestId)) throw new Error('Invalid request ID');
   if (!NONCE_PATTERN.test(nonce)) throw new Error('Invalid nonce');
-  return `${AREA_PREFIX[area]}${REQUEST_ACTION[area].code}:${requestId}:${nonce}`;
+  return `${AREA_PREFIX[area]}${REQUEST_ACTIONS[area][action]}:${requestId}:${nonce}`;
+}
+
+/** A Cancel button (`status`) or the Delete confirm button (`delete`) for one request. */
+export function encodeRequestActionCustomId(area: ManageArea, requestId: string, nonce = newNonce()): string {
+  return encodeRequestAction(area, area === 'status' ? 'cancel' : 'confirm', requestId, nonce);
+}
+
+/** The confirm button of a cancel confirmation (Cancel request / Withdraw request). */
+export function encodeCancelConfirmCustomId(requestId: string, nonce = newNonce()): string {
+  return encodeRequestAction('status', 'confirm', requestId, nonce);
 }
 
 /** Parses a /status, Cancel or /delete custom_id; null for anything the encoders above did not build. */
@@ -176,8 +190,9 @@ export function decodeManageCustomId(id: unknown): ManageCustomId | null {
     if (!PAGE_PATTERN.test(value)) return null;
     return { area, action: code === 'p' ? 'page' : 'menu', page: Number(value), nonce };
   }
-  if (code !== REQUEST_ACTION[area].code || !isRequestId(value)) return null;
+  const action = findKey(REQUEST_ACTIONS[area] as Record<RequestAction, string>, code);
+  if (!action || !isRequestId(value)) return null;
   return area === 'status'
-    ? { area, action: 'cancel', requestId: value, nonce }
+    ? { area, action, requestId: value, nonce }
     : { area, action: 'confirm', requestId: value, nonce };
 }

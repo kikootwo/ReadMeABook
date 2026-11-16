@@ -11,7 +11,7 @@
 import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
-import { CANCELLABLE_STATUSES } from '../constants/request-statuses';
+import { isCancellableStatus } from '../constants/request-statuses';
 import { CANCEL_STEP_BUDGET_MS, CancelDeadline } from './cancel-deadline';
 import { handleCancelledDownload, newestSelectedRow, type CancelDownloadOutcome } from './cancelled-download';
 import { refreshDiscordRequestCards } from './discord/discord-runtime';
@@ -55,7 +55,8 @@ export type CancelResult =
   | { success: false; reason: 'not_found' }
   | { success: false; reason: 'not_cancellable'; status: string };
 
-const CANCEL_SELECT = {
+/** The fields a cancel loads (Discord adds the requester for its check) */
+export const CANCEL_SELECT = {
   id: true,
   status: true,
   audiobookId: true,
@@ -72,7 +73,7 @@ export async function cancelRequest(requestId: string, options: CancelOptions): 
 }
 
 export async function cancelLoadedRequest(record: CancellableRequest, options: CancelOptions): Promise<CancelResult> {
-  if (!(CANCELLABLE_STATUSES as readonly string[]).includes(record.status)) {
+  if (!isCancellableStatus(record.status)) {
     return alreadyCancelledOr(record.id, record.status);
   }
 

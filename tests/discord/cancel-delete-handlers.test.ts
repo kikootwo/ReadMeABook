@@ -1,73 +1,31 @@
 /**
- * Component: Discord Cancel and /delete Handler Tests
+ * Component: Discord /delete Handler Tests
  * Documentation: documentation/integrations/discord-bot.md
  *
- * Who may cancel or delete from Discord: Cancel is for the request's requester or an RMAB admin;
  * /delete is for RMAB admins only, checked at the command, every page, the menu and the confirm.
  * Only the account linked to the clicking Discord user counts (database role, read on every
- * step); a Discord role grants nothing. Every step acknowledges Discord before any database work.
- * Replies are fixed texts chosen from result fields, never a service message or error text.
+ * step); a Discord role grants nothing. Every step acknowledges Discord before any database work,
+ * and a delete runs once. Replies are fixed texts chosen from result fields, never a service
+ * message or error text. (Cancel: cancel-confirm-handlers.test.ts.)
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DISCORD_USER, fakeStep, lastText, type FakeStep } from './discord-request-fakes';
-
-const ADMIN_ROLE = '666666666666666666';
-const ID = '0b6f2c1e-4d6a-4c1e-9a8b-1f2e3d4c5b6a';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeStep, lastText, type FakeStep } from './discord-request-fakes';
+import { ADMIN_ROLE, ID, account, admin, deleted, expectNoMentions, record } from './manage-handler-fakes';
 
 const db = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
   request: { findFirst: vi.fn(), findMany: vi.fn() },
 }));
-const cancelMock = vi.hoisted(() => vi.fn());
 const deleteMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db', () => ({ prisma: db }));
-vi.mock('@/lib/services/request-cancel.service', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/services/request-cancel.service')>()),
-  cancelLoadedRequest: cancelMock,
-}));
 vi.mock('@/lib/services/request-delete.service', () => ({ deleteRequest: deleteMock }));
 vi.mock('@/lib/utils/logger', () => ({
   RMABLogger: { create: () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
 }));
 
-type Account = { id: string; plexUsername: string; role: string; registrationStatus: string; deletedAt: Date | null };
-const account = (overrides: Partial<Account> = {}): Account => ({
-  id: 'user-1', plexUsername: 'reader', role: 'user', registrationStatus: 'approved', deletedAt: null, ...overrides,
-});
-const admin = (overrides: Partial<Account> = {}) => account({ id: 'admin-1', plexUsername: 'boss', role: 'admin', ...overrides });
-
-const record = (userId = 'user-1', status = 'downloading') => ({
-  id: ID, userId, status, audiobookId: 'ab-1', type: 'audiobook',
-  audiobook: { title: 'Book', author: 'Author' }, user: { plexUsername: 'reader' },
-});
-const cancelled = (fields: Record<string, unknown> = {}) => ({
-  success: true, request: { id: ID, status: 'cancelled', cancelledAt: new Date() }, download: 'none', message: 'Request cancelled.', ...fields,
-});
-const deleted = (fields: Record<string, unknown> = {}) => ({
-  success: true, message: 'Request deleted successfully', filesDeleted: false, torrentsRemoved: 0, torrentsKeptSeeding: 0,
-  torrentsKeptUnlimited: 0, torrentsKeptShared: 0, torrentsKeptNotOwned: 0, ...fields,
-});
-
 const ids = () => import('@/lib/services/discord/discord-custom-id');
-
-async function cardCancel(opts: { guildId?: string | null; order?: string[] } = {}) {
-  const { encodeRequestActionCustomId } = await ids();
-  const { handleStatusComponent } = await import('@/lib/services/discord/manage/discord-status-handler');
-  // The clicker holds the Discord admin role in every case: it must never matter
-  const step = fakeStep('button', { customId: encodeRequestActionCustomId('status', ID), member: { roles: [ADMIN_ROLE] }, ...opts });
-  await handleStatusComponent(step as never);
-  return step;
-}
-
-async function statusMenuCancel(values: string[] = [ID]) {
-  const { encodePageCustomId } = await ids();
-  const { handleStatusComponent } = await import('@/lib/services/discord/manage/discord-status-handler');
-  const step = fakeStep('select', { customId: encodePageCustomId('status', 'menu', 0), values, member: { roles: [ADMIN_ROLE] } });
-  await handleStatusComponent(step as never);
-  return step;
-}
 
 type DeleteStep = 'command' | 'page' | 'menu' | 'confirm';
 async function deleteStep(kind: DeleteStep, opts: { guildId?: string | null; order?: string[] } = {}) {
@@ -87,151 +45,12 @@ async function deleteStep(kind: DeleteStep, opts: { guildId?: string | null; ord
   return step;
 }
 
-/** Every payload sent carries no-mention allowedMentions. */
-function expectNoMentions(step: FakeStep) {
-  for (const [payload] of [...step.editReply.mock.calls, ...step.reply.mock.calls]) {
-    expect(payload).toMatchObject({ allowedMentions: { parse: [] } });
-  }
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   db.user.findUnique.mockResolvedValue(account());
   db.request.findFirst.mockResolvedValue(record());
   db.request.findMany.mockResolvedValue([]);
-  cancelMock.mockResolvedValue(cancelled());
   deleteMock.mockResolvedValue(deleted());
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe('Cancel from a card or /status', () => {
-  it('the requester (non-admin) cancels their own request as the requester audience', async () => {
-    const step = await cardCancel();
-
-    expect(db.user.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { discordUserId: DISCORD_USER } }));
-    expect(db.request.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: ID, deletedAt: null } }));
-    expect(cancelMock).toHaveBeenCalledWith(expect.objectContaining({ id: ID, status: 'downloading' }), { audience: 'owner' });
-    expect(step.deferReply).toHaveBeenCalledWith({ flags: 64 });
-    expect(lastText(step)).toBe('Request cancelled.');
-    expectNoMentions(step);
-  });
-
-  it('a non-admin on another user\'s request is refused and nothing is cancelled', async () => {
-    db.request.findFirst.mockResolvedValue(record('user-2'));
-    const step = await cardCancel();
-
-    expect(cancelMock).not.toHaveBeenCalled();
-    expect(lastText(step)).toBe('You can cancel only your own requests.');
-  });
-
-  it('a linked RMAB admin cancels any request as the admin audience (also from the approval message)', async () => {
-    db.user.findUnique.mockResolvedValue(admin());
-    db.request.findFirst.mockResolvedValue(record('user-2', 'awaiting_approval'));
-    await cardCancel();
-
-    expect(cancelMock).toHaveBeenCalledWith(expect.objectContaining({ id: ID }), { audience: 'admin' });
-  });
-
-  it('a card in a DM works the same way (the requester\'s own card)', async () => {
-    const step = await cardCancel({ guildId: null });
-    expect(cancelMock).toHaveBeenCalledTimes(1);
-    expect(lastText(step)).toBe('Request cancelled.');
-  });
-
-  it.each([
-    ['an unlinked member holding the Discord admin role', null],
-    ['a linked account pending approval', account({ registrationStatus: 'pending_approval' })],
-    ['a linked account that was rejected', account({ registrationStatus: 'rejected' })],
-    ['a linked account that was deleted', account({ deletedAt: new Date() })],
-  ])('%s is refused and nothing is read or cancelled', async (_label, linked) => {
-    db.user.findUnique.mockResolvedValue(linked);
-    const step = await cardCancel();
-
-    expect(db.request.findFirst).not.toHaveBeenCalled();
-    expect(cancelMock).not.toHaveBeenCalled();
-    expect(lastText(step)).toBe('Your Discord account is not linked to an RMAB account. Ask an RMAB admin to link it.');
-  });
-
-  it('a deleted request (re-read with deletedAt null) is not found and not cancelled', async () => {
-    db.request.findFirst.mockResolvedValue(null);
-    const step = await cardCancel();
-    expect(cancelMock).not.toHaveBeenCalled();
-    expect(lastText(step)).toBe('This request no longer exists.');
-  });
-
-  it('defers before any database work, and a cancel that takes 10 s still answers', async () => {
-    vi.useFakeTimers();
-    const order: string[] = [];
-    db.user.findUnique.mockImplementation(async () => {
-      order.push('db');
-      return account();
-    });
-    cancelMock.mockImplementation(() => {
-      order.push('cancel');
-      return new Promise((resolve) => setTimeout(() => resolve(cancelled()), 10_000));
-    });
-
-    const done = cardCancel({ order });
-    await vi.advanceTimersByTimeAsync(10_000);
-    const step = await done;
-
-    expect(order.slice(0, 2)).toEqual(['deferReply', 'db']);
-    expect(order.indexOf('deferReply')).toBeLessThan(order.indexOf('cancel'));
-    expect(lastText(step)).toBe('Request cancelled.');
-  });
-
-  it.each([
-    ['already cancelled', cancelled({ alreadyCancelled: true, message: 'This request was already cancelled.' }), 'This request was already cancelled.'],
-    ['not cancellable', { success: false, reason: 'not_cancellable', status: 'processing' }, 'This request can no longer be cancelled. Status: Processing.'],
-    ['gone meanwhile', { success: false, reason: 'not_found' }, 'This request no longer exists.'],
-    ['download kept (requester view)', cancelled({ download: 'kept' }), 'Request cancelled. Its download stays in the download client.'],
-    ['download removed', cancelled({ download: 'removed' }), 'Request cancelled. Its download was removed from the download client.'],
-  ])('%s maps to a fixed reply', async (_label, result, text) => {
-    cancelMock.mockResolvedValue(result);
-    expect(lastText(await cardCancel())).toBe(text);
-  });
-
-  it('an admin reply never shows the service message (it can name the download client)', async () => {
-    db.user.findUnique.mockResolvedValue(admin());
-    cancelMock.mockResolvedValue(cancelled({ download: 'kept_shared', message: 'Request cancelled. Its download stays in qBittorrent-Home: another request still uses it.' }));
-    const step = await cardCancel();
-
-    expect(lastText(step)).toBe('Request cancelled. Its download stays in the download client: another request still uses it.');
-    expect(JSON.stringify(step.editReply.mock.calls)).not.toContain('qBittorrent-Home');
-  });
-
-  it('the /status menu cancels the chosen request and lists the page again', async () => {
-    const step = await statusMenuCancel();
-
-    expect(step.deferUpdate).toHaveBeenCalledTimes(1);
-    expect(cancelMock).toHaveBeenCalledWith(expect.objectContaining({ id: ID }), { audience: 'owner' });
-    expect(lastText(step)).toBe('Request cancelled.');
-    expect(db.request.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { deletedAt: null, userId: 'user-1' } }));
-  });
-
-  it('the /status menu refuses another user\'s request for a non-admin', async () => {
-    db.request.findFirst.mockResolvedValue(record('user-2'));
-    const step = await statusMenuCancel();
-    expect(cancelMock).not.toHaveBeenCalled();
-    expect(lastText(step)).toBe('You can cancel only your own requests.');
-  });
-
-  it('a menu value that is not a request ID cancels nothing', async () => {
-    const step = await statusMenuCancel(['../../etc']);
-    expect(db.request.findFirst).not.toHaveBeenCalled();
-    expect(cancelMock).not.toHaveBeenCalled();
-    expect(lastText(step)).toBe('That choice is no longer available. Run the command again.');
-  });
-
-  it('a failing step shows the generic text, never the error', async () => {
-    cancelMock.mockRejectedValue(new Error('connect ECONNREFUSED 10.0.0.5:8080 /downloads/Book'));
-    const step = await cardCancel();
-    expect(lastText(step)).toBe('Something went wrong. Try again in a moment.');
-    expect(JSON.stringify(step.editReply.mock.calls)).not.toMatch(/ECONNREFUSED|downloads/);
-  });
 });
 
 describe('/delete (RMAB admins only)', () => {
@@ -336,5 +155,65 @@ describe('/delete (RMAB admins only)', () => {
     db.user.findUnique.mockResolvedValue(admin());
     deleteMock.mockResolvedValue({ ...deleted(), success: false, message: 'Request not found or already deleted', error: 'NotFound' });
     expect(lastText(await deleteStep('confirm'))).toBe('This request no longer exists.');
+  });
+});
+
+describe('/delete runs once and reports what happened', () => {
+  beforeEach(() => {
+    db.user.findUnique.mockResolvedValue(admin());
+  });
+
+  it('the confirmation turns into "Deleting…" with no buttons before the delete starts', async () => {
+    const order: string[] = [];
+    deleteMock.mockImplementation(async () => {
+      order.push('delete');
+      return deleted();
+    });
+    const step = await deleteStep('confirm', { order });
+
+    const first = step.editReply.mock.calls[0][0];
+    expect(first).toMatchObject({ content: 'Deleting…', embeds: [], components: [] });
+    expect(order.indexOf('editReply')).toBeLessThan(order.indexOf('delete'));
+  });
+
+  it('a second Delete press while the first runs deletes nothing more', async () => {
+    let finish!: (value: unknown) => void;
+    deleteMock.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+
+    const first = deleteStep('confirm');
+    await vi.waitFor(() => expect(deleteMock).toHaveBeenCalledTimes(1));
+    const second = await deleteStep('confirm');
+    finish(deleted());
+    const done = await first;
+
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(second.editReply).not.toHaveBeenCalled();
+    expect(lastText(done)).toBe('Request deleted.');
+  });
+
+  it('a later Delete press after the first finished runs again (the service then says not found)', async () => {
+    await deleteStep('confirm');
+    deleteMock.mockResolvedValue({ ...deleted(), success: false, error: 'NotFound' });
+    expect(lastText(await deleteStep('confirm'))).toBe('This request no longer exists.');
+    expect(deleteMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['some ebook files removed and some kept', { filesDeleted: true, filesKeptReason: 'b.epub could not be removed (EBUSY)' }, 'Request deleted. Some of its library files were kept.'],
+    ['every file removed, only the emptied folder could not be', { filesDeleted: true, folderKept: { folder: '/mnt/media/A/B', files: [], more: 0, error: 'could not be removed (EBUSY)' } }, 'Request deleted. Its library files were removed. Its emptied book folder could not be removed.'],
+    ['other files keep the folder', { filesDeleted: true, folderKept: { folder: '/mnt/media/A/B', files: [], more: 3 } }, 'Request deleted. Its library files were removed. Its book folder stays: it still holds other files.'],
+  ])('%s: a fixed reply', async (_label, fields, text) => {
+    deleteMock.mockResolvedValue(deleted(fields));
+    const step = await deleteStep('confirm');
+    expect(lastText(step)).toBe(text);
+    expect(JSON.stringify(step.editReply.mock.calls)).not.toMatch(/mnt|EBUSY|epub/);
+  });
+
+  it('after a delete, a list that cannot be read still shows the outcome, never a failure', async () => {
+    db.request.findMany.mockRejectedValue(new Error('database unavailable'));
+    deleteMock.mockResolvedValue(deleted({ filesDeleted: true }));
+    const step = await deleteStep('confirm');
+    expect(step.editReply.mock.calls.at(-1)![0]).toMatchObject({ content: 'Request deleted. Its library files were removed.', embeds: [], components: [] });
+    expectNoMentions(step);
   });
 });

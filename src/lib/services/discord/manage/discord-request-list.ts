@@ -4,7 +4,7 @@
  *
  * Reads one page of requests and builds its reply: an embed listing them, a menu (Cancel on
  * /status, only for requests that can still be cancelled; Delete on /delete), page buttons, and
- * the /delete confirmation. Whose requests a page lists comes from the account acting now (an
+ * the cancel and /delete confirmations. Whose requests a page lists comes from the account acting now (an
  * RMAB admin's database role shows every user's), never from the custom_id. Deleted requests
  * are never listed. Embed text from the database is markdown-escaped; menu text is plain
  * (Discord shows it as written) and only cut to Discord's limits. No paths, release picks,
@@ -12,17 +12,18 @@
  */
 
 import { prisma } from '@/lib/db';
-import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { isCancellableStatus } from '@/lib/constants/request-statuses';
+import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
 import type { DiscordActor } from '../discord-actor';
 import { mediaTypeLabel } from '../discord-book-embed';
-import { MAX_PAGE, encodePageCustomId, encodeRequestActionCustomId, type ManageArea } from '../discord-custom-id';
+import { MAX_PAGE, encodeCancelConfirmCustomId, encodePageCustomId, encodeRequestActionCustomId, type ManageArea } from '../discord-custom-id';
 import { ButtonStyle, ComponentType, DISCORD_LIMITS, NO_MENTIONS, clip, safeText } from '../discord-format';
-import { statusLabel } from '../cards/discord-card-embeds';
+import { cancelLabel, statusLabel } from '../cards/discord-card-embeds';
 
 /** Requests per page (Discord allows 25 menu options). */
 export const PAGE_SIZE = 10;
 
-/** Only these fields are read for a list or the delete confirmation. */
+/** Only these fields are read for a list or a confirmation. */
 const LIST_SELECT = {
   id: true,
   status: true,
@@ -67,10 +68,6 @@ export async function readRequestPage(actor: DiscordActor, page: number): Promis
 /** One live request with the list fields (null when missing or deleted). */
 export function readListedRequest(requestId: string): Promise<ListedRequest | null> {
   return prisma.request.findFirst({ where: { id: requestId, deletedAt: null }, select: LIST_SELECT });
-}
-
-export function isCancellableStatus(status: string): boolean {
-  return (CANCELLABLE_STATUSES as readonly string[]).includes(status);
 }
 
 const COLOUR = { status: 0x5865f2, delete: 0xda373c } as const;
@@ -163,14 +160,14 @@ export function pageReply(area: ManageArea, actor: DiscordActor, { page, rows, h
   };
 }
 
-/** The /delete confirmation for one request: Delete, or back to the first page. */
-export function deleteConfirmReply(row: ListedRequest) {
+/** A confirmation: the question, the request, and its two buttons. */
+function confirmReply(content: string, row: ListedRequest, colour: number, buttons: object[]) {
   return {
-    content: 'Delete this request? RMAB removes its download and its library files as a delete on the web does. This cannot be undone.',
+    content,
     embeds: [
       {
         title: safeText(row.audiobook.title, DISCORD_LIMITS.embedTitle) || 'Untitled',
-        color: COLOUR.delete,
+        color: colour,
         fields: [
           { name: 'Author', value: safeText(row.audiobook.author, DISCORD_LIMITS.embedFieldValue) || 'Unknown', inline: true },
           { name: 'Status', value: statusLabel({ status: row.status, deletedAt: null }), inline: true },
@@ -179,15 +176,34 @@ export function deleteConfirmReply(row: ListedRequest) {
         footer: { text: `${mediaTypeLabel(row.type)} request` },
       },
     ],
-    components: [
-      {
-        type: ComponentType.ActionRow,
-        components: [
-          { type: ComponentType.Button, style: ButtonStyle.Danger, label: 'Delete', custom_id: encodeRequestActionCustomId('delete', row.id) },
-          { type: ComponentType.Button, style: ButtonStyle.Secondary, label: 'Back', custom_id: encodePageCustomId('delete', 'page', 0) },
-        ],
-      },
-    ],
+    components: [{ type: ComponentType.ActionRow, components: buttons }],
     allowedMentions: NO_MENTIONS,
   };
+}
+
+/** The /delete confirmation for one request: Delete, or back to the first page. */
+export function deleteConfirmReply(row: ListedRequest) {
+  return confirmReply(
+    'Delete this request? RMAB removes its download and its library files as a delete on the web does. This cannot be undone.',
+    row,
+    COLOUR.delete,
+    [
+      { type: ComponentType.Button, style: ButtonStyle.Danger, label: 'Delete', custom_id: encodeRequestActionCustomId('delete', row.id) },
+      { type: ComponentType.Button, style: ButtonStyle.Secondary, label: 'Back', custom_id: encodePageCustomId('delete', 'page', 0) },
+    ]
+  );
+}
+
+/**
+ * The cancel confirmation, worded as the web's: a request awaiting approval is withdrawn.
+ * Keep request lists `backPage` of /status again and changes nothing.
+ */
+export function cancelConfirmReply(row: ListedRequest, actor: DiscordActor, backPage: number) {
+  const content = row.status === 'awaiting_approval'
+    ? `This request is pending admin approval and will be withdrawn. ${row.userId === actor.userId ? 'You' : 'The user'} can request it again later.`
+    : `Cancel this request? ${cancelConfirmText(row.status, row.type)}`;
+  return confirmReply(content, row, COLOUR.delete, [
+    { type: ComponentType.Button, style: ButtonStyle.Danger, label: cancelLabel(row.status), custom_id: encodeCancelConfirmCustomId(row.id) },
+    { type: ComponentType.Button, style: ButtonStyle.Secondary, label: 'Keep request', custom_id: encodePageCustomId('status', 'page', backPage) },
+  ]);
 }

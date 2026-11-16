@@ -16,6 +16,11 @@ export const CANCELLABLE_STATUSES = [
   'awaiting_release',
 ] as const;
 
+/** True for a status in CANCELLABLE_STATUSES. */
+export function isCancellableStatus(status: string): boolean {
+  return (CANCELLABLE_STATUSES as readonly string[]).includes(status);
+}
+
 /**
  * Statuses a request has before (or instead of) an approval. A request that leaves one of
  * these without being approved is recorded in Request.approvalBypassedBy.

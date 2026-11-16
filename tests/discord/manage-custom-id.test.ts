@@ -12,6 +12,7 @@ import {
   decodeApprovalCustomId,
   decodeManageCustomId,
   decodeRequestCustomId,
+  encodeCancelConfirmCustomId,
   encodePageCustomId,
   encodeRequestActionCustomId,
 } from '@/lib/services/discord/discord-custom-id';
@@ -40,6 +41,13 @@ describe('Discord /status, Cancel and /delete custom ids', () => {
     expect(confirm.length).toBeLessThanOrEqual(CUSTOM_ID_MAX_LENGTH);
   });
 
+  it('the cancel confirm carries the request ID only', () => {
+    const yes = encodeCancelConfirmCustomId(ID, NONCE);
+    expect(yes).toBe(`rmab:sts:y:${ID}:${NONCE}`);
+    expect(decodeManageCustomId(yes)).toEqual({ area: 'status', action: 'confirm', requestId: ID, nonce: NONCE });
+    expect(() => encodeCancelConfirmCustomId('not-a-uuid')).toThrow('Invalid request ID');
+  });
+
   it('a fresh nonce on every encode', () => {
     expect(encodePageCustomId('status', 'page', 1)).not.toBe(encodePageCustomId('status', 'page', 1));
   });
@@ -53,7 +61,9 @@ describe('Discord /status, Cancel and /delete custom ids', () => {
     `rmab:sts:p:01:${NONCE}`,
     `rmab:sts:p:1.5:${NONCE}`,
     `rmab:sts:p:0:ABCDEFGHIJ`,
-    `rmab:sts:y:${ID}:${NONCE}`,
+    `rmab:sts:k:${ID}:${NONCE}`,
+    `rmab:sts:y:${ID}`,
+    `rmab:sts:y:${ID}:${NONCE}:all`,
     `rmab:del:x:${ID}:${NONCE}`,
     `rmab:sts:x:not-a-uuid:${NONCE}`,
     `rmab:sts:x:${ID.toUpperCase()}:${NONCE}`,
@@ -77,7 +87,7 @@ describe('Discord /status, Cancel and /delete custom ids', () => {
   });
 
   it('the other decoders do not accept these ids (and the reverse)', () => {
-    const ids = [encodePageCustomId('status', 'page', 0), encodeRequestActionCustomId('status', ID), encodeRequestActionCustomId('delete', ID)];
+    const ids = [encodePageCustomId('status', 'page', 0), encodeRequestActionCustomId('status', ID), encodeCancelConfirmCustomId(ID), encodeRequestActionCustomId('delete', ID)];
     for (const id of ids) {
       expect(decodeRequestCustomId(id)).toBeNull();
       expect(decodeApprovalCustomId(id)).toBeNull();

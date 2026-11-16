@@ -128,7 +128,8 @@ async function decisionAfter(now: CardRequest): Promise<'approved' | 'denied' | 
 
 /**
  * Posts the cards for a request just made in Discord, stores their IDs (an empty list still
- * marks the request as made in Discord), then refreshes once if the status moved meanwhile. A
+ * marks the request as made in Discord), then refreshes once if the status moved or the request
+ * was deleted meanwhile. A
  * decision made while the cards were being posted found none to update: it is applied here
  * (the approval message shows it and the requester gets the decision DM).
  */
@@ -161,8 +162,9 @@ export async function announceRequest(bot: DiscordBotService, requestId: string)
 
   await writeCards(requestId, (current) => [...current, ...posted]);
 
+  // A delete does not change the status: it counts as a move too (the cards then show Removed)
   const now = await readCardRequest(requestId);
-  if (!now || now.status === request.status) return;
+  if (!now || (now.status === request.status && !now.deletedAt)) return;
   const decision = request.status === 'awaiting_approval' ? await decisionAfter(now) : undefined;
   if (decision) {
     await syncApprovalDecision(bot, requestId, decision);

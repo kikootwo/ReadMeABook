@@ -7,8 +7,10 @@
  * Discord first, then resolve the clicking user to an RMAB account (no cache) and require an RMAB
  * admin (database role): an admin demoted after opening the list is refused at the next step.
  * Discord's Administrator permission on the command only hides it. The delete runs the shared
- * delete service as that admin, exactly as the web admin delete does; the reply is a fixed text
- * chosen from the result fields (never its message, error or the reason files were kept).
+ * delete service as that admin, exactly as the web admin delete does, once: the confirmation
+ * turns into "Deleting…" with no buttons first, and a second press while it runs does nothing.
+ * The reply is a fixed text chosen from the result fields (never its message, error or the
+ * reason files were kept).
  */
 
 import { deleteRequest, type DeleteRequestResult } from '@/lib/services/request-delete.service';
@@ -16,18 +18,31 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { resolveDiscordActor, type DiscordActor } from '../discord-actor';
 import { decodeManageCustomId, isRequestId } from '../discord-custom-id';
 import { textOnly } from '../discord-format';
-import { EPHEMERAL, MANAGE_TEXT, failQuietly, type ManageInteraction } from './discord-manage-common';
+import { EPHEMERAL, MANAGE_TEXT, runOnce, showOutcome, stepFailed, type ManageInteraction } from './discord-manage-common';
 import { deleteConfirmReply, pageReply, readListedRequest, readRequestPage } from './discord-request-list';
 
 const logger = RMABLogger.create('Discord.Delete');
+
+/** Deletes being run in this process, keyed by request ID. */
+const deletesInFlight = new Set<string>();
+
+function filesText(result: DeleteRequestResult): string | null {
+  if (result.filesDeleted && result.filesKeptReason) return 'Some of its library files were kept.';
+  if (result.filesDeleted) return 'Its library files were removed.';
+  if (result.filesKeptReason) return 'Its library files were kept.';
+  return null;
+}
 
 /** The fixed reply for a delete result, built from its counts and flags only. */
 export function deleteReplyText(result: DeleteRequestResult): string {
   if (!result.success) return result.error === 'NotFound' ? MANAGE_TEXT.notFound : MANAGE_TEXT.deleteFailed;
   const parts = ['Request deleted.'];
-  if (result.filesDeleted) parts.push('Its library files were removed.');
-  if (result.filesKeptReason) parts.push('Its library files were kept.');
-  if (result.folderKept) parts.push('Its book folder stays: it still holds other files.');
+  const files = filesText(result);
+  if (files) parts.push(files);
+  if (result.folderKept) {
+    const holdsFiles = result.folderKept.files.length > 0 || result.folderKept.more > 0;
+    parts.push(holdsFiles ? 'Its book folder stays: it still holds other files.' : 'Its emptied book folder could not be removed.');
+  }
   if (result.torrentsRemoved > 0) parts.push('Its download was removed from the download client.');
   if (result.torrentsKeptSeeding > 0 || result.torrentsKeptUnlimited > 0) parts.push('Its download stays in the download client to seed.');
   if (result.torrentsKeptShared > 0 || result.torrentsKeptNotOwned > 0) parts.push('Its download stays in the download client.');
@@ -58,7 +73,7 @@ export async function handleDeleteCommand(interaction: ManageInteraction): Promi
     if (!actor) return;
     await interaction.editReply(pageReply('delete', actor, await readRequestPage(actor, 0)));
   } catch (error) {
-    await failQuietly(interaction, 'delete', error);
+    await stepFailed(interaction, 'delete', error);
   }
 }
 
@@ -86,7 +101,7 @@ export async function handleDeleteComponent(interaction: ManageInteraction): Pro
       return;
     }
 
-    if (id.action !== 'confirm') {
+    if (id.action === 'menu') {
       const requestId = interaction.values?.[0];
       const row = isRequestId(requestId) ? await readListedRequest(requestId) : null;
       if (!row) {
@@ -98,10 +113,17 @@ export async function handleDeleteComponent(interaction: ManageInteraction): Pro
       return;
     }
 
-    const result = await deleteRequest(id.requestId, actor.userId);
-    logger.info('Discord delete', { userId: actor.userId, requestId: id.requestId, success: result.success });
-    await interaction.editReply(pageReply('delete', actor, await readRequestPage(actor, 0), deleteReplyText(result)));
+    if (id.action !== 'confirm') return;
+    const requestId = id.requestId;
+    const ran = await runOnce(deletesInFlight, requestId, async () => {
+      // The buttons go before the delete starts
+      await interaction.editReply(textOnly(MANAGE_TEXT.deleting));
+      const result = await deleteRequest(requestId, actor.userId);
+      logger.info('Discord delete', { userId: actor.userId, requestId, success: result.success });
+      await showOutcome(interaction, 'delete', actor, 0, deleteReplyText(result));
+    });
+    if (!ran) logger.debug('Ignored a second Delete press while the first runs', { requestId });
   } catch (error) {
-    await failQuietly(interaction, `delete ${id.action}`, error);
+    await stepFailed(interaction, `delete ${id.action}`, error);
   }
 }

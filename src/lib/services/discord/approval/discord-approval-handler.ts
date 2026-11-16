@@ -12,10 +12,9 @@
 
 import { decideRequestApproval, type ApprovalResult } from '@/lib/services/request-approval.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { errorForLog } from '@/lib/utils/zod-validation';
 import { resolveDiscordActor } from '../discord-actor';
 import { decodeApprovalCustomId } from '../discord-custom-id';
-import { MessageFlags, textOnly } from '../discord-format';
+import { MessageFlags, SHARED_TEXT, failQuietly, textOnly } from '../discord-format';
 import { refreshDiscordRequestCards } from '../discord-runtime';
 import { statusLabel } from '../cards/discord-card-embeds';
 
@@ -35,10 +34,8 @@ export interface ApprovalInteraction {
 }
 
 export const APPROVAL_TEXT = {
-  notLinked: 'Your Discord account is not linked to an RMAB account. Ask an RMAB admin to link it.',
+  ...SHARED_TEXT,
   notAdmin: 'Only RMAB admins can approve or deny requests.',
-  generic: 'Something went wrong. Try again in a moment.',
-  notFound: 'This request no longer exists.',
   sourceUnavailable: 'The release source could not be reached. Nothing was changed; try again in a moment.',
   denied: 'Denied.',
 } as const;
@@ -93,12 +90,6 @@ export async function handleApprovalComponent(interaction: ApprovalInteraction):
       refreshDiscordRequestCards(id.requestId);
     }
   } catch (error) {
-    logger.warn('Discord approval click failed', { requestId: id.requestId, error: errorForLog(error) });
-    try {
-      if (interaction.deferred || interaction.replied) await interaction.editReply(textOnly(APPROVAL_TEXT.generic));
-      else await interaction.reply({ ...textOnly(APPROVAL_TEXT.generic), flags: MessageFlags.Ephemeral });
-    } catch (replyError) {
-      logger.debug('Could not show the approval error', { error: errorForLog(replyError) });
-    }
+    await failQuietly(interaction, logger, 'Discord approval click failed', { requestId: id.requestId }, error);
   }
 }
