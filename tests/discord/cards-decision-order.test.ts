@@ -112,27 +112,30 @@ describe('a refresh without the decision runs before the decision sync', () => {
     resetFakeDb(db);
   });
 
-  it.each([
-    ['approved', 'pending', 'Approved.', 'was approved'],
-    ['denied', 'denied', 'Denied.', 'was denied'],
-  ] as const)('%s: the approval message still shows the decision and the requester still gets the DM', async (decision, status, content, dm) => {
-    seedRequest(db, {
-      status,
-      discordCards: [
-        { kind: 'dm', channelId: DM_CHANNEL, messageId: '900000000000000001' },
-        { kind: 'approval', channelId: ADMIN_CHANNEL, messageId: '900000000000000002' },
-      ],
-    });
+  it('the approval message still shows Approved. (and Denied. for a denial), and the requester still gets the DM', async () => {
     const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');
     const { syncApprovalDecision } = await import('@/lib/services/discord/cards/discord-decision-sync');
-    const calls: Call[] = [];
-    const bot = fakeBot(calls);
-    await refreshRequestCards(bot, ID);
-    await syncApprovalDecision(bot, ID, decision);
+    for (const [decision, status, content, dm] of [
+      ['approved', 'pending', 'Approved.', 'was approved'],
+      ['denied', 'denied', 'Denied.', 'was denied'],
+    ] as const) {
+      resetFakeDb(db);
+      seedRequest(db, {
+        status,
+        discordCards: [
+          { kind: 'dm', channelId: DM_CHANNEL, messageId: '900000000000000001' },
+          { kind: 'approval', channelId: ADMIN_CHANNEL, messageId: '900000000000000002' },
+        ],
+      });
+      const calls: Call[] = [];
+      const bot = fakeBot(calls);
+      await refreshRequestCards(bot, ID);
+      await syncApprovalDecision(bot, ID, decision);
 
-    const approvalEdits = calls.filter((c) => c.method === 'patch' && c.route.startsWith(`/channels/${ADMIN_CHANNEL}/`));
-    expect(approvalEdits.map((c) => c.body.content)).toEqual([content]);
-    expect(decisionDm(calls)?.body.content).toContain(dm);
+      const approvalEdits = calls.filter((c) => c.method === 'patch' && c.route.startsWith(`/channels/${ADMIN_CHANNEL}/`));
+      expect(approvalEdits.map((c) => c.body.content)).toEqual([content]);
+      expect(decisionDm(calls)?.body.content).toContain(dm);
+    }
   });
 });
 
