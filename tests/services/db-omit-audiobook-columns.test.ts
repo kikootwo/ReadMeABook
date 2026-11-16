@@ -1,6 +1,6 @@
 /**
  * Component: Audiobook columns left out of full-row reads (#325a library ASIN, #600 file size)
- * Documentation: documentation/backend/services/api-tokens.md
+ * Documentation: documentation/backend/services/api-tokens.md, documentation/fixes/file-hash-matching.md
  *
  * The Prisma client omits `audiobooks.library_asin` and `audiobooks.file_size_bytes` from every
  * audiobook result (an `include: { audiobook: true }` in GET/POST /api/requests and every other
