@@ -106,6 +106,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 **requireAuth()** - Verifies JWT exists/valid, adds user to request, returns 401 if invalid
 **requireAdmin()** - Checks `user.role === 'admin'`, returns 403 if not, chains after requireAuth
 **getOptionalAuthUser()** - For routes that also answer without a session: the caller after the same account checks as requireAuth (API tokens: allowlist too), else `null`, never a 401
+**API tokens (`rmab_`)** - lookup, allowlist and per-endpoint permissions live in `src/lib/middleware/api-token-auth.ts` (used by both functions above); `req.apiToken` is set only for token callers → [api-tokens.md](api-tokens.md)
 **requireSetupIncomplete()** - Setup-only routes; 403 once `setup_completed='true'`
 **requireSetupIncompleteOrAdmin()** - Shared setup/settings routes; open during setup, admin after
 - Both **fail closed**: if the `setup_completed` lookup throws → 503 `ServiceUnavailable` (handler not run; details logged only)

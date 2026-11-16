@@ -213,6 +213,7 @@
 **"Can I delete or cancel many requests at once?" / "Why did deleted requests come back?"** → [admin-features/bulk-request-actions.md](admin-features/bulk-request-actions.md) (page selection, skip rule, shelves and watches re-request deleted ones)
 **"Does cancelling a request stop its download?" / "Can an API token cancel a request?"** → [admin-features/request-cancel.md](admin-features/request-cancel.md) (partial removed, finished seeds first, cleanup pass for post-upgrade cancels; `POST /api/requests/:id/cancel`), [backend/services/api-tokens.md](backend/services/api-tokens.md)
 **"How do I approve/deny user requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
+**"Can an API token approve a request?"** → [backend/services/api-tokens.md](backend/services/api-tokens.md#request-approval-opt-in-approve-only) (opt-in setting + per-token flag, admin's own token, approve only, 90-day expiry)
 **"How do I enable auto-approve for requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How does the release blocklist work?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 **"Why does the same bad release keep getting re-downloaded?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (it shouldn't anymore — auto-blocked on permanent failure)

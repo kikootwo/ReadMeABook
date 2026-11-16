@@ -177,7 +177,7 @@ Fetch all requests with status 'awaiting_approval'
 ### POST /api/admin/requests/[id]/approve
 Approve or deny a specific request
 
-**Auth:** Admin only
+**Auth:** Admin only (session). An admin's API token may call it when both opt-ins hold (setting `api_tokens.allow_request_approval` and the token's `canApproveRequests`), approve only, with no `selectedTorrent` ([api-tokens.md](../backend/services/api-tokens.md#request-approval-opt-in-approve-only))
 
 **Request:**
 ```json
@@ -239,8 +239,9 @@ Approve or deny a specific request
 - `404` - Request not found
 - `400` - Request not in 'awaiting_approval' status
 - `400` - Invalid action (must be 'approve' or 'deny')
+- API token callers: `403` on `action: 'deny'`; `400 ValidationError` on a `selectedTorrent` (not `null`); `403` when a gate fails (token flag, admin role, 90-day lifetime, setting), `503` when the setting cannot be read
 
-**Shared approval service** (`src/lib/services/request-approval.service.ts`; the route is a thin wrapper, Discord's Approve / Deny buttons call the same `decideRequestApproval({requestId, action, adminId, adminSelectedTorrent?, via: 'web'|'discord'})`)
+**Shared approval service** (`src/lib/services/request-approval.service.ts`; the route is a thin wrapper, Discord's Approve / Deny buttons call the same `decideRequestApproval({requestId, action, adminId, adminSelectedTorrent?, via: 'web'|'discord'|'api_token'})`; token callers pass no release)
 - Pick: `request-approval-selection.ts` (`chooseApprovalPick`: admin pick or stored pick through the download-selection guard → download / search / unavailable (503) / rejected (400))
 - **Atomic claim** (`request-approval-start.ts`): `updateMany {id, status: 'awaiting_approval', deletedAt: null}`; only `count === 1` proceeds. A second approve or a deny racing it gets `400 InvalidStatus` + `currentStatus`; a row soft-deleted between read and claim → `404`. Download claim clears the stored pick (`selectedTorrent: null`) and `approvalBypassedBy`; search claim sets `pending`/`awaiting_release` and clears an unusable stored pick (`Prisma.DbNull`)
 - **Rollback:** enqueue throws → row back to `awaiting_approval` with the stored pick and bypass record (gated on the claimed status and `deletedAt: null`), then the route's `500 ApprovalError` body. Not when the job was already queued (the queue's write of its Bull ID failed after `queue.add`; marked by `jobWasQueued`, `src/lib/utils/job-queued-error.ts`): logged, the request stays started, normal success response. If the rollback itself fails (claim kept), the notification and the Discord update still go, then the 500
