@@ -23,7 +23,9 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
   - `bookdate_library_scope` ('full'|'rated', default 'full') - Library scope for recommendations
   - `bookdate_custom_prompt` (text, optional, max 1000 chars) - Custom preferences for AI
   - `bookdate_onboarding_complete` (bool, default false) - Whether user has completed BookDate onboarding
-- Indexes: `plex_id`, `role`
+- **Discord identity link (#231, groundwork: no bot yet):**
+  - `discord_user_id` (string, nullable, unique) - Discord user ID (snowflake); null = not linked. Set only by an admin (`PUT /api/admin/users/[id]/discord`), cleared by the user delete. Resolved to an account only through `resolveDiscordActor` ([auth.md](services/auth.md#discord-identity-link)); listed (admin only) by `GET /api/admin/users`. Added by `prisma db push` (no migration file); a downgrade drops it (no link = no Discord access)
+- Indexes: `plex_id`, `role`, unique `discord_user_id`
 
 ### Audible_Cache
 - `id` (UUID PK), `asin` (unique, Audible ID), `title`, `author`, `narrator`, `description`

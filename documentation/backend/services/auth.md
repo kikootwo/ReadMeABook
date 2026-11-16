@@ -336,6 +336,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
   - local: `plexId` = `local-<username>-deleted-<ms>` (stays in the `local-` space; admin login looks up `local-<username>`, Plex and OIDC sign-in refuse `local-` keys)
   - Plex, OIDC, null provider: `plexId` = `<plexId>-deleted-<uuid v4>`; `oidcSubject` (when set) = `<oidcSubject>-deleted-<same uuid>`. Random part: no Plex id or IdP subject can equal it
   - `loginTokenHash` and `authToken` (the Plex account token or the local password hash) cleared
+  - `discordUserId` cleared, so another user can be linked to that Discord account
 - `OIDCAuthProvider.findUserByOIDCSubject` skips deleted rows (`deletedAt: null`)
 - Returning user (new row, role from the new-account rule: `user`, or `admin` from the OIDC admin claim; permissions reset to defaults):
 
@@ -348,6 +349,17 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 - Deleted account's access token, refresh token, API tokens and download links: refused by the existing `deletedAt` checks (`getSessionRefusal`, `requireAuth`, `/api/auth/refresh`)
 - Shelves and watched lists: a deleted user's Goodreads/Hardcover shelves and watched authors/series stay configured but are skipped by the scheduled and manual runs (#504, [goodreads-sync.md](goodreads-sync.md#deleted-users-504), [watched-lists.md](../../features/watched-lists.md))
+
+## Discord Identity Link
+
+**Status:** groundwork for the Discord bot (#231): no bot yet. The link is resolved to an account only through `resolveDiscordActor`; listed (admin only) by `GET /api/admin/users`
+- `User.discordUserId` (Discord user ID, unique), set only by an admin: `PUT /api/admin/users/[id]/discord` (admin session; not on the API-token allowlist). API: [admin-dashboard.md](../../admin-dashboard.md)
+- `resolveDiscordActor(discordUserId)` (`src/lib/services/discord/discord-actor.ts`): the only path from a Discord user to an account. A second identity path with the same refusal as `requireAuth` (`getSessionRefusal`: missing, deleted, pending, rejected) → `null`; anything that is not 15-20 digits with no leading zero → `null` without a query. Returns `{ userId, username, isAdmin }` (no role). Pass only `interaction.user.id`, never an ID from command options, a custom_id or message text
+- Guard test `tests/services/discord/discord-user-id-lookup-guard.test.ts` (tripwire): `discordUserId` in a `where: { ... }` or `const where = { ... }` object, or raw `discord_user_id`, anywhere under `src/` outside `discord-actor.ts` fails. Not caught: a typed `where` declaration, `where.discordUserId = ...`, or a where object under another name
+- Admin = DB role only (`role === 'admin'`; `isSetupAdmin` does not count, same as `requireAdmin`), read on every call, never cached
+- Removing a user's Plex server or OIDC group access does not cut off the Discord link (a web session re-checks it at the next sign-in, within 7 days when the refresh token expires; API tokens behave like the link). Cut off by unlinking or deleting the user; removing them from the Discord server does not (clicks on DM cards carry no server)
+- Revoking a user's sessions or login token (`sessionsInvalidatedAt`) does not cut off Discord: unlink or delete the user
+- Link an admin account only when its Discord account has 2FA on
 
 ## Admin-Generated Login Token
 

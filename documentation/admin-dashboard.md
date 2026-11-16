@@ -51,6 +51,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 **GET /api/admin/users**
 - User ID, Plex ID, username, email, role, avatar, created/updated dates, last login, request count, autoApproveRequests
 - `localLoginEnabled`: `isLocalLoginEnabled()` (shows the Add User button)
+- `discordUserId` per user (null = not linked; not shown on the page yet)
 
 **POST /api/admin/users** (#77)
 - Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403)
@@ -67,6 +68,14 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Soft delete for every provider (local, Plex, OIDC, older rows without a provider): sets `deletedAt`/`deletedBy`, frees the sign-in keys, clears `loginTokenHash` and `authToken` (Plex account token / local password hash); requests and history stay with the deleted row
 - Refused: own account (403, checked first, same rule for every provider), setup admin (403), missing (404), already deleted (400, also when a concurrent delete wins: `updateMany` on `deletedAt: null`)
 - Returning user: signing in again creates a new account. Rules + freed key format: [backend/services/auth.md](backend/services/auth.md#deleting-users)
+- Clears `discordUserId` (the Discord account can then be linked to another user)
+
+**PUT /api/admin/users/[id]/discord** (#231, groundwork: no bot and no Users page field yet)
+- Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403). An admin may link their own account: only `discordUserId` is written, never the role
+- Body `{ discordUserId }` (`AUTH_JSON_BODY_LIMIT_BYTES`; other keys ignored): a Discord user ID, trimmed, 15-20 digits, no leading zero (`^[1-9]\d{14,19}$`); `null` or `''` unlinks
+- One write, `updateMany` on `{ id, deletedAt: null }`: 200 `{ user: { id, discordUserId } }`; info log `Discord account linked`/`unlinked` with `userId`, `adminId`, `discordUserId` (null on unlink)
+- Errors: 400 `ValidationError` (`Discord user ID must be 15 to 20 digits, not starting with 0, or empty to unlink`; missing field, wrong type, bad JSON); 404 `User not found` (missing or deleted); 409 `Conflict` `This Discord account is already linked to another user` (unique index); 413 over the limit; 500 `Failed to update Discord link`
+- Rules for using the link: [backend/services/auth.md](backend/services/auth.md#discord-identity-link)
 
 **GET /api/admin/settings/auto-approve**
 - Get global auto-approve setting (boolean)

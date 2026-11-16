@@ -9,6 +9,7 @@
 - **Deleting users (any provider), returning user gets a new account** → [backend/services/auth.md](backend/services/auth.md#deleting-users), [admin-dashboard.md](admin-dashboard.md)
 - **Local accounts: self-registration and admin Add User (#77), shared creator, local login enabled** → [backend/services/auth.md](backend/services/auth.md#local-accounts-registration-and-admin-added), [admin-dashboard.md](admin-dashboard.md)
 - **Request file download link (token check, single file or zip, streaming backpressure #500)** → [backend/services/auth.md](backend/services/auth.md#request-file-download-link)
+- **How is a Discord account mapped to a user? (Discord identity link, actor resolver, admin link route; groundwork: no bot yet)** → [backend/services/auth.md](backend/services/auth.md#discord-identity-link), [admin-dashboard.md](admin-dashboard.md)
 - **API tokens, allowlist, GET /api/requests/:id (field list, BigInt sizes #261)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
