@@ -5,21 +5,22 @@
  * The one approve/deny path, shared by the admin route and the Discord Approve/Deny buttons.
  * Callers check who may decide (the route: requireAdmin; Discord: the linked account's
  * database role) and pass the admin's RMAB user ID. Every request returned has passed through
- * hidePlacementRecord, read again after the decision was written. Discord is told about a
- * decision through the running-check facade, in the background: nothing here waits on it.
+ * hidePlacementRecord, read right after the decision was written (so its status is the one the
+ * decision set). Once a decision is written, the approval notification is queued and Discord is
+ * told through the running-check facade, in the background: nothing here waits on Discord.
  */
 
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
-import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { syncDiscordApprovalDecision } from '@/lib/services/discord/discord-runtime';
 import { RMABLogger } from '@/lib/utils/logger';
 import { errorForLog } from '@/lib/utils/zod-validation';
 import { chooseApprovalPick } from './request-approval-selection';
 import {
-  APPROVAL_INCLUDE,
   claimFromApproval,
+  claimWasKept,
   findApprovalRequest,
+  readClaimed,
   startApprovedRequest,
   type ApprovalRequest,
   type ApprovedStatus,
@@ -48,9 +49,9 @@ export type ApprovalResult =
       /** Set when the stored pick was unusable and a search ran instead. */
       droppedPickReason: string | null;
       releaseDate: Date | null;
-      request: ApprovalRequest | null;
+      request: ApprovalRequest;
     }
-  | { ok: true; action: 'deny'; request: ApprovalRequest | null }
+  | { ok: true; action: 'deny'; request: ApprovalRequest }
   | { ok: false; code: 'not_found' }
   | { ok: false; code: 'invalid_status'; currentStatus: string }
   /** The release source could not be reached; nothing changed (try again). */
@@ -65,12 +66,6 @@ export function formatReleaseDay(releaseDate: Date | null): string {
     : 'unknown';
 }
 
-/** The row as it is now, for the response (hidden records dropped). */
-async function readBack(id: string): Promise<ApprovalRequest | null> {
-  const row = await prisma.request.findUnique({ where: { id }, include: APPROVAL_INCLUDE });
-  return row ? hidePlacementRecord(row) : null;
-}
-
 /** Another decision or change won the claim: answer with what the row is now. */
 async function claimLost(id: string): Promise<ApprovalResult> {
   const now = await prisma.request.findUnique({ where: { id }, select: { status: true, deletedAt: true } });
@@ -80,7 +75,7 @@ async function claimLost(id: string): Promise<ApprovalResult> {
 
 async function deny(existing: ApprovalRequest, input: ApprovalInput): Promise<ApprovalResult> {
   if (!(await claimFromApproval(existing.id, { status: 'denied' }))) return claimLost(existing.id);
-  const request = await readBack(existing.id);
+  const request = await readClaimed(existing, { status: 'denied' });
   logger.info(`Request ${existing.id} denied by admin ${input.adminId}`, {
     requestId: existing.id,
     userId: existing.userId,
@@ -108,24 +103,53 @@ async function approve(existing: ApprovalRequest, input: ApprovalInput): Promise
     });
   }
 
-  const started = await startApprovedRequest(existing, pick, input.adminId);
-  if (!started.claimed) return claimLost(existing.id);
-
-  const request = await readBack(existing.id);
-  const title = request?.audiobook.title ?? existing.audiobook.title;
-  const author = request?.audiobook.author ?? existing.audiobook.author;
-  // Send notification for manual approval
-  await getJobQueueService().addNotificationJob(
-    'request_approved',
-    existing.id,
-    isEbook ? `${title} (Ebook)` : title,
-    author,
-    existing.user.plexUsername || 'Unknown User'
-  ).catch((error) => {
-    logger.error('Failed to queue notification', { error: errorForLog(error) });
-  });
-
   const pickSource = pick.kind === 'download' ? pick.source : null;
+  let started: Awaited<ReturnType<typeof startApprovedRequest>>;
+  try {
+    started = await startApprovedRequest(existing, pick, input.adminId);
+  } catch (error) {
+    // The work could not be queued and the row could not be put back: it is approved all the same
+    if (claimWasKept(error)) await afterApproval(existing, existing, input, pickSource);
+    throw error;
+  }
+  if (!started.claimed) return claimLost(existing.id);
+  await afterApproval(existing, started.request, input, pickSource);
+
+  return {
+    ok: true,
+    action: 'approve',
+    status: started.status,
+    isEbook,
+    pickSource,
+    droppedPickReason: pick.kind === 'search' ? pick.droppedPickReason : null,
+    releaseDate: existing.releaseDate,
+    request: started.request,
+  };
+}
+
+/** After an approval is written: the approval notification, the log line, the Discord update. Never throws. */
+async function afterApproval(
+  existing: ApprovalRequest,
+  request: ApprovalRequest,
+  input: ApprovalInput,
+  pickSource: 'admin' | 'user' | null
+): Promise<void> {
+  const isEbook = existing.type === 'ebook';
+  const title = request.audiobook?.title ?? existing.audiobook.title;
+  const author = request.audiobook?.author ?? existing.audiobook.author;
+  try {
+    // Send notification for manual approval
+    await getJobQueueService().addNotificationJob(
+      'request_approved',
+      existing.id,
+      isEbook ? `${title} (Ebook)` : title,
+      author,
+      existing.user.plexUsername || 'Unknown User'
+    );
+  } catch (error) {
+    logger.error('Failed to queue notification', { error: errorForLog(error) });
+  }
+
   logger.info(pickSource
     ? `Request ${existing.id} approved by admin ${input.adminId}, downloading ${pickSource}-selected torrent`
     : `Request ${existing.id} approved by admin ${input.adminId}`, {
@@ -138,17 +162,6 @@ async function approve(existing: ApprovalRequest, input: ApprovalInput): Promise
     ...(pickSource ? { torrentSource: pickSource } : {}),
   });
   syncDiscordApprovalDecision(existing.id, 'approved');
-
-  return {
-    ok: true,
-    action: 'approve',
-    status: started.status,
-    isEbook,
-    pickSource,
-    droppedPickReason: pick.kind === 'search' ? pick.droppedPickReason : null,
-    releaseDate: existing.releaseDate,
-    request,
-  };
 }
 
 /**

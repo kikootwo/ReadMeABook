@@ -3,12 +3,15 @@
  * Documentation: documentation/admin-features/request-approval.md
  *
  * The claim (one conditional write) decides races between two approvals, or an approval
- * and a denial; a job queue failure puts the row back; a request deleted between the read
- * and the claim is not found; the returned request is read back after the write. Discord
- * hears about each decision through the facade, without being waited on.
+ * and a denial; a job queue failure puts the row back (unless the job was already queued);
+ * a request deleted between the read and the claim is not found; the returned request is read
+ * right after the claim. Once a decision is written, the notification is queued and Discord
+ * hears about it through the facade, without being waited on.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { prisma } from '@/lib/db';
+import { markJobQueued } from '@/lib/utils/job-queued-error';
 import { createFakeDb, resetFakeDb, seedRequest } from './approval-db-fake';
 
 const db = vi.hoisted(() => ({ rows: new Map(), histories: [], hooks: {} }) as ReturnType<typeof createFakeDb>);
@@ -116,9 +119,8 @@ describe('decideRequestApproval', () => {
     expect(db.rows.get(ID)!.status).toBe('awaiting_approval');
   });
 
-  it('the returned request is read back after the write (not the row read before it) with hidden records dropped', async () => {
-    seedRequest(db);
-    // The search job moves the row on before the read-back
+  it('the returned request is read right after the claim: the claimed status, even when the search job moves the row on', async () => {
+    seedRequest(db, { discordCards: [] });
     jobQueueMock.addSearchJob.mockImplementation(async () => {
       db.rows.get(ID)!.status = 'searching';
     });
@@ -126,10 +128,85 @@ describe('decideRequestApproval', () => {
     const result = await decide('approve');
     expect(result).toMatchObject({ ok: true, action: 'approve', status: 'pending' });
     const request = (result as { request: Record<string, unknown> }).request;
-    expect(request.status).toBe('searching');
+    expect(request.status).toBe('pending');
+    expect(db.rows.get(ID)!.status).toBe('searching');
     expect(request.placedEbookFiles).toBeUndefined();
     expect(request.approvalBypassedBy).toBeUndefined();
+    expect(request.discordCards).toBeUndefined();
     expect(request).toMatchObject({ audiobook: { title: 'The Book' }, user: { plexUsername: 'reader' } });
+  });
+
+  it('download: the response shows downloading, even when the download job moves the row on first', async () => {
+    seedRequest(db, { selectedTorrent: PICK });
+    jobQueueMock.addDownloadJob.mockImplementation(async () => {
+      db.rows.get(ID)!.status = 'processing';
+    });
+
+    const result = await decide('approve');
+    expect((result as { request: Record<string, unknown> }).request.status).toBe('downloading');
+  });
+
+  it('the read after the claim fails: success with the claimed row as written, and the notification and Discord update still go', async () => {
+    seedRequest(db);
+    vi.mocked(prisma.request.findUnique).mockRejectedValueOnce(new Error('connection reset'));
+
+    const result = await decide('approve');
+    expect(result).toMatchObject({ ok: true, action: 'approve', status: 'pending' });
+    const request = (result as { request: Record<string, unknown> }).request;
+    expect(request).toMatchObject({ id: ID, status: 'pending', approvalBypassedBy: undefined, placedEbookFiles: undefined });
+    expect(jobQueueMock.addSearchJob).toHaveBeenCalledTimes(1);
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith('request_approved', ID, 'The Book', 'An Author', 'reader');
+    expect(facadeMock.decision).toHaveBeenCalledWith(ID, 'approved');
+  });
+
+  it('deny: the read after the claim fails: success with status denied, Discord still told', async () => {
+    seedRequest(db);
+    vi.mocked(prisma.request.findUnique).mockRejectedValueOnce(new Error('connection reset'));
+
+    const result = await decide('deny');
+    expect(result).toMatchObject({ ok: true, action: 'deny', request: { id: ID, status: 'denied' } });
+    expect(facadeMock.decision).toHaveBeenCalledWith(ID, 'denied');
+  });
+
+  it('the job was queued but its record could not be completed: no rollback, the approval stands and is notified', async () => {
+    seedRequest(db, { selectedTorrent: PICK });
+    jobQueueMock.addDownloadJob.mockImplementation(async () => {
+      const error = new Error('jobs table write failed');
+      markJobQueued(error);
+      throw error;
+    });
+
+    const result = await decide('approve');
+    expect(result).toMatchObject({ ok: true, action: 'approve', status: 'downloading' });
+    expect(db.rows.get(ID)).toMatchObject({ status: 'downloading', selectedTorrent: null });
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
+    expect(facadeMock.decision).toHaveBeenCalledWith(ID, 'approved');
+  });
+
+  it('no rollback of a request deleted while the work was being queued', async () => {
+    seedRequest(db);
+    jobQueueMock.addSearchJob.mockImplementation(async () => {
+      db.rows.get(ID)!.deletedAt = new Date();
+      throw new Error('redis down');
+    });
+
+    await expect(decide('approve')).rejects.toThrow('redis down');
+    expect(db.rows.get(ID)!.status).toBe('pending');
+  });
+
+  it('the queue failed and the row could not be put back: the error is thrown, the approval is still notified', async () => {
+    seedRequest(db);
+    jobQueueMock.addSearchJob.mockRejectedValue(new Error('redis down'));
+    let writes = 0;
+    db.hooks.beforeClaim = () => {
+      writes += 1;
+      if (writes === 2) throw new Error('database gone');
+    };
+
+    await expect(decide('approve')).rejects.toThrow('redis down');
+    expect(db.rows.get(ID)!.status).toBe('pending');
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
+    expect(facadeMock.decision).toHaveBeenCalledWith(ID, 'approved');
   });
 
   it('the Discord update is started, never awaited: a hanging facade call does not hold the result', async () => {

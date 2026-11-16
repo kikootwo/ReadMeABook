@@ -5,16 +5,21 @@
  * Moves an approved request out of awaiting_approval and starts it. The move is one
  * conditional write (`updateMany` where status is still awaiting_approval and the row is not
  * deleted), so of two decisions made at once (web and Discord, or two admins) exactly one
- * starts the request. If queueing the work then fails, the row goes back to awaiting_approval
+ * starts the request. The row is read back right after the claim, so the response shows the
+ * status the claim set. If queueing the work then fails, the row goes back to awaiting_approval
  * with its stored pick and approval record, but only while it still has the status this claim
- * set (a job that already moved it on is left alone).
+ * set and is not deleted (a job that already moved it on is left alone). Once the job is in the
+ * queue it runs, so a failure after that point (recording the job's Bull ID) is logged and the
+ * request stays started.
  */
 
 import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { shouldWaitForRelease } from '@/lib/services/release-gate';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
+import { jobWasQueued } from '@/lib/utils/job-queued-error';
 import { RMABLogger } from '@/lib/utils/logger';
 import { errorForLog } from '@/lib/utils/zod-validation';
 import type { ApprovalPick } from './request-approval-selection';
@@ -38,7 +43,18 @@ export type ApprovalRequest = NonNullable<Awaited<ReturnType<typeof findApproval
 
 export type ApprovedStatus = 'downloading' | 'pending' | 'awaiting_release';
 
-export type StartResult = { claimed: false } | { claimed: true; status: ApprovedStatus };
+export type StartResult =
+  | { claimed: false }
+  /** `request`: the row as read right after the claim (hidden records dropped). */
+  | { claimed: true; status: ApprovedStatus; request: ApprovalRequest };
+
+/** Errors from a start whose claim still stands (the rollback did not put the row back). */
+const claimKept = new WeakSet<object>();
+
+/** True when `error` came from a start that left the request out of awaiting_approval. */
+export function claimWasKept(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && claimKept.has(error);
+}
 
 /** One conditional write: true when this caller moved the row out of awaiting_approval. */
 export async function claimFromApproval(id: string, data: Prisma.RequestUpdateManyMutationInput): Promise<boolean> {
@@ -46,15 +62,39 @@ export async function claimFromApproval(id: string, data: Prisma.RequestUpdateMa
   return count === 1;
 }
 
-/** Runs `enqueue`; on failure puts the claimed row back to awaiting_approval, then rethrows. */
+/**
+ * The row right after a claim, for the response. If it cannot be read, the row as it was with
+ * the claim's fields applied (the claim is already written; the response must not fail).
+ */
+export async function readClaimed(existing: ApprovalRequest, claimed: Partial<ApprovalRequest>): Promise<ApprovalRequest> {
+  try {
+    const row = await prisma.request.findUnique({ where: { id: existing.id }, include: APPROVAL_INCLUDE });
+    if (row) return hidePlacementRecord(row);
+  } catch (error) {
+    logger.warn(`Could not read request ${existing.id} after the decision`, { error: errorForLog(error) });
+  }
+  return hidePlacementRecord({ ...existing, ...claimed });
+}
+
+/**
+ * Runs `enqueue`; on failure puts the claimed row back to awaiting_approval, then rethrows.
+ * A failure after the job was queued is not rolled back: the job runs, so the request stays started.
+ */
 async function enqueueOrRollBack(existing: ApprovalRequest, claimed: ApprovedStatus, enqueue: () => Promise<void>): Promise<void> {
   try {
     await enqueue();
   } catch (error) {
+    if (jobWasQueued(error)) {
+      logger.warn(`The job for approved request ${existing.id} is queued but its record could not be completed`, {
+        requestId: existing.id,
+        error: errorForLog(error),
+      });
+      return;
+    }
     let restored = false;
     try {
       const result = await prisma.request.updateMany({
-        where: { id: existing.id, status: claimed },
+        where: { id: existing.id, status: claimed, deletedAt: null },
         data: {
           status: 'awaiting_approval',
           selectedTorrent: (existing.selectedTorrent ?? Prisma.DbNull) as Prisma.InputJsonValue | typeof Prisma.DbNull,
@@ -70,6 +110,7 @@ async function enqueueOrRollBack(existing: ApprovalRequest, claimed: ApprovedSta
       restoredToAwaitingApproval: restored,
       error: errorForLog(error),
     });
+    if (!restored && typeof error === 'object' && error !== null) claimKept.add(error);
     throw error;
   }
 }
@@ -82,6 +123,7 @@ async function startDownload(existing: ApprovalRequest, release: DownloadPick['r
     approvalBypassedBy: null, // approved now: clears an earlier record (#232)
   });
   if (!claimed) return { claimed: false };
+  const request = await readClaimed(existing, { status: 'downloading', selectedTorrent: null, approvalBypassedBy: null });
 
   const jobQueue = getJobQueueService();
   await enqueueOrRollBack(existing, 'downloading', async () => {
@@ -122,7 +164,7 @@ async function startDownload(existing: ApprovalRequest, release: DownloadPick['r
       release
     );
   });
-  return { claimed: true, status: 'downloading' };
+  return { claimed: true, status: 'downloading', request };
 }
 
 /**
@@ -151,8 +193,13 @@ async function startSearch(existing: ApprovalRequest, adminId: string): Promise<
     ...(existing.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
   });
   if (!claimed) return { claimed: false };
+  const request = await readClaimed(existing, {
+    status,
+    approvalBypassedBy: null,
+    ...(existing.selectedTorrent ? { selectedTorrent: null } : {}),
+  });
   // Searched later by the daily retry job
-  if (waitForRelease) return { claimed: true, status };
+  if (waitForRelease) return { claimed: true, status, request };
 
   const jobQueue = getJobQueueService();
   const book = {
@@ -165,7 +212,7 @@ async function startSearch(existing: ApprovalRequest, adminId: string): Promise<
     if (isEbook) await jobQueue.addSearchEbookJob(existing.id, book);
     else await jobQueue.addSearchJob(existing.id, book);
   });
-  return { claimed: true, status };
+  return { claimed: true, status, request };
 }
 
 /** Claims and starts an approved request with the chosen release (or a search). */

@@ -195,6 +195,27 @@ describe('JobQueueService', () => {
     });
   });
 
+  it('a failed Bull ID write after the job is queued rethrows the same error, marked as queued; an add that failed is not marked', async () => {
+    const { jobWasQueued } = await import('@/lib/utils/job-queued-error');
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    const service = new JobQueueService();
+    const book = { id: 'ab-1', title: 'Title', author: 'Author' };
+
+    prismaMock.job.create.mockResolvedValue({ id: 'job-q' });
+    queueMock.add.mockResolvedValue({ id: 'bull-q' });
+    const writeError = new Error('jobs write failed');
+    prismaMock.job.update.mockRejectedValue(writeError);
+    const thrown = await service.addSearchJob('req-1', book).catch((error: unknown) => error);
+    expect(thrown).toBe(writeError);
+    expect(jobWasQueued(thrown)).toBe(true);
+
+    const addError = new Error('redis down');
+    queueMock.add.mockRejectedValue(addError);
+    const notQueued = await service.addSearchJob('req-1', book).catch((error: unknown) => error);
+    expect(notQueued).toBe(addError);
+    expect(jobWasQueued(notQueued)).toBe(false);
+  });
+
   it('adds download jobs with expected priority', async () => {
     prismaMock.job.create.mockResolvedValue({ id: 'job-2' });
     queueMock.add.mockResolvedValue({ id: 'bull-2' });

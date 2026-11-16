@@ -200,8 +200,16 @@ export async function GET(request: NextRequest) {
         // Stored release picks are internal (they can carry source credentials); admins only
         const selectedTorrent = isAdmin ? r.selectedTorrent : undefined;
         // The ebook placement record (absolute library paths, #497) is for the request delete only;
-        // the approval record (#232) is server-side only
-        return { ...r, selectedTorrent, audiobook, downloadAvailable, placedEbookFiles: undefined, approvalBypassedBy: undefined };
+        // the approval record (#232) and the Discord message references are server-side only
+        return {
+          ...r,
+          selectedTorrent,
+          audiobook,
+          downloadAvailable,
+          placedEbookFiles: undefined,
+          approvalBypassedBy: undefined,
+          discordCards: undefined,
+        };
       });
       // An admin's page carries stored picks: they go out without the indexer key
       const enriched = isAdmin ? await stripProwlarrKeyFromResults(shown) : shown;

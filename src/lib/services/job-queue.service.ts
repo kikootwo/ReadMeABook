@@ -12,6 +12,7 @@ import { RMABLogger } from '../utils/logger';
 import { processSingleton } from '../utils/process-singleton';
 import { isProcessStopping } from '../utils/process-stopping';
 import { markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
+import { markJobQueued } from '../utils/job-queued-error';
 import { createQueueShutdownTarget, JOB_QUEUE_SINGLETON_KEY, JobActivityTracker, QueueShutdownTarget } from './job-activity-tracker';
 import { handleStallLimitFailure } from './job-stall-failure';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
@@ -626,11 +627,16 @@ export class JobQueueService {
     // Create Bull job
     const bullJob = await this.queue.add(type, payloadWithJobId, options);
 
-    // Update database job with Bull job ID
-    await prisma.job.update({
-      where: { id: dbJob.id },
-      data: { bullJobId: bullJob.id as string },
-    });
+    // Update database job with Bull job ID (the job is queued now: a failure here is marked so)
+    try {
+      await prisma.job.update({
+        where: { id: dbJob.id },
+        data: { bullJobId: bullJob.id as string },
+      });
+    } catch (error) {
+      markJobQueued(error);
+      throw error;
+    }
 
     return dbJob.id;
   }

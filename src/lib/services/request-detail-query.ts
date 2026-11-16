@@ -5,8 +5,8 @@
  * Every caller gets the job summary (JOB_SUMMARY_SELECT: no Job.payload/result/stackTrace) and
  * the selected download row without DownloadHistory.magnetLink/torrentUrl/downloadPath.
  * Non-admin callers (owners, API tokens) get an explicit field list that also leaves out
- * Audiobook.filePath and Request.selectedTorrent. Request.placedEbookFiles and
- * Request.approvalBypassedBy are left out for every caller.
+ * Audiobook.filePath and Request.selectedTorrent. Request.placedEbookFiles,
+ * Request.approvalBypassedBy and Request.discordCards are left out for every caller.
  * Both shapes go through withRequestLibraryDisplay: a followed audiobook request (#325a) shows
  * the linked library item's title, author, narrator and cover, and `audiobook.libraryAsin` is the
  * effective value (null when the overlay does not apply).
@@ -132,13 +132,14 @@ export function hideStoredPick<T>(record: T, role: string | undefined): T {
 
 /**
  * Drop the ebook placement record (Request.placedEbookFiles, #497: absolute
- * library paths and hashes) and the approval record (Request.approvalBypassedBy,
- * #232) from a request returned to any caller, admins included. Only the
- * request delete reads the first; only the server reads the second.
+ * library paths and hashes), the approval record (Request.approvalBypassedBy,
+ * #232) and the Discord message references (Request.discordCards) from a request
+ * returned to any caller, admins included. Only the request delete reads the
+ * first; only the server reads the other two.
  */
 export function hidePlacementRecord<T>(record: T): T {
   if (!record || typeof record !== 'object') return record;
-  return { ...record, placedEbookFiles: undefined, approvalBypassedBy: undefined };
+  return { ...record, placedEbookFiles: undefined, approvalBypassedBy: undefined, discordCards: undefined };
 }
 
 /**
