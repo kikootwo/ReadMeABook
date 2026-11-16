@@ -3,7 +3,7 @@
 **Status:** ✅ Implemented | One cancel path; stops and removes RMAB's own partial download (#228, credit #506)
 
 ## Overview
-Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLoadedRequest()` in `src/lib/services/request-cancel.service.ts`. Callers authorize (owner, or effective role admin). Cancel never touches library files. Delete is a different action: [request-deletion.md](request-deletion.md).
+Cancel (web UI, admin table, API token route, Discord Cancel button and `/status` menu) runs `cancelRequest()` / `cancelLoadedRequest()` in `src/lib/services/request-cancel.service.ts`. Callers authorize (owner, or effective role admin). Cancel never touches library files. Delete is a different action: [request-deletion.md](request-deletion.md).
 
 ## Cancel vs Delete
 | | Cancel | Delete (admin) |
@@ -12,13 +12,14 @@ Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLo
 | Partial torrent RMAB added | removed with its files | removed with its files (unless unlimited seeding) |
 | Finished torrent | kept until its indexer's seeding rule is met | same |
 | Library files | never | removed (guards in request-deletion.md) |
-| Routes | `PATCH /api/requests/:id {action:'cancel'}`, `POST /api/requests/:id/cancel` | `DELETE /api/admin/requests/:id` |
+| Routes | `PATCH /api/requests/:id {action:'cancel'}`, `POST /api/requests/:id/cancel`, Discord Cancel | `DELETE /api/admin/requests/:id`, Discord `/delete` |
 
 ## Order (`cancelLoadedRequest`)
 1. Status not in `CANCELLABLE_STATUSES`: `cancelled` = idempotent success (`alreadyCancelled`, `download:'none'`); else `not_cancellable` (400).
 2. `updateMany where {id, deletedAt:null, status:<status read>}` sets `status`, `cancelledAt`, `updatedAt` (+ `selectedTorrent: DbNull` for `awaiting_approval`). Count 0: re-read; `cancelled` = idempotent success, else 400 / 404. Committed before any client call; no transaction.
-3. Queue `request_cancelled` notification (failure logged only).
-4. Download step inline (`handleCancelledDownload`, `src/lib/services/cancelled-download.ts`) on the newest `selected` row only, under `CANCEL_STEP_BUDGET_MS` (10 s, `cancel-deadline.ts`). Deadline checked right before every `deleteDownload` and every row write; once passed: no delete, no write (the seeding cleanup's cancelled pass takes over). Lookups race the deadline (no abort signal; a late answer is ignored). An in-flight delete is awaited.
+3. `refreshDiscordRequestCards(id)` (only after a flip; bot running only, background, never awaited or thrown: [discord-bot.md](../integrations/discord-bot.md#request-cards)). The `send-notification` job skips its own refresh for `request_cancelled`, so cards are refreshed once.
+4. Queue `request_cancelled` notification (failure logged only).
+5. Download step inline (`handleCancelledDownload`, `src/lib/services/cancelled-download.ts`) on the newest `selected` row only, under `CANCEL_STEP_BUDGET_MS` (10 s, `cancel-deadline.ts`). Deadline checked right before every `deleteDownload` and every row write; once passed: no delete, no write (the seeding cleanup's cancelled pass takes over). Lookups race the deadline (no abort signal; a late answer is ignored). An in-flight delete is awaited.
 
 ## Download step rules (torrent)
 | Case | Result |

@@ -14,6 +14,8 @@ Allows admins to delete requests from the admin dashboard with smart handling of
 
 **Cancel vs Delete:** cancel stops the download and keeps the request (`cancelled`); see [request-cancel.md](request-cancel.md).
 
+**Discord:** `/delete` is for RMAB admins only (database role, checked at the command, every page, the menu and the confirm) and calls `deleteRequest(id, adminId)` like the web; replies never show `message`, `error` or `filesKeptReason` ([discord-bot.md](../integrations/discord-bot.md#delete-rmab-admins-only)).
+
 ## Key Features
 
 1. **Soft Delete** - Preserves request history, allows re-requesting
@@ -177,6 +179,7 @@ model Request {
 7. **Soft Delete Request**
    - UPDATE: `deletedAt = NOW(), deletedBy = adminUserId`
    - Preserves for audit trail and orphaned download tracking
+   - Then `refreshDiscordRequestCards` for the request and each undelivered child deleted with it (bot running only, background, never awaited; cards show "Removed", the approval message "This request was removed.")
 
 ### Cleanup Job Enhancement
 
@@ -458,7 +461,7 @@ Queries Updated (deletedAt: null filters):
 
 ## Security
 
-- **Authorization:** Admin role required
+- **Authorization:** Admin role required (web and Discord `/delete`)
 - **Audit Trail:** `deletedBy` tracks admin user ID
 - **Soft Delete:** Preserves history, prevents permanent data loss
 - **Confirmation Required:** Prevents accidental deletion

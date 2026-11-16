@@ -121,6 +121,7 @@
 ## Discord Bot
 - **Discord bot: settings keys, gateway lifecycle, zero footprint when off, settings/test routes, invite permissions, `/request` (requester role, custom ids, fixed replies)** → [integrations/discord-bot.md](integrations/discord-bot.md)
 - **Discord request cards, Approve / Deny buttons, decision DMs, `discord_cards`** → [integrations/discord-bot.md](integrations/discord-bot.md#request-cards), [admin-features/request-approval.md](admin-features/request-approval.md#post-apiadminrequestsidapprove)
+- **Discord `/status`, Cancel (requester or admin), admin-only `/delete`** → [integrations/discord-bot.md](integrations/discord-bot.md#status-and-cancel), [admin-features/request-cancel.md](admin-features/request-cancel.md), [admin-features/request-deletion.md](admin-features/request-deletion.md)
 - **Discord settings tab** → [settings-pages.md](settings-pages.md), [integrations/discord-bot.md](integrations/discord-bot.md)
 
 ## Notifications
