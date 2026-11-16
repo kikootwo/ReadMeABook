@@ -17,6 +17,7 @@ import { createLibraryRowUnlessPresent } from './library-row-insert';
 import { matchRequestsToLibrary } from '../services/library/match-requests';
 import { followLibraryAsins } from '../services/library/follow-library-asin';
 import { cacheLibraryCover } from '../services/library/library-cover';
+import { warnPlexItemsWithoutAudibleId } from '../services/library/plex-audible-id-check';
 
 /**
  * Process library scan job
@@ -173,6 +174,11 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     }
 
     logger.info(`Scan complete: ${libraryItems.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
+
+    // 4a. For Plex: say when items lack the Audible ID that request matching needs (#298)
+    if (backendMode === 'plex') {
+      warnPlexItemsWithoutAudibleId(libraryItems, logger);
+    }
 
     // 4b. For Audiobookshelf: Trigger metadata match for items without ASIN, and store the ASIN
     // from the match response now (#287), before requests are matched in step 6

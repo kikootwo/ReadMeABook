@@ -91,4 +91,37 @@ describe('BackendSelectionStep', () => {
     fireEvent.change(screen.getByLabelText('Audible Region'), { target: { value: 'it' } });
     expect(onAudibleRegionChange).toHaveBeenCalledWith('it');
   });
+
+  it('says a Plex library must use the Audnexus agent, for Plex only', async () => {
+    const { BackendSelectionStep } = await import('@/app/setup/steps/BackendSelectionStep');
+    const requirement =
+      /Your Plex audiobook library must use the Audnexus agent: ReadMeABook matches books by the Audible ID it adds\./;
+
+    const { rerender } = render(
+      <BackendSelectionStep
+        value="plex"
+        onChange={vi.fn()}
+        audibleRegion="us"
+        onAudibleRegionChange={vi.fn()}
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(requirement)).toBeInTheDocument();
+
+    rerender(
+      <BackendSelectionStep
+        value="audiobookshelf"
+        onChange={vi.fn()}
+        audibleRegion="us"
+        onAudibleRegionChange={vi.fn()}
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText(requirement)).not.toBeInTheDocument();
+    expect(screen.getByText(/configuration in Audiobookshelf/i)).toBeInTheDocument();
+  });
 });
