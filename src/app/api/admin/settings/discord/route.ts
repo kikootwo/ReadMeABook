@@ -40,8 +40,8 @@ const DiscordSettingsSchema = z.object({
   requestChannelId: discordId,
   adminRoleId: discordId,
   adminNotifyChannelId: discordId,
-  /** Empty: every linked user may /request. */
-  requesterRoleId: discordId,
+  /** Empty: every linked user may /request. Omitted: the saved value stays (older clients send six fields). */
+  requesterRoleId: discordId.optional(),
 });
 
 /** What the tab shows: the token masked, never its value. */
@@ -102,7 +102,10 @@ export async function PUT(request: NextRequest) {
         const category = 'discord';
         const updates = [
           { key: DISCORD_KEYS.enabled, value: String(input.enabled), category },
-          ...DISCORD_ID_FIELDS.map((field) => ({ key: DISCORD_KEYS[field], value: input[field], category })),
+          ...DISCORD_ID_FIELDS.flatMap((field) => {
+            const value = input[field];
+            return value === undefined ? [] : [{ key: DISCORD_KEYS[field], value, category }];
+          }),
           ...(keepToken ? [] : [{ key: DISCORD_KEYS.botToken, value: effectiveToken, encrypted: true, category }]),
         ];
         await getConfigService().setManyAtomic(updates);

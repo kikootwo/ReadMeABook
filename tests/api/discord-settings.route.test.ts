@@ -194,11 +194,14 @@ describe('/api/admin/settings/discord', () => {
     expect(written('discord.requester_role_id')).toMatchObject({ value: '' });
   });
 
-  it('a body without the requester role ID is refused (400)', async () => {
+  it('a body without the requester role ID (an older client) saves and keeps the stored role', async () => {
+    saved.values['discord.requester_role_id'] = '555555555555555555';
     const rest: Record<string, unknown> = body();
     delete rest.requesterRoleId;
-    expect((await put(rest)).status).toBe(400);
-    expect(setManyAtomic).not.toHaveBeenCalled();
+
+    expect((await put(rest)).status).toBe(200);
+    expect(written('discord.requester_role_id')).toBeUndefined();
+    expect(written('discord.guild_id')).toBeDefined();
   });
 
   it('refuses a body that is not JSON (400)', async () => {
