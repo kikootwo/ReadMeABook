@@ -22,8 +22,10 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   // Externalize packages that should only run on the server
-  // Bull uses child processes and is incompatible with client bundling
-  serverExternalPackages: ['bull'],
+  // Bull uses child processes and is incompatible with client bundling.
+  // discord.js is loaded with import() only when the Discord bot is configured;
+  // external keeps it out of the server bundles (the standalone trace still ships it).
+  serverExternalPackages: ['bull', 'discord.js'],
 
   // Turbopack configuration (silence migration warning)
   turbopack: {},
@@ -36,10 +38,11 @@ const nextConfig: NextConfig = {
   // Webpack configuration for when not using Turbopack
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // Don't bundle Bull on the client side - it's server-only
+      // Don't bundle Bull or discord.js on the client side - they're server-only
       config.resolve.alias = {
         ...config.resolve.alias,
         'bull': false,
+        'discord.js': false,
       };
     }
     return config;

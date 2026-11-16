@@ -13,6 +13,7 @@ import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { GlobalUserSettingsModal } from '@/components/admin/users/GlobalUserSettingsModal';
 import { UserPermissionsModal } from '@/components/admin/users/UserPermissionsModal';
+import { DiscordIdLine } from '@/components/admin/users/DiscordAccountField';
 import { UserActionsCell, deleteUserConfirmMessage } from '@/components/admin/users/UserActionsCell';
 import { AddUserButton, AddUserDialog } from '@/components/admin/users/AddUserDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -33,6 +34,7 @@ interface User {
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
   hasLoginToken: boolean;
+  discordUserId?: string | null;
   _count: {
     requests: number;
   };
@@ -142,6 +144,9 @@ function AdminUsersPageContent() {
     '/api/admin/settings/download-access',
     authenticatedFetcher
   );
+  // RMAB's own settings (no call to Discord): the Discord field shows only once the bot is configured
+  const { data: discordSettings } = useSWR('/api/admin/settings/discord', authenticatedFetcher);
+  const discordConfigured = discordSettings?.isConfigured === true;
   const [editDialog, setEditDialog] = useState<{
     isOpen: boolean;
     user: User | null;
@@ -595,6 +600,7 @@ function AdminUsersPageContent() {
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                     {user.plexEmail || 'No email'}
                   </div>
+                  {discordConfigured && <DiscordIdLine discordUserId={user.discordUserId} />}
                 </div>
               </div>
 
@@ -721,6 +727,7 @@ function AdminUsersPageContent() {
                             ID: {user.plexId.length > 12 ? `${user.plexId.substring(0, 12)}...` : user.plexId}
                           </span>
                         </div>
+                        {discordConfigured && <DiscordIdLine discordUserId={user.discordUserId} />}
                       </div>
                     </div>
                   </td>
@@ -971,6 +978,8 @@ function AdminUsersPageContent() {
           onToggleToken={(user, newValue) => {
             handleToggleToken(user, newValue);
           }}
+          discordConfigured={discordConfigured}
+          onDiscordSaved={() => mutate()}
         />
       </div>
     </div>

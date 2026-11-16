@@ -3,7 +3,8 @@
  * Documentation: documentation/testing/e2e-harness.md
  *
  * Listeners: prowlarr (+ relative-redirect hops), tracker (foreign origin for redirect hops),
- * qbit, sab, plex, metadata (answering proxy for Audible/Audnexus, see metadata.js), control. Every non-control request is recorded with its listener port and
+ * qbit, sab, plex, metadata (answering proxy for Audible/Audnexus, see metadata.js), control,
+ * sinkhole (raw TCP :443 for the Discord hosts, see sinkhole.js). Every non-control request is recorded with its listener port and
  * all headers so specs can assert where credentials travelled.
  */
 
@@ -18,6 +19,7 @@ import { handleSab } from './sab.js';
 import { handlePlex } from './plex.js';
 import { handleMetadata, refuseConnect } from './metadata.js';
 import { handleControl } from './control.js';
+import { createSinkhole } from './sinkhole.js';
 import { sendJson, sendText, notFound } from './http-util.js';
 
 function routerFor(service, state) {
@@ -67,7 +69,7 @@ export async function startFakeArr(config = loadConfig()) {
   state.loadScenarioByName(config.defaultScenario);
   const servers = {};
   for (const [service, port] of Object.entries(config.ports)) {
-    const server = http.createServer((req, res) => {
+    const server = service === 'sinkhole' ? createSinkhole(state) : http.createServer((req, res) => {
       routerFor(service, state)(req, res).catch((error) => {
         console.error(`[fake-arr] ${service} ${req.method} ${req.url} failed:`, error);
         if (!res.headersSent) sendJson(res, 500, { error: error.message });

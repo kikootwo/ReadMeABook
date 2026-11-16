@@ -82,6 +82,13 @@ services:
       stack:
         aliases:
           - tracker.e2e
+          # Discord sinkhole (#231): on `stack` these names resolve to fake-arr (Docker DNS answers aliases
+          # first), which records each :443 connection's TLS SNI and closes it (fake-arr/src/sinkhole.js).
+          # discord.js ignores HTTP(S)_PROXY, so a proxy log would never show the bot.
+          - discord.com
+          - gateway.discord.gg
+          - cdn.discordapp.com
+          - discordapp.com
       control: {}
     environment:
       PUID: ${PUID}

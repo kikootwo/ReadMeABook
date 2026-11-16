@@ -18,3 +18,6 @@ export const SHUTDOWN_DRAIN_MS = 3500;
 
 /** Limit for each later step: queue close, job-row writes, disconnects (ms) */
 export const SHUTDOWN_STEP_LIMIT_MS = 400;
+
+/** Process singleton holding the Discord bot's state; the coordinator peeks it to stop the bot */
+export const DISCORD_BOT_SINGLETON_KEY = 'discord-bot';

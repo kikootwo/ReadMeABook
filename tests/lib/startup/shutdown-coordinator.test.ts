@@ -134,6 +134,30 @@ describe('shutdown coordinator', () => {
     expect(t.logs.at(-1)).toMatch(/\(finished 0, left 1 for retry\)$/);
   });
 
+  it('stops the Discord bot alongside the drain; a hanging stop is cut at the step limit', async () => {
+    const t = setup();
+    const stop = vi.fn(never);
+    t.deps.getDiscordBot = () => ({ stop });
+
+    createShutdownHandler(t.deps)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_STEP_LIMIT_MS + 10);
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(t.logs).toContain('warn: Discord bot stop: timeout');
+    expect(t.exit.mock.calls).toEqual([[0]]);
+  });
+
+  it('a bot whose module never ran adds no step and no warning', async () => {
+    const t = setup();
+    t.deps.getDiscordBot = () => undefined;
+
+    createShutdownHandler(t.deps)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(t.logs.filter((l) => l.includes('Discord'))).toEqual([]);
+    expect(t.exit.mock.calls).toEqual([[0]]);
+  });
+
   it('closes open connections when requests outlast the drain window', async () => {
     const t = setup();
     t.server.close.mockImplementation(() => undefined); // close callback never fires
@@ -327,5 +351,24 @@ describe('registerShutdownHandlers', () => {
     const signals = on.mock.calls.map(([event]) => event);
     expect(signals.filter((s) => s === 'SIGTERM')).toHaveLength(1);
     expect(signals.filter((s) => s === 'SIGINT')).toHaveLength(1);
+  });
+
+  it('SIGTERM calls stop() on the Discord bot state when the bot module has run', async () => {
+    const botSlot = Symbol.for('rmab.singleton.discord-bot');
+    const stop = vi.fn(async () => undefined);
+    store[botSlot] = { stop };
+    const on = vi.spyOn(process, 'on').mockImplementation(() => process);
+    vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      registerShutdownHandlers({ NEXT_MANUAL_SIG_HANDLE: 'true' });
+      const sigterm = on.mock.calls.find(([event]) => event === 'SIGTERM')![1] as () => void;
+      sigterm();
+      await vi.waitFor(() => expect(process.exit).toHaveBeenCalledWith(0));
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally {
+      delete store[botSlot];
+    }
   });
 });

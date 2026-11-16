@@ -7,6 +7,7 @@
 
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
+import { DiscordAccountField } from './DiscordAccountField';
 
 interface UserPermissionsUser {
   id: string;
@@ -18,6 +19,7 @@ interface UserPermissionsUser {
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
   hasLoginToken: boolean;
+  discordUserId?: string | null;
 }
 
 interface UserPermissionsModalProps {
@@ -32,6 +34,9 @@ interface UserPermissionsModalProps {
   onToggleInteractiveSearch: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleDownloadAccess: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleToken: (user: UserPermissionsUser, newValue: boolean) => void;
+  /** The Discord bot is configured: show the Discord account field. */
+  discordConfigured?: boolean;
+  onDiscordSaved?: () => void;
 }
 
 interface PermissionToggleProps {
@@ -172,6 +177,8 @@ export function UserPermissionsModal({
   onToggleInteractiveSearch,
   onToggleDownloadAccess,
   onToggleToken,
+  discordConfigured = false,
+  onDiscordSaved,
 }: UserPermissionsModalProps) {
   if (!user) return null;
 
@@ -287,6 +294,8 @@ export function UserPermissionsModal({
                 generatedToken={generatedToken}
                 onToggle={() => onToggleToken(user, !(user.hasLoginToken || generatedToken !== null))}
             />
+
+            {discordConfigured && <DiscordAccountField key={`${user.id}:${user.discordUserId ?? ''}`} user={user} onSaved={() => onDiscordSaved?.()} />}
           </div>
         </div>
       </div>

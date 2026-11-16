@@ -352,7 +352,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 ## Discord Identity Link
 
-**Status:** groundwork for the Discord bot (#231): no bot yet. The link is resolved to an account only through `resolveDiscordActor`; listed (admin only) by `GET /api/admin/users`
+**Status:** used by the Discord bot (#231; core only, no commands yet: [discord-bot.md](../../integrations/discord-bot.md)). The link is resolved to an account only through `resolveDiscordActor`; listed (admin only) by `GET /api/admin/users`
 - `User.discordUserId` (Discord user ID, unique), set only by an admin: `PUT /api/admin/users/[id]/discord` (admin session; not on the API-token allowlist). API: [admin-dashboard.md](../../admin-dashboard.md)
 - `resolveDiscordActor(discordUserId)` (`src/lib/services/discord/discord-actor.ts`): the only path from a Discord user to an account. A second identity path with the same refusal as `requireAuth` (`getSessionRefusal`: missing, deleted, pending, rejected) → `null`; anything that is not 15-20 digits with no leading zero → `null` without a query. Returns `{ userId, username, isAdmin }` (no role). Pass only `interaction.user.id`, never an ID from command options, a custom_id or message text
 - Guard test `tests/services/discord/discord-user-id-lookup-guard.test.ts` (tripwire): `discordUserId` in a `where: { ... }` or `const where = { ... }` object, or raw `discord_user_id`, anywhere under `src/` outside `discord-actor.ts` fails. Not caught: a typed `where` declaration, `where.discordUserId = ...`, or a where object under another name

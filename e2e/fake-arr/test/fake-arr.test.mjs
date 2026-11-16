@@ -12,6 +12,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startFakeArr } from '../src/server.js';
 import { loadConfig } from '../src/state.js';
 import { generate } from '../../fixtures/generate.mjs';
+import net from 'node:net';
+import tls from 'node:tls';
+import { parseSni } from '../src/sinkhole.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const E2E = path.resolve(HERE, '../..');
@@ -85,7 +88,7 @@ before(async () => {
     MEDIA_DIR: posix(path.join(tmp, 'media')),
     PUBLIC_HOST: '127.0.0.1',
     TRACKER_HOST: 'localhost',
-    PROWLARR_PORT: '0', TRACKER_PORT: '0', QBIT_PORT: '0', SAB_PORT: '0', PLEX_PORT: '0', METADATA_PORT: '0', CONTROL_PORT: '0',
+    PROWLARR_PORT: '0', TRACKER_PORT: '0', QBIT_PORT: '0', SAB_PORT: '0', PLEX_PORT: '0', METADATA_PORT: '0', CONTROL_PORT: '0', SINKHOLE_PORT: '0',
     SCENARIO: 'smoke',
     CONTROL_TOKEN: TOKEN,
   });
@@ -617,4 +620,34 @@ test('categories (#46): a SABnzbd dir ending in "*" has no job folder; a categor
   assert.equal((await control('/categories', { client: 'sab', name: 'FLAT', remove: true })).removed, true);
   assert.equal((await control('/categories', { client: 'qbit', name: 'missing', remove: true })).removed, false);
   assert.equal((await control('/state')).sabCategories.flat, undefined);
+});
+
+test('sinkhole (#231): records the TLS SNI of each :443 connection and closes it (no TLS answer)', async () => {
+  const before = (await control('/requests?service=sinkhole')).length;
+  // A real TLS client (as discord.js would open) sends the ClientHello with SNI; the sinkhole closes it
+  const tlsError = await new Promise((resolve) => {
+    const socket = tls.connect({ host: '127.0.0.1', port: cfg.ports.sinkhole, servername: 'gateway.discord.gg', rejectUnauthorized: false });
+    socket.on('error', resolve);
+    socket.on('secureConnect', () => resolve(new Error('handshake should not complete')));
+  });
+  assert.ok(tlsError instanceof Error);
+  assert.notEqual(tlsError.message, 'handshake should not complete');
+  // A plain TCP connection that sends nothing is still counted (host '')
+  await new Promise((resolve) => {
+    const socket = net.connect(cfg.ports.sinkhole, '127.0.0.1', () => socket.end());
+    socket.on('close', resolve);
+    socket.on('error', resolve);
+  });
+  const records = await waitFor(async () => {
+    const all = await control('/requests?service=sinkhole');
+    return all.length >= before + 2 ? all.slice(before) : null;
+  });
+  assert.deepEqual(records.map((r) => r.host).sort(), ['', 'gateway.discord.gg']);
+  assert.ok(records.every((r) => r.service === 'sinkhole' && r.method === 'TLS' && r.listener === cfg.ports.sinkhole));
+});
+
+test('sinkhole: parseSni reads the server_name extension and survives garbage', () => {
+  assert.equal(parseSni(Buffer.from('GET / HTTP/1.1', 'ascii')), '');
+  assert.equal(parseSni(Buffer.alloc(0)), '');
+  assert.equal(parseSni(Buffer.from([0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x00])), '');
 });

@@ -73,8 +73,9 @@ src/app/admin/settings/
 6. **E-book Sidecar** - Multi-source ebook downloads (Anna's Archive + Indexer Search), preferred format
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
+9. **Discord** (#231, `tabs/DiscordTab/`, saves itself) - Discord bot: enable switch, bot token (masked, encrypted), server / request channel / admin role / admin channel IDs (inline error unless 15-20 digits), status pill (`GET /api/admin/settings/discord` `status`), Test (`POST test-discord`: bot name, servers, names for the IDs, invite link), Save (`PUT`). Load = one GET to RMAB, never a Discord call (enabled or not); a failed load shows an error + Retry and no form; after an enabling Save the status is re-read up to 5 × 1 s → [integrations/discord-bot.md](integrations/discord-bot.md)
 
-**Active tab:** in the address, `/admin/settings?tab=<id>`: `library` (default, no param), `auth` (Audiobookshelf mode only), `prowlarr`, `download`, `paths`, `ebook`, `bookdate`, `notifications`, `api`. A click pushes a history entry (`window.history.pushState`, synced by Next.js, no server round trip), so reload, back/forward and links keep the tab; an unknown tab or one `getTabs(backendMode)` doesn't offer shows `library` and the URL is left alone (`hooks/useSettingsTabUrlState.ts`).
+**Active tab:** in the address, `/admin/settings?tab=<id>`: `library` (default, no param), `auth` (Audiobookshelf mode only), `prowlarr`, `download`, `paths`, `ebook`, `bookdate`, `notifications`, `discord`, `api`. A click pushes a history entry (`window.history.pushState`, synced by Next.js, no server round trip), so reload, back/forward and links keep the tab; an unknown tab or one `getTabs(backendMode)` doesn't offer shows `library` and the URL is left alone (`hooks/useSettingsTabUrlState.ts`).
 
 ## E-book Sidecar
 

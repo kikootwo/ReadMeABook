@@ -23,6 +23,7 @@ import { EbookTab } from './tabs/EbookTab/EbookTab';
 import { BookDateTab } from './tabs/BookDateTab/BookDateTab';
 import { NotificationsTab } from './tabs/NotificationsTab';
 import { ApiTab } from './tabs/ApiTab/ApiTab';
+import { DiscordTab } from './tabs/DiscordTab/DiscordTab';
 
 // Types and Helpers
 import type { Settings, Message } from './lib/types';
@@ -337,11 +338,19 @@ function AdminSettingsContent() {
           {/* Notifications Tab */}
           {activeTab === 'notifications' && <NotificationsTab />}
 
+          {/* Discord Tab (saves itself) */}
+          {activeTab === 'discord' && (
+            <DiscordTab
+              onSuccess={(msg) => setMessage({ type: 'success', text: msg, autoClear: true })}
+              onError={(msg) => setMessage({ type: 'error', text: msg })}
+            />
+          )}
+
           {/* API Tab */}
           {activeTab === 'api' && <ApiTab />}
 
           {/* Save Button (only for tabs that save through main page) */}
-          {activeTab !== 'ebook' && activeTab !== 'bookdate' && activeTab !== 'notifications' && activeTab !== 'api' && (
+          {activeTab !== 'ebook' && activeTab !== 'bookdate' && activeTab !== 'notifications' && activeTab !== 'discord' && activeTab !== 'api' && (
             <div className="mt-8 flex gap-4">
               <Button
                 onClick={saveSettings}
