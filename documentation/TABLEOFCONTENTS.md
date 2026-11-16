@@ -120,6 +120,7 @@
 
 ## Discord Bot
 - **Discord bot: settings keys, gateway lifecycle, zero footprint when off, settings/test routes, invite permissions, `/request` (requester role, custom ids, fixed replies)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Discord request cards, Approve / Deny buttons, decision DMs, `discord_cards`** → [integrations/discord-bot.md](integrations/discord-bot.md#request-cards), [admin-features/request-approval.md](admin-features/request-approval.md#post-apiadminrequestsidapprove)
 - **Discord settings tab** → [settings-pages.md](settings-pages.md), [integrations/discord-bot.md](integrations/discord-bot.md)
 
 ## Notifications
@@ -157,7 +158,7 @@
 - **Shared torrent rule (who keeps a torrent several requests use, and until when)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#shared-torrent-holds)
 - **Request cancel (stops the download, cancelled-download cleanup pass, token cancel route)** → [admin-features/request-cancel.md](admin-features/request-cancel.md)
 - **Bulk request actions (select requests in the admin table; approve, deny, cancel, delete one at a time; in-library skip)** → [admin-features/bulk-request-actions.md](admin-features/bulk-request-actions.md)
-- **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
+- **Request approval system, auto-approve settings, shared approval service (atomic claim, rollback)** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 
 ## Fixes & Improvements
