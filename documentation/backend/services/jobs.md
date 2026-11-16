@@ -23,6 +23,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Remove on complete: keep last 100
 - Remove on fail: keep last 200
 - MaxListeners: 20 on both Redis client and Bull queue (accommodates 12 job processors)
+- `addJob()`: `jobs` row → `queue.add` → write of the Bull ID to the row. A failure of that last write is rethrown unchanged but marked: `jobWasQueued(error)` (`src/lib/utils/job-queued-error.ts`) is true, the job runs. Only the approval start reads it (no rollback once queued, [request-approval.md](../../admin-features/request-approval.md)); every other caller sees the same error as before
 
 ## Job Types
 

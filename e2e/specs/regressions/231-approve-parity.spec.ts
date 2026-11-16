@@ -104,11 +104,12 @@ test('231 parity: web approve and deny answer as before; the bot off writes no D
     writeEvidence(`${DIR}/answers.json`, { image: process.env.E2E_RMAB_IMAGE, answers, race: raceAnswers, discordCards: { column, set: cardsSet } });
 
     expect.soft(answers.created, 'both requests wait for approval').toEqual(['awaiting_approval', 'awaiting_approval']);
-    expect.soft(answers.approveUi).toEqual({ status: 200, error: null, message: 'Request approved and search job triggered', requestStatus: 'pending' });
+    // The response shows the status the approval set (read right after the claim), as main does
+    expect(answers.approveUi).toEqual({ status: 200, error: null, message: 'Request approved and search job triggered', requestStatus: 'pending' });
     expect.soft(answers.denyUi).toEqual({ status: 200, error: null, message: 'Request denied', requestStatus: 'denied' });
     expect.soft(answers.approvedDownloads).toBe('downloading');
     expect.soft(answers.deniedRow).toBe('denied');
-    expect.soft(answers.storedPick).toEqual({ status: 200, error: null, message: 'Request approved and download started with pre-selected torrent', requestStatus: 'downloading' });
+    expect(answers.storedPick).toEqual({ status: 200, error: null, message: 'Request approved and download started with pre-selected torrent', requestStatus: 'downloading' });
     expect.soft(answers.denyAgain).toEqual({ status: 400, error: 'InvalidStatus', message: 'Request is not awaiting approval (current status: denied)', requestStatus: null });
     expect.soft(answers.approveAgain).toMatchObject({ status: 400, error: 'InvalidStatus', message: 'Request is not awaiting approval (current status: <moving>)' });
     expect.soft(answers.unknown).toEqual({ status: 404, error: 'NotFound', message: 'Request not found', requestStatus: null });
