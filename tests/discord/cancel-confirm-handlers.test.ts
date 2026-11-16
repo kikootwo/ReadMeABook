@@ -181,17 +181,23 @@ describe('Cancel asks once', () => {
   });
 
   it('a second confirm press while the first runs cancels nothing more', async () => {
-    let finish!: (value: unknown) => void;
-    cancelMock.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    cancelMock.mockImplementation(async () => {
+      await gate;
+      return cancelled();
+    });
 
     const first = confirmClick();
     await vi.waitFor(() => expect(cancelMock).toHaveBeenCalledTimes(1));
-    const second = await confirmClick();
-    finish(cancelled());
-    const done = await first;
+    const second = confirmClick();
+    const secondState = await Promise.race([second.then(() => 'returned'), new Promise((resolve) => setTimeout(() => resolve('still running'), 500))]);
+    release();
+    const [done, again] = await Promise.all([first, second]);
 
     expect(cancelMock).toHaveBeenCalledTimes(1);
-    expect(second.editReply).not.toHaveBeenCalled();
+    expect(secondState).toBe('returned');
+    expect(again.editReply).not.toHaveBeenCalled();
     expect(lastText(done)).toBe('Request cancelled.');
   });
 

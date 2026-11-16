@@ -177,17 +177,23 @@ describe('/delete runs once and reports what happened', () => {
   });
 
   it('a second Delete press while the first runs deletes nothing more', async () => {
-    let finish!: (value: unknown) => void;
-    deleteMock.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    deleteMock.mockImplementation(async () => {
+      await gate;
+      return deleted();
+    });
 
     const first = deleteStep('confirm');
     await vi.waitFor(() => expect(deleteMock).toHaveBeenCalledTimes(1));
-    const second = await deleteStep('confirm');
-    finish(deleted());
-    const done = await first;
+    const second = deleteStep('confirm');
+    const secondState = await Promise.race([second.then(() => 'returned'), new Promise((resolve) => setTimeout(() => resolve('still running'), 500))]);
+    release();
+    const [done, again] = await Promise.all([first, second]);
 
     expect(deleteMock).toHaveBeenCalledTimes(1);
-    expect(second.editReply).not.toHaveBeenCalled();
+    expect(secondState).toBe('returned');
+    expect(again.editReply).not.toHaveBeenCalled();
     expect(lastText(done)).toBe('Request deleted.');
   });
 
