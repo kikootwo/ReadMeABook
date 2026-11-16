@@ -13,8 +13,8 @@ const lookups = vi.hoisted(() => new Map<string, Lookup>());
 const useAudiobookDetailsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
-  useAudiobookDetails: (asin: string | null) => {
-    useAudiobookDetailsMock(asin);
+  useAudiobookDetails: (asin: string | null, options?: { retryOnError?: boolean }) => {
+    useAudiobookDetailsMock(asin, options);
     return (asin && lookups.get(asin)) || { audiobook: null, isLoading: false, error: null };
   },
 }));
@@ -38,7 +38,7 @@ describe('useLibraryEdition', () => {
     const { result } = renderHook(() => useLibraryEdition(REQUESTED, LIBRARY, true));
 
     expect(lookedUp()).toEqual([LIBRARY]);
-    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook, isLoading: false, failed: false });
+    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook, isLoading: false });
   });
 
   it.each([
@@ -50,31 +50,43 @@ describe('useLibraryEdition', () => {
     const { result } = renderHook(() => useLibraryEdition(REQUESTED, libraryAsin, true));
 
     expect(lookedUp()).toEqual([]);
-    expect(result.current).toEqual({ libraryAsin: null, libraryBook: null, isLoading: false, failed: false });
+    expect(result.current).toEqual({ libraryAsin: null, libraryBook: null, isLoading: false });
   });
 
   it('a closed modal looks nothing up', () => {
     const { result } = renderHook(() => useLibraryEdition(REQUESTED, LIBRARY, false));
 
     expect(lookedUp()).toEqual([]);
-    expect(result.current.libraryBook).toBeNull();
-    expect(result.current.failed).toBe(false);
+    expect(result.current).toEqual({ libraryAsin: null, libraryBook: null, isLoading: false });
   });
 
-  it('while the lookup runs: loading, not failed', () => {
+  it('looks the library ASIN up with retry after an error turned off', () => {
+    renderHook(() => useLibraryEdition(REQUESTED, LIBRARY, true));
+
+    expect(useAudiobookDetailsMock).toHaveBeenCalledWith(LIBRARY, { retryOnError: false });
+  });
+
+  it('while the lookup runs: loading', () => {
     lookups.set(LIBRARY, { audiobook: null, isLoading: true, error: null });
     const { result } = renderHook(() => useLibraryEdition(REQUESTED, LIBRARY, true));
 
-    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook: null, isLoading: true, failed: false });
+    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook: null, isLoading: true });
   });
 
   it.each([
     ['an error', new Error('Not found')],
     ['no record', null],
-  ])('a lookup that ends with %s: failed, with the library ASIN kept for the notice', (_label, error) => {
+  ])('a lookup that ends with %s: no record, with the library ASIN kept for the notice', (_label, error) => {
     lookups.set(LIBRARY, { audiobook: null, isLoading: false, error });
     const { result } = renderHook(() => useLibraryEdition(REQUESTED, LIBRARY, true));
 
-    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook: null, isLoading: false, failed: true });
+    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook: null, isLoading: false });
+  });
+
+  it('a lookup with an error that is loading again: not loading, no record', () => {
+    lookups.set(LIBRARY, { audiobook: null, isLoading: true, error: new Error('Not found') });
+    const { result } = renderHook(() => useLibraryEdition(REQUESTED, LIBRARY, true));
+
+    expect(result.current).toEqual({ libraryAsin: LIBRARY, libraryBook: null, isLoading: false });
   });
 });

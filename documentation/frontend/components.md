@@ -213,7 +213,7 @@ interface UnifiedPaginationProps {
 
 - **useAuth** - `{user, login, logout, isLoading}`
 - **useAudiobooks** - `{audiobooks, isLoading, error, totalPages, hasMore}`
-- **useAudiobookDetails** ✅ - `{audiobook, isLoading, error}` - Fetches individual audiobook by ASIN
+- **useAudiobookDetails** ✅ - `(asin, { retryOnError? })` → `{audiobook, isLoading, error}` - Fetches individual audiobook by ASIN; `retryOnError: false` turns off SWR's retry after an error (default on)
 - **useRequest** - `{createRequest, cancelRequest, isLoading}`
 - **useThemeChoice** ✅ - `ThemeChoice` applied to `<html>` (`'system' | 'light' | 'dark'`), live; see [Theme Switch](#theme-switch)
 - **useLibraryQuery** ✅ - `/library` URL state: `{query, input, setInput, toggleStatus/Source/RequestedBy, setRequestedBy, setSort, setGroup, clearFacet, clearSearch, clearAll}`; `parseLibraryQuery`, `libraryQueryString`

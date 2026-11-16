@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Lookup = { audiobook: Record<string, unknown> | null; isLoading: boolean; error: unknown };
 const lookups = vi.hoisted(() => new Map<string, Lookup>());
-const calls = vi.hoisted(() => ({ details: [] as (string | null)[], ebook: [] as (string | null)[], download: [] as (string | null)[], ignored: [] as (string | null)[] }));
+const calls = vi.hoisted(() => ({ details: [] as (string | null)[], detailArgs: [] as unknown[][], ebook: [] as (string | null)[], download: [] as (string | null)[], ignored: [] as (string | null)[] }));
 const user = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 const fetchEbookMock = vi.hoisted(() => vi.fn());
 const createRequestMock = vi.hoisted(() => vi.fn());
@@ -28,8 +28,10 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: user.value })
 vi.mock('@/contexts/PreferencesContext', () => ({ usePreferences: () => ({ squareCovers: false }) }));
 vi.mock('@/lib/hooks/useExplicitMark', () => ({ useExplicitMarkEnabled: () => false, useSetExplicit: () => ({ setExplicit: vi.fn() }) }));
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
-  useAudiobookDetails: (asin: string | null) => {
+  useAudiobookDetails: (...args: [string | null, unknown?]) => {
+    const [asin] = args;
     calls.details.push(asin);
+    calls.detailArgs.push(args);
     return { audibleBaseUrl: 'https://www.audible.com', ...((asin && lookups.get(asin)) || { audiobook: null, isLoading: false, error: null }) };
   },
 }));
@@ -165,6 +167,25 @@ describe('AudiobookDetailsModal: a library edition that differs from the request
     expect(screen.getByRole('button', { name: X })).toBeInTheDocument();
     expect(screen.getByTestId('requested-edition')).toHaveTextContent(`Your library holds a different edition (ASIN ${Y})`);
     expect(within(screen.getByTestId('requested-edition')).queryByText(/Requested edition/)).toBeNull();
+  });
+
+  it('a library lookup in error while it loads again: the requested edition plus the library ASIN, no spinner', async () => {
+    lookups.set(Y, { audiobook: null, isLoading: true, error: new Error('Not found') });
+    await open({ libraryAsin: Y, isAvailable: true, requestStatus: 'available' });
+
+    expect(screen.getByRole('heading', { name: 'Requested Title' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Report Issue' })).toBeInTheDocument();
+    expect(screen.getByTestId('requested-edition')).toHaveTextContent(`Your library holds a different edition (ASIN ${Y})`);
+  });
+
+  it('looks the library edition up with retry after an error off, and the requested one as before', async () => {
+    await open({ libraryAsin: Y, isAvailable: true, requestStatus: 'available' });
+
+    const optionsFor = (asin: string) => calls.detailArgs.filter(([a]) => a === asin).map((args) => args.slice(1));
+    expect(optionsFor(Y)).not.toHaveLength(0);
+    for (const options of optionsFor(Y)) expect(options).toEqual([{ retryOnError: false }]);
+    expect(optionsFor(X)).not.toHaveLength(0);
+    for (const options of optionsFor(X)) expect(options).toEqual([]);
   });
 
   it('waits for the library edition before showing the details (no swap)', async () => {
