@@ -237,3 +237,66 @@ describe('refreshRequestCards', () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe('Cancel buttons and the final state after a cancel or delete', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFakeDb(db);
+    configMock.mockResolvedValue(config());
+  });
+
+  const CARDS = [
+    { kind: 'dm', channelId: DM_CHANNEL, messageId: '900000000000000001' },
+    { kind: 'approval', channelId: ADMIN_CHANNEL, messageId: '900000000000000002' },
+  ];
+  const buttonsOf = (body: Record<string, any>) => (body.components as any[]).flatMap((row) => row.components);
+
+  it('the card carries Cancel while the request can be cancelled; the approval message carries Approve, Deny and Cancel', async () => {
+    const { decodeManageCustomId } = await import('@/lib/services/discord/discord-custom-id');
+    seedRequest(db);
+    const calls: Call[] = [];
+    const { announceRequest } = await import('@/lib/services/discord/cards/discord-cards');
+    await announceRequest(fakeBot(calls), ID);
+
+    const [card, approval] = messageSends(calls);
+    expect(buttonsOf(card.body).map((b) => b.label)).toEqual(['Cancel request']);
+    expect(decodeManageCustomId(buttonsOf(card.body)[0].custom_id)).toMatchObject({ area: 'status', action: 'cancel', requestId: ID });
+    expect(buttonsOf(approval.body).map((b) => b.label)).toEqual(['Approve', 'Deny', 'Cancel request']);
+  });
+
+  it.each(['available', 'processing', 'denied', 'failed'])('a %s request card has no Cancel button', async (status) => {
+    const { requestCardBody } = await import('@/lib/services/discord/cards/discord-card-embeds');
+    const { readCardRequest } = await import('@/lib/services/discord/cards/discord-cards');
+    seedRequest(db, { status });
+    expect(requestCardBody((await readCardRequest(ID))!).components).toEqual([]);
+  });
+
+  it('cancelled: the approval message shows it with no buttons, the card loses Cancel, one edit each and no DM', async () => {
+    seedRequest(db, { status: 'cancelled', discordCards: CARDS });
+    const calls: Call[] = [];
+    const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');
+    await refreshRequestCards(fakeBot(calls), ID);
+
+    expect(calls.map((c) => c.method)).toEqual(['patch', 'patch']);
+    const [card, approval] = calls;
+    expect(card.body.components).toEqual([]);
+    expect(card.body.embeds[0].fields).toContainEqual({ name: 'Status', value: 'Cancelled', inline: true });
+    expect(approval.body.content).toBe('Cancelled.');
+    expect(approval.body.components).toEqual([]);
+    expect(storedCards()).toEqual([CARDS[0]]);
+  });
+
+  it('deleted: the approval message says it was removed, the card shows Removed with no Cancel, no DM', async () => {
+    seedRequest(db, { status: 'awaiting_approval', deletedAt: new Date(), discordCards: CARDS });
+    const calls: Call[] = [];
+    const { refreshRequestCards } = await import('@/lib/services/discord/cards/discord-cards');
+    await refreshRequestCards(fakeBot(calls), ID);
+
+    expect(calls.map((c) => c.method)).toEqual(['patch', 'patch']);
+    const [card, approval] = calls;
+    expect(card.body.components).toEqual([]);
+    expect(card.body.embeds[0].fields).toContainEqual({ name: 'Status', value: 'Removed', inline: true });
+    expect(approval.body.content).toBe('This request was removed.');
+    expect(approval.body.components).toEqual([]);
+  });
+});

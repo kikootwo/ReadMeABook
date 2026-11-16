@@ -24,6 +24,8 @@ const ENTRIES = [
   'src/lib/services/request-cancel.service.ts',
   'src/app/api/admin/requests/[id]/route.ts',
   'src/lib/services/request-delete.service.ts',
+  // The reported-issue replace deletes the old request through the delete service
+  'src/lib/services/reported-issue.service.ts',
   'src/lib/startup/app-init.ts',
   'src/lib/startup/shutdown-coordinator.ts',
   // Shared with /request: the web request paths never reach the bot's handlers
@@ -124,6 +126,9 @@ describe('Discord zero footprint: core web paths', () => {
         'src/lib/services/discord/discord-custom-id.ts',
         'src/lib/services/discord/discord-book-embed.ts',
         'src/lib/services/discord/approval/discord-approval-handler.ts',
+        'src/lib/services/discord/manage/discord-status-handler.ts',
+        'src/lib/services/discord/manage/discord-delete-handler.ts',
+        'src/lib/services/discord/manage/discord-request-list.ts',
       ])
     );
   });
