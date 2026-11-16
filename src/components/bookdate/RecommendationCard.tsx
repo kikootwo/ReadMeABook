@@ -26,6 +26,8 @@ export function RecommendationCard({
   isAnimating = false,
   isDraggable = true,
 }: RecommendationCardProps) {
+  // A Prisma Decimal rating arrives as a string ("4.50", "0.00"); NaN and 0 both hide the badge
+  const rating = Number(recommendation.rating ?? 0);
   const [showToast, setShowToast] = useState(false);
   const [coverError, setCoverError] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -264,11 +266,11 @@ export function RecommendationCard({
               Narrated by {recommendation.narrator}
             </p>
           )}
-          {recommendation.rating && (
+          {rating > 0 && (
             <div className="flex items-center mb-2">
               <span className="text-yellow-500 text-lg md:text-xl">⭐</span>
               <span className="ml-2 text-base md:text-lg font-semibold text-gray-700 dark:text-gray-300">
-                {Number(recommendation.rating).toFixed(1)}
+                {rating.toFixed(1)}
               </span>
             </div>
           )}

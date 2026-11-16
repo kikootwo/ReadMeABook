@@ -8,6 +8,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { textNodesEqualTo } from '../../helpers/stray-text';
 
 const useAuthMock = vi.hoisted(() => vi.fn());
 const useAudiobookDetailsMock = vi.hoisted(() => vi.fn());
@@ -365,8 +366,38 @@ describe('AudiobookDetailsModal', () => {
     );
 
     await act(async () => {});
-    // Rating badge is not shown when rating is 0
+    // Rating badge is not shown when rating is 0, and no bare "0" leaks out of the guard
     expect(screen.queryByText('0.0')).toBeNull();
+    expect(textNodesEqualTo(document.body, '0')).toHaveLength(0);
+  });
+
+  it('shows the rating badge for a positive rating', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, rating: 4.5 },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+
+    await act(async () => {});
+    expect(screen.getByText('4.5')).toBeInTheDocument();
+  });
+
+  it('renders no duration and no stray "0" when durationMinutes is 0', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, durationMinutes: 0 },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+
+    await act(async () => {});
+    expect(screen.queryByText(/\d+h \d+m/)).toBeNull();
+    expect(textNodesEqualTo(document.body, '0')).toHaveLength(0);
   });
 
   it('opens interactive search when requested', async () => {
