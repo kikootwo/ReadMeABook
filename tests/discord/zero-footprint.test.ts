@@ -3,7 +3,7 @@
  * Documentation: documentation/integrations/discord-bot.md
  *
  * With the bot off, the web paths that later PRs hook into (approve, deny, cancel,
- * admin delete, app init) must never load discord.js or a bot module. Static part:
+ * admin delete, app init) and the request creators /request shares must never load discord.js or a bot module. Static part:
  * walk each entry's import graph and allow only the running-check facade. Runtime
  * part: the facade does nothing (no import) while the bot is not running and never
  * makes its caller wait.
@@ -25,6 +25,11 @@ const ENTRIES = [
   'src/lib/services/request-delete.service.ts',
   'src/lib/startup/app-init.ts',
   'src/lib/startup/shutdown-coordinator.ts',
+  // Shared with /request: the web request paths never reach the bot's handlers
+  'src/app/api/requests/route.ts',
+  'src/lib/services/request-creator.service.ts',
+  'src/app/api/audiobooks/[asin]/fetch-ebook/route.ts',
+  'src/lib/services/ebook-request-creator.service.ts',
 ];
 
 /** Modules a core path may import: the facade (it loads the bot lazily, when running), the actor resolver and the ID check. */
@@ -101,6 +106,33 @@ describe('Discord zero footprint: core web paths', () => {
   it('the walker sees the bot module when it is imported (control)', () => {
     const { discordModules } = importGraph('src/app/api/admin/settings/discord/route.ts');
     expect([...discordModules.keys()]).toContain('src/lib/services/discord/discord-bot.service.ts');
+  });
+
+  it('the walker reaches the /request handlers through the bot (control)', () => {
+    const { discordModules } = importGraph('src/lib/services/discord/discord-bot.service.ts');
+    expect([...discordModules.keys()]).toEqual(
+      expect.arrayContaining([
+        'src/lib/services/discord/request/discord-request-handlers.ts',
+        'src/lib/services/discord/request/discord-request-access.ts',
+        'src/lib/services/discord/discord-custom-id.ts',
+        'src/lib/services/discord/discord-book-embed.ts',
+      ])
+    );
+  });
+
+  const VALUE_IMPORT_RE = /^import\s+(?!type\b)[^;]*from\s+['"]discord\.js['"]/m;
+
+  it('no Discord module imports a discord.js value at load (only types and lazy imports)', () => {
+    const discordDir = path.join(SRC, 'lib/services/discord');
+    const files = fs.readdirSync(discordDir, { recursive: true }).map(String).filter((f) => f.endsWith('.ts'));
+    const valueImports = files.filter((file) =>
+      VALUE_IMPORT_RE.test(fs.readFileSync(path.join(discordDir, file), 'utf8'))
+    );
+    expect(files.length).toBeGreaterThan(10);
+    expect(valueImports).toEqual([]);
+    // The pattern itself: a value import matches, a type-only import does not
+    expect(VALUE_IMPORT_RE.test("import { Client } from 'discord.js';")).toBe(true);
+    expect(VALUE_IMPORT_RE.test("import type { Client } from 'discord.js';")).toBe(false);
   });
 });
 

@@ -3,15 +3,22 @@
  * Documentation: documentation/integrations/discord-bot.md
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DISCORD_COMMANDS, routeInteraction, type RoutableInteraction } from '@/lib/services/discord/discord-interaction-router';
 
+const requestHandlers = vi.hoisted(() => ({
+  handleRequestCommand: vi.fn(async () => undefined),
+  handleRequestComponent: vi.fn(async () => undefined),
+}));
+vi.mock('@/lib/services/discord/request/discord-request-handlers', () => requestHandlers);
+
 const GUILD = '222222222222222222';
+const REQUEST_ID = 'rmab:req:pick:a:abcdefghij';
 
 type Kind = 'command' | 'autocomplete' | 'modal' | 'button' | 'select' | 'context-menu';
 
 /** Only the kind's own check is true, like discord.js (every type guard present). */
-function interaction(kind: Kind, guildId: string | null): RoutableInteraction {
+function interaction(kind: Kind, guildId: string | null, extra: Partial<RoutableInteraction> = {}): RoutableInteraction {
   const fake = {
     guildId,
     commandName: 'probe',
@@ -21,13 +28,23 @@ function interaction(kind: Kind, guildId: string | null): RoutableInteraction {
     isContextMenuCommand: () => kind === 'context-menu',
     isButton: () => kind === 'button',
     isAnySelectMenu: () => kind === 'select',
+    ...extra,
   };
   return fake;
 }
 
 describe('Discord interaction router', () => {
-  it('registers no commands yet', () => {
-    expect(DISCORD_COMMANDS).toEqual([]);
+  beforeEach(() => {
+    requestHandlers.handleRequestCommand.mockClear();
+    requestHandlers.handleRequestComponent.mockClear();
+  });
+
+  it('registers /request (type required: audiobook or ebook; query optional), server-only', () => {
+    expect(DISCORD_COMMANDS.map((command) => command.name)).toEqual(['request']);
+    const [request] = DISCORD_COMMANDS as Array<{ contexts: number[]; options: Array<Record<string, unknown>> }>;
+    expect(request.contexts).toEqual([0]);
+    expect(request.options.map((o) => [o.name, o.required])).toEqual([['type', true], ['query', false]]);
+    expect((request.options[0].choices as Array<{ value: string }>).map((c) => c.value)).toEqual(['audiobook', 'ebook']);
   });
 
   it('runs a command handler only for the configured server', async () => {
@@ -41,7 +58,8 @@ describe('Discord interaction router', () => {
   });
 
   it.each(['autocomplete', 'modal', 'context-menu'] as const)('drops a %s with no server', async (kind) => {
-    expect(await routeInteraction(interaction(kind, null), GUILD, new Map())).toBe('ignored-foreign-guild');
+    expect(await routeInteraction(interaction(kind, null, { customId: REQUEST_ID }), GUILD, new Map())).toBe('ignored-foreign-guild');
+    expect(requestHandlers.handleRequestComponent).not.toHaveBeenCalled();
   });
 
   it.each(['button', 'select'] as const)('a %s from a DM passes the server check; from another server it does not', async (kind) => {
@@ -49,7 +67,32 @@ describe('Discord interaction router', () => {
     expect(await routeInteraction(interaction(kind, '333333333333333333'), GUILD, new Map())).toBe('ignored-foreign-guild');
   });
 
-  it('an unknown command in the right server is ignored (nothing registered)', async () => {
+  it('an unknown command in the right server is ignored', async () => {
     expect(await routeInteraction(interaction('command', GUILD), GUILD)).toBe('ignored-unhandled');
+  });
+
+  it('/request goes to the request command handler (loaded on first use)', async () => {
+    const command = interaction('command', GUILD, { commandName: 'request' });
+    expect(await routeInteraction(command, GUILD)).toBe('handled');
+    expect(requestHandlers.handleRequestCommand).toHaveBeenCalledWith(command);
+  });
+
+  it.each(['modal', 'button', 'select'] as const)('a %s with a /request custom id goes to the request step handler', async (kind) => {
+    const step = interaction(kind, GUILD, { customId: REQUEST_ID });
+    expect(await routeInteraction(step, GUILD)).toBe('handled');
+    expect(requestHandlers.handleRequestComponent).toHaveBeenCalledWith(step);
+  });
+
+  it('a component with another custom id, or none, is ignored', async () => {
+    expect(await routeInteraction(interaction('button', GUILD, { customId: 'other:thing' }), GUILD)).toBe('ignored-unhandled');
+    expect(await routeInteraction(interaction('button', GUILD), GUILD)).toBe('ignored-unhandled');
+    expect(await routeInteraction(interaction('autocomplete', GUILD, { customId: REQUEST_ID }), GUILD)).toBe('ignored-unhandled');
+    expect(requestHandlers.handleRequestComponent).not.toHaveBeenCalled();
+  });
+
+  it('a command is never routed by a custom id', async () => {
+    const command = interaction('command', GUILD, { commandName: 'probe', customId: REQUEST_ID });
+    expect(await routeInteraction(command, GUILD)).toBe('ignored-unhandled');
+    expect(requestHandlers.handleRequestComponent).not.toHaveBeenCalled();
   });
 });

@@ -93,14 +93,16 @@ describe('Discord bot lifecycle', () => {
     expect(service.getStatus()).toMatchObject({ state: 'running', botTag: 'RMAB Bot#0001' });
   });
 
-  it('registers the current command list (empty) for the configured guild', async () => {
+  it('registers the current command list (/request) for the configured guild', async () => {
     const { service } = await load();
 
     await service.start();
 
     const set = discord.state.clients[0].application.commands.set;
     await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
-    expect(set).toHaveBeenCalledWith([], GUILD);
+    const { DISCORD_COMMANDS } = await import('@/lib/services/discord/discord-commands');
+    expect(set).toHaveBeenCalledWith(DISCORD_COMMANDS, GUILD);
+    expect(set.mock.calls[0][0].map((command: { name: string }) => command.name)).toEqual(['request']);
   });
 
   it('listens for client error and shardError, and logs them without throwing', async () => {
@@ -210,8 +212,13 @@ describe('Discord bot lifecycle', () => {
     expect(logLines.filter((l) => l.message === IGNORED_FOREIGN)).toHaveLength(0);
   });
 
+  it('listens for no `invalidated` event (discord.js 14.28.1 never emits it)', async () => {
+    const { service } = await load();
+    await service.start();
+    expect(discord.state.clients[0].listeners.has('invalidated')).toBe(false);
+  });
+
   it.each([
-    ['invalidated', FAKE_EVENTS.Invalidated, [] as unknown[], 'Discord ended the session'],
     ['a shard closed for good (4004)', FAKE_EVENTS.ShardDisconnect, [{ code: 4004 }, 0], 'Gateway closed (code 4004)'],
   ])('%s: status failed, not running, client destroyed, no retry', async (_label, event, args, reason) => {
     const { service, runtime } = await load();

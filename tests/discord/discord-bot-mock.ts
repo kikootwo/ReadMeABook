@@ -53,7 +53,6 @@ export const FAKE_EVENTS = {
   InteractionCreate: 'interactionCreate',
   Error: 'error',
   ShardError: 'shardError',
-  Invalidated: 'invalidated',
   ShardDisconnect: 'shardDisconnect',
 };
 

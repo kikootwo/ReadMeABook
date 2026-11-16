@@ -121,7 +121,8 @@ export class DiscordBotService {
         setDiscordBotRunning(false);
         void destroyQuietly(client);
       };
-      client.on(Events.Invalidated, () => dead('Discord ended the session'));
+      // shardDisconnect fires only for close codes discord.js will not resume (e.g. 4004 token
+      // reset). No `invalidated` listener: discord.js 14.28.1 never emits that event.
       client.on(Events.ShardDisconnect, (event) => dead(`Gateway closed (code ${event.code})`));
 
       await client.login(config.botToken);
