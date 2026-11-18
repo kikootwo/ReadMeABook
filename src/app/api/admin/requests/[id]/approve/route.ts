@@ -97,7 +97,7 @@ export async function POST(
           const grant = adminSelectedTorrent ? null : await grantLibraryAccess(id, logger);
           if (grant?.granted) {
             logger.info(`Access request ${id} approved by admin ${req.user.sub}`, { requestId: id, userId: existingRequest.userId });
-            return NextResponse.json({ success: true, message: 'Access granted: the book is already in the library', request: hidePlacementRecord(grant.request) });
+            return NextResponse.json({ success: true, accessGranted: true, message: 'Access granted: the book is already in the library', request: hidePlacementRecord(grant.request) });
           }
           if (grant?.reason === 'changed') {
             return NextResponse.json({ error: 'InvalidStatus', message: 'Request is no longer awaiting approval' }, { status: 400 });

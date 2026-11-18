@@ -304,7 +304,7 @@ Update user (includes autoApproveRequests field)
 - **Info modal:** `AudiobookDetailsModal` rendered with `adminActions` prop containing Approve/Search/Deny buttons, allowing admin to review full book details (cover, description, series, genres, narrator, etc.) without leaving the approval workflow
 - Auto-refreshes every 10 seconds (SWR)
 - Loading states on buttons during approval/denial
-- Success/error toast notifications ("Request approved"; for an unreleased book the API message, e.g. "Request approved; it will be searched on its release date (May 5, 2027)", and the row shows the "Awaiting Release" badge)
+- Success/error toast notifications naming the book and requester: `Approved "<title>" for <username>`, `Denied "<title>" for <username>`, an access grant (`accessGranted` in the response) `Granted <username> access to "<title>"`; plain "Request approved"/"Request denied" if the card is gone. For an unreleased book the API message, e.g. "Request approved; it will be searched on its release date (May 5, 2027)", and the row shows the "Awaiting Release" badge. Bulk actions keep their count summary
 - Mutates multiple caches on action: pending-approval, recent requests, metrics
 
 ### Admin Users Page (/admin/users)

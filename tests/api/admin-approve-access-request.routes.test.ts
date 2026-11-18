@@ -67,6 +67,7 @@ describe('POST /api/admin/requests/[id]/approve: access requests', () => {
     expect(status).toBe(200);
     expect(grantLibraryAccess).toHaveBeenCalledWith('req-access', expect.anything());
     expect(body.message).toBe('Access granted: the book is already in the library');
+    expect(body.accessGranted).toBe(true); // the dashboard toast names the user and the book
     expect(body.request.status).toBe('available');
     expect(body.request).not.toHaveProperty('approvalBypassedBy');
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();

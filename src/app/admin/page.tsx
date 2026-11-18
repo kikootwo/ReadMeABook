@@ -117,6 +117,19 @@ function ApprovalActionButtons({ isLoading, onApprove, onSearch, onDeny }: Appro
   );
 }
 
+/**
+ * The approve toast: an access grant names the user and the book; an unreleased book keeps the API's
+ * release-date message; otherwise 'Approved "<title>" for <user>' (plain text if the card is gone).
+ */
+function approvedToast(
+  request: PendingApprovalRequest | undefined,
+  result: { awaitingRelease?: boolean; accessGranted?: boolean; message?: string } | undefined
+): string {
+  if (result?.accessGranted && request) return `Granted ${request.user.plexUsername} access to "${request.audiobook.title}"`;
+  if (result?.awaitingRelease && result.message) return result.message;
+  return request ? `Approved "${request.audiobook.title}" for ${request.user.plexUsername}` : 'Request approved';
+}
+
 function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest[] }) {
   const toast = useToast();
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
@@ -132,17 +145,21 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
     ? requests.find((r) => r.id === detailsRequestId)
     : null;
 
+  // Toasts name the book and the requester, e.g. 'Denied "Dune" for reader1'
+  const findRequest = (requestId: string) => requests.find((r) => r.id === requestId);
+
   const handleApproveRequest = async (requestId: string) => {
+    const request = findRequest(requestId);
     setLoadingStates((prev) => ({ ...prev, [requestId]: true }));
 
     try {
-      const result = await fetchJSON<{ awaitingRelease?: boolean; message?: string }>(
+      const result = await fetchJSON<{ awaitingRelease?: boolean; accessGranted?: boolean; message?: string }>(
         `/api/admin/requests/${requestId}/approve`,
         { method: 'POST', body: JSON.stringify({ action: 'approve' }) }
       );
 
       // An unreleased book waits for its release date instead of searching now
-      toast.success(result?.awaitingRelease && result.message ? result.message : 'Request approved');
+      toast.success(approvedToast(request, result));
 
       await mutate('/api/admin/requests/pending-approval');
       await mutate('/api/admin/requests/recent');
@@ -158,6 +175,7 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
   };
 
   const handleDenyRequest = async (requestId: string) => {
+    const request = findRequest(requestId);
     setLoadingStates((prev) => ({ ...prev, [requestId]: true }));
 
     try {
@@ -166,7 +184,7 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
         body: JSON.stringify({ action: 'deny' }),
       });
 
-      toast.success('Request denied');
+      toast.success(request ? `Denied "${request.audiobook.title}" for ${request.user.plexUsername}` : 'Request denied');
 
       await mutate('/api/admin/requests/pending-approval');
       await mutate('/api/admin/metrics');
