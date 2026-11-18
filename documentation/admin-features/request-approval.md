@@ -292,7 +292,7 @@ Update user (includes autoApproveRequests field)
 - Shows only when pending approval requests exist
 - Grid layout with book cards (3 columns on desktop)
 - Each card displays:
-  - Book cover image
+  - Book cover image, following the square-covers preference: square 5.5rem (about the height of the text beside it), else 2:3 at `w-16` (uncropped)
   - Title and author
   - User avatar and username
   - Request timestamp (relative: "2 hours ago")

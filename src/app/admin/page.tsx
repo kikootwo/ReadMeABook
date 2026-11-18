@@ -12,6 +12,7 @@ import { MetricCard } from './components/MetricCard';
 import { ActiveDownloadsTable } from './components/ActiveDownloadsTable';
 import { RecentRequestsTable } from './components/RecentRequestsTable';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
+import { usePreferences } from '@/contexts/PreferencesContext';
 import { ReportedIssuesSection } from './components/ReportedIssuesSection';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
@@ -117,6 +118,7 @@ function ApprovalActionButtons({ isLoading, onApprove, onSearch, onDeny }: Appro
 
 function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest[] }) {
   const toast = useToast();
+  const { squareCovers } = usePreferences();
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
   const [searchModalRequestId, setSearchModalRequestId] = useState<string | null>(null);
   const [detailsAsin, setDetailsAsin] = useState<string | null>(null);
@@ -255,7 +257,7 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
                     <img
                       src={request.audiobook.coverArtUrl || '/placeholder_cover.svg'}
                       alt={request.audiobook.title}
-                      className="w-16 h-16 rounded object-cover"
+                      className={squareCovers ? 'w-[5.5rem] aspect-square rounded object-cover' : 'w-16 aspect-[2/3] rounded object-cover'}
                       onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder_cover.svg'; }}
                     />
                   </div>

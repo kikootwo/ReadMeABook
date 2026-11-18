@@ -28,8 +28,9 @@ vi.mock('next/image', () => ({
   default: (props: any) => <img {...props} />,
 }));
 
+const preferencesMock = vi.hoisted(() => ({ squareCovers: false }));
 vi.mock('@/contexts/PreferencesContext', () => ({
-  usePreferences: () => ({ squareCovers: false, setSquareCovers: vi.fn(), cardSize: 5, setCardSize: vi.fn() }),
+  usePreferences: () => ({ squareCovers: preferencesMock.squareCovers, setSquareCovers: vi.fn(), cardSize: 5, setCardSize: vi.fn() }),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -66,6 +67,21 @@ describe('RequestCard', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [false, 'w-16 sm:w-24 aspect-[2/3]'],
+    [true, 'w-24 sm:w-36 aspect-square'],
+  ])('cover box with square covers %s is as tall as a 2:3 cover', async (square, classes) => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+    preferencesMock.squareCovers = square;
+    try {
+      render(<RequestCard request={{ ...baseRequest, audiobook: { ...baseRequest.audiobook, coverArtUrl: 'https://example.test/c.jpg' } }} />);
+      const box = screen.getByRole('img', { name: 'Test Book' }).parentElement!;
+      for (const c of classes.split(' ')) expect(box.classList.contains(c)).toBe(true);
+    } finally {
+      preferencesMock.squareCovers = false;
+    }
   });
 
   it('shows progress and active indicator for downloads', async () => {

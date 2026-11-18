@@ -55,6 +55,11 @@ vi.mock('@/components/ui/Toast', () => ({
   useToast: () => toastMock,
 }));
 
+const preferencesMock = vi.hoisted(() => ({ squareCovers: true }));
+vi.mock('@/contexts/PreferencesContext', () => ({
+  usePreferences: () => preferencesMock,
+}));
+
 vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
   InteractiveTorrentSearchModal: () => null,
 }));
@@ -68,6 +73,7 @@ describe('AdminDashboard', () => {
     toastMock.error.mockReset();
     mockRouter.push.mockReset();
     mockRouter.replace.mockReset();
+    preferencesMock.squareCovers = true;
   });
 
   it('renders metrics, downloads, and recent requests', async () => {
@@ -210,5 +216,41 @@ describe('AdminDashboard', () => {
     expect(await screen.findByText('Made Up Book')).toBeInTheDocument();
     expect(screen.queryByText('Error Loading Dashboard')).toBeNull();
     expect(screen.getByRole('alert')).toHaveTextContent('Download client unreachable');
+  });
+
+  /** One pending request with a cover, for the approval-card cover tests. */
+  const seedCoverRequest = () => {
+    swrState.set('/api/admin/metrics', {
+      data: { totalRequests: 1, activeDownloads: 0, completedLast30Days: 0, failedLast30Days: 0, totalUsers: 1, systemHealth: { status: 'healthy', issues: [] } },
+    });
+    swrState.set('/api/admin/downloads/active', { data: { downloads: [] } });
+    swrState.set('/api/admin/users', { data: { users: [] } });
+    swrState.set('/api/admin/settings', { data: { ebook: { enabled: false } } });
+    swrState.set('/api/admin/requests/pending-approval', {
+      data: {
+        requests: [
+          {
+            id: 'pending-2',
+            createdAt: new Date().toISOString(),
+            audiobook: { title: 'Dune', author: 'Frank Herbert', coverArtUrl: 'https://example.test/dune.jpg' },
+            user: { id: 'u2', plexUsername: 'reader1', avatarUrl: null },
+          },
+        ],
+      },
+    });
+  };
+
+  it.each([
+    [true, 'aspect-square', 'h-16'],
+    [false, 'aspect-[2/3]', 'aspect-square'],
+  ])('approval card cover follows the square-covers preference (%s)', async (square, expected, absent) => {
+    preferencesMock.squareCovers = square;
+    seedCoverRequest();
+
+    render(<AdminDashboard />);
+    const cover = await screen.findByRole('img', { name: 'Dune' });
+
+    expect(cover.className).toContain(expected);
+    expect(cover.className).not.toContain(absent);
   });
 });

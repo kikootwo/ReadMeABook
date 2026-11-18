@@ -122,8 +122,9 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
           <div
             className={cn(
               'relative rounded overflow-hidden bg-gray-200 dark:bg-gray-700',
+              // A square cover is as tall as a 2:3 one (96 / 144 px), so it spans the card's text
               squareCovers
-                ? 'w-16 sm:w-24 aspect-square'
+                ? 'w-24 sm:w-36 aspect-square'
                 : 'w-16 sm:w-24 aspect-[2/3]',
               request.audiobook.audibleAsin && 'cursor-pointer hover:opacity-90 transition-opacity'
             )}
@@ -138,7 +139,7 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
                 alt={request.audiobook.title}
                 fill
                 className="object-cover"
-                sizes="96px"
+                sizes={squareCovers ? '144px' : '96px'}
                 onError={() => setCoverError(true)}
               />
             ) : isEbook ? (
@@ -158,7 +159,7 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
                 alt={request.audiobook.title}
                 fill
                 className="object-cover"
-                sizes="96px"
+                sizes={squareCovers ? '144px' : '96px'}
               />
             )}
           </div>
