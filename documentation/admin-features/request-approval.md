@@ -292,11 +292,9 @@ Update user (includes autoApproveRequests field)
 - Shows only when pending approval requests exist
 - Grid layout with book cards (3 columns on desktop)
 - Each card displays:
-  - Book cover image, following the square-covers preference: square 5.5rem (about the height of the text beside it), else 2:3 at `w-16` (uncropped)
-  - Title and author
-  - User avatar and username
-  - Request timestamp (relative: "2 hours ago")
-  - Info button (ⓘ, top-right corner) — opens AudiobookDetailsModal for full book details
+  - Book cover image, following the square-covers preference: square 5.5rem (about the height of the text beside it), else 2:3 at `w-16` (2:3 view of the art)
+  - Text column spread over the cover's height (`flex-col justify-between`). Top row: title (`truncate`, full title as `title`; gives way first), then the pills, then the ⓘ details button (in the row, no longer floating over the corner): **Ebook** (`EbookPill`, ebook requests) or rose **Explicit** (`request.explicit` while `useExplicitMarkEnabled()`, audiobook requests; same rule and style as the requests table). Under it the authors, summarized like RequestCard (`creditLine`: "A, B and 1 more", every credit with roles as hover text), then " · <year>" (`audiobooks.year`, the book's Audible release year, on audiobook and ebook requests alike: the same year names an ebook's folder; the authors truncate first so the year stays). Then "Narrated by …" when the book has a narrator (audiobook and ebook requests; same summary rule, everyone in the hover text) (`approvalCredits`). Text levels as on My Requests: title `font-semibold gray-900`/dark `gray-100`; authors `font-medium gray-700`/`gray-200`; narrators `gray-600`/`gray-300`; requester + time `text-xs gray-500` (like My Requests' date row). Requester avatar + username · relative time ("2 hours ago") on one line at the bottom, level with the cover's bottom edge
+  - Info button (ⓘ, end of the title row) — opens AudiobookDetailsModal for full book details
   - Approve button (green, checkmark icon)
   - Search button (blue, magnifier icon) — opens InteractiveTorrentSearchModal
   - Deny button (red, X icon)

@@ -84,7 +84,7 @@ describe('RequestCard', () => {
     }
   });
 
-  it('shows progress and active indicator for downloads', async () => {
+  it('shows progress for downloads, with no separate Active note beside the bar', async () => {
     const { RequestCard } = await import('@/components/requests/RequestCard');
 
     render(
@@ -98,7 +98,7 @@ describe('RequestCard', () => {
     );
 
     expect(screen.getByText('Downloading')).toBeInTheDocument();
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.queryByText('Active')).toBeNull();
     expect(screen.getByText('45%')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '45');
   });
@@ -387,5 +387,171 @@ describe('RequestCard', () => {
     detailsModalSpy.mock.calls.at(-1)?.[0].onRequestSuccess?.();
 
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  describe('book details', () => {
+    const fullBook = {
+      ...baseRequest.audiobook,
+      narrator: 'Tim Gerard Reynolds',
+      year: 2014,
+      series: 'Red Rising Saga',
+      seriesPart: '1',
+      description: '  Darrow is a Red.\n\nHe works all day.  ',
+    };
+
+    it('shows narrator, recording year and series with its book number on one line', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, audiobook: fullBook }} />);
+
+      expect(screen.getByTestId('request-book-details')).toHaveTextContent(
+        'Narrated by Tim Gerard Reynolds · 2014 · Red Rising Saga, Book 1'
+      );
+    });
+
+    it('leaves out the parts a book lacks', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, audiobook: { ...baseRequest.audiobook, year: 2014, series: 'Saga' } }} />);
+
+      expect(screen.getByTestId('request-book-details')).toHaveTextContent(/^2014 · Saga$/);
+    });
+
+    it('shows no details line for a book with none', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={baseRequest} />);
+
+      expect(screen.queryByTestId('request-book-details')).toBeNull();
+      expect(screen.queryByTestId('request-book-description')).toBeNull();
+    });
+
+    it('shows the narrator and year on ebook requests too', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, type: 'ebook', audiobook: fullBook }} />);
+
+      expect(screen.getByTestId('request-book-details')).toHaveTextContent(
+        /^Narrated by Tim Gerard Reynolds · 2014 · Red Rising Saga, Book 1$/
+      );
+    });
+
+    it('names the first two authors and narrators, with everyone in the hover text', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      const book = {
+        ...baseRequest.audiobook,
+        author: 'Terry Pratchett, Neil Gaiman, Ben Aaranovitch - introduction, Stephen Baxter',
+        narrator: 'Sian Clifford, Peter Serafinowicz, Bill Nighy',
+      };
+      render(<RequestCard request={{ ...baseRequest, audiobook: book }} />);
+
+      const authors = screen.getByTestId('request-book-authors');
+      expect(authors).toHaveTextContent('By Terry Pratchett, Neil Gaiman and 1 more');
+      expect(authors).toHaveAttribute('title', 'Terry Pratchett, Neil Gaiman, Ben Aaranovitch (introduction), Stephen Baxter');
+      const details = screen.getByTestId('request-book-details');
+      expect(details).toHaveTextContent(/^Narrated by Sian Clifford, Peter Serafinowicz and 1 more$/);
+      expect(details).toHaveAttribute('title', 'Narrated by Sian Clifford, Peter Serafinowicz, Bill Nighy');
+    });
+
+    it('shows the description on one paragraph, clamped from sm and hidden on phones', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, audiobook: fullBook }} />);
+
+      const description = screen.getByTestId('request-book-description');
+      expect(description.textContent).toBe('Darrow is a Red. He works all day.');
+      for (const c of ['hidden', 'sm:line-clamp-2', 'md:line-clamp-3']) expect(description.classList.contains(c)).toBe(true);
+    });
+
+    it('puts the pills beside the title at every width, with the full title on hover', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, status: 'available', type: 'ebook', audiobook: fullBook }} />);
+
+      const heading = screen.getByRole('heading', { name: 'Test Book' });
+      expect(heading).toHaveAttribute('title', 'Test Book');
+      expect(heading.parentElement!.className).toContain('grid-cols-[minmax(0,1fr)_auto]');
+      const badges = screen.getByTestId('request-card-badges');
+      expect(heading.nextElementSibling).toBe(badges);
+      // Icon-only below sm: labels stay for screen readers, and show as hover text
+      expect(screen.getByTitle('Available')).toHaveTextContent('Available');
+      expect(screen.getByText('Available').className).toContain('sr-only sm:not-sr-only');
+      expect(screen.getByText('Ebook').className).toContain('sr-only sm:not-sr-only');
+    });
+
+    it('moves the setting-up note under the details, out of the pill column', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, status: 'downloading', progress: 0, audiobook: fullBook }} />);
+
+      expect(screen.getByTestId('request-card-badges')).not.toHaveTextContent('Setting up...');
+      expect(screen.getByText('Setting up...')).toBeInTheDocument();
+      expect(screen.queryByRole('progressbar')).toBeNull();
+    });
+
+    it('puts the progress bar full width under the cover, and shortens the description beside a note', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      // Merging chapters: a note line and a bar
+      render(<RequestCard request={{ ...baseRequest, status: 'processing', progress: 50, audiobook: fullBook }} />);
+
+      const topRow = screen.getByRole('heading', { name: 'Test Book' }).closest('.flex.gap-3')!;
+      expect(topRow.contains(screen.getByRole('progressbar'))).toBe(false);
+      expect(screen.getByTestId('request-book-description').classList.contains('md:line-clamp-3')).toBe(false);
+    });
+
+    it('keeps 3 description lines from md on a download, which has a bar but no note', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, status: 'downloading', progress: 45, audiobook: fullBook }} />);
+
+      expect(screen.getByTestId('request-book-description').classList.contains('md:line-clamp-3')).toBe(true);
+    });
+
+    it.each([
+      [0, 'Requested just now'],
+      [86400000 + 60000, 'Requested yesterday'],
+    ])('reads the request time as one phrase (%i ms ago)', async (ago, text) => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, createdAt: new Date(Date.now() - ago).toISOString() }} />);
+
+      expect(screen.getByText(text)).toBeInTheDocument();
+    });
+
+    it('gives the date row the same space above and below', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={baseRequest} />);
+
+      const footer = screen.getByText(/^Requested/).parentElement!;
+      expect(footer.className).toContain('pt-3');
+      expect(footer.parentElement!.className).toContain('pb-3');
+      expect(footer.parentElement!.className).not.toMatch(/(^| )p-\d/);
+    });
+
+    it('puts a failed request\'s error toggle full width under the cover', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, status: 'failed', errorMessage: 'Boom', audiobook: fullBook }} />);
+
+      const topRow = screen.getByRole('heading', { name: 'Test Book' }).closest('.flex.gap-3')!;
+      expect(topRow.contains(screen.getByRole('button', { name: 'Show error' }))).toBe(false);
+    });
+
+    it('keeps the actions right-aligned when they wrap under the date', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={baseRequest} />);
+
+      const actions = screen.getByRole('button', { name: 'Cancel' }).parentElement!;
+      for (const c of ['ml-auto', 'justify-end', 'flex-wrap']) expect(actions.classList.contains(c)).toBe(true);
+    });
+
+    it('steps the emphasis down: authors, then details, then the description', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, audiobook: fullBook }} />);
+
+      expect(screen.getByTestId('request-book-authors').className).toContain('font-medium text-gray-700 dark:text-gray-200');
+      expect(screen.getByTestId('request-book-details').className).toContain('text-gray-600 dark:text-gray-300');
+      expect(screen.getByTestId('request-book-description').className).toContain('text-gray-500 dark:text-gray-400');
+    });
+
+    it('keeps the date and actions in a full-width row under the cover', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+      render(<RequestCard request={{ ...baseRequest, audiobook: fullBook }} />);
+
+      const footer = screen.getByRole('button', { name: 'Cancel' }).closest('.border-t')!;
+      expect(footer).toHaveTextContent(/Requested/);
+      expect(footer.contains(screen.getByRole('heading', { name: 'Test Book' }))).toBe(false);
+      expect(footer.parentElement!.firstElementChild!.contains(screen.getByRole('heading', { name: 'Test Book' }))).toBe(true);
+    });
   });
 });

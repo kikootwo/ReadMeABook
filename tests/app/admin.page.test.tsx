@@ -240,6 +240,105 @@ describe('AdminDashboard', () => {
     });
   };
 
+  const seedPendingCard = (extra: Record<string, unknown>, providers?: Record<string, unknown>) => {
+    seedCoverRequest();
+    const [request] = swrState.get('/api/admin/requests/pending-approval')!.data.requests;
+    swrState.set('/api/admin/requests/pending-approval', { data: { requests: [{ ...request, ...extra }] } });
+    if (providers) swrState.set('/api/auth/providers', { data: providers });
+  };
+
+  it('approval card shows an Ebook pill on ebook requests', async () => {
+    seedPendingCard({ type: 'ebook' });
+    render(<AdminDashboard />);
+
+    expect(await screen.findByTitle('Ebook')).toHaveTextContent('Ebook');
+    expect(screen.queryByText('Explicit')).toBeNull();
+  });
+
+  it('approval card shows an Explicit pill on a marked request while the setting is on', async () => {
+    seedPendingCard({ type: 'audiobook', explicit: true }, { backendMode: 'audiobookshelf', explicitMarkEnabled: true });
+    render(<AdminDashboard />);
+
+    expect(await screen.findByText('Explicit')).toBeInTheDocument();
+  });
+
+  it('approval card shows no Explicit pill while the setting is off', async () => {
+    seedPendingCard({ type: 'audiobook', explicit: true }, { backendMode: 'audiobookshelf', explicitMarkEnabled: false });
+    render(<AdminDashboard />);
+
+    await screen.findByRole('img', { name: 'Dune' });
+    expect(screen.queryByText('Explicit')).toBeNull();
+  });
+
+  it('approval card puts the requester and time on one line', async () => {
+    seedPendingCard({ type: 'audiobook' });
+    render(<AdminDashboard />);
+
+    const name = await screen.findByText('reader1');
+    expect(name.parentElement).toHaveTextContent(/reader1·.*ago/);
+  });
+
+  it('approval card puts the pills and the details button top right, after the title', async () => {
+    const dune = { title: 'Dune', author: 'Frank Herbert', coverArtUrl: 'https://example.test/dune.jpg', audibleAsin: 'B002V1OF70' };
+    seedPendingCard({ type: 'audiobook', explicit: true, audiobook: dune }, { backendMode: 'audiobookshelf', explicitMarkEnabled: true });
+    render(<AdminDashboard />);
+
+    const title = await screen.findByRole('heading', { name: 'Dune' });
+    expect(title).toHaveAttribute('title', 'Dune');
+    const row = title.parentElement!;
+    expect(row.children[1]).toHaveTextContent('Explicit');
+    expect(row.children[2]).toBe(screen.getByRole('button', { name: 'View book details' }));
+  });
+
+  it('approval card summarizes the authors and adds the year', async () => {
+    const book = { title: 'Guards! Guards!', author: 'Terry Pratchett, Neil Gaiman, Ben Aaronovitch - introduction, Stephen Baxter', year: 2007, coverArtUrl: null };
+    seedPendingCard({ type: 'audiobook', audiobook: book });
+    render(<AdminDashboard />);
+
+    const line = await screen.findByTestId('approval-authors');
+    expect(line).toHaveTextContent('Terry Pratchett, Neil Gaiman and 1 more · 2007');
+    expect(line).toHaveAttribute('title', 'Terry Pratchett, Neil Gaiman, Ben Aaronovitch (introduction), Stephen Baxter');
+    // The authors truncate; the year never does
+    expect(screen.getByText('Terry Pratchett, Neil Gaiman and 1 more').className).toContain('truncate');
+    expect(screen.getByText('· 2007').className).toContain('flex-shrink-0');
+  });
+
+  it('approval card shows the year and narrators on ebook requests too', async () => {
+    seedPendingCard({ type: 'ebook', audiobook: { title: 'Dune', author: 'Frank Herbert', narrator: 'Scott Brick', year: 2006, coverArtUrl: null } });
+    render(<AdminDashboard />);
+
+    expect(await screen.findByTestId('approval-authors')).toHaveTextContent('Frank Herbert · 2006');
+    expect(screen.getByTestId('approval-narrators')).toHaveTextContent('Narrated by Scott Brick');
+  });
+
+  it('approval card text steps down like My Requests: title, authors, narrators, then requester', async () => {
+    seedPendingCard({ type: 'audiobook', audiobook: { title: 'Dune', author: 'Frank Herbert', narrator: 'Scott Brick', year: 2006, coverArtUrl: null } });
+    render(<AdminDashboard />);
+
+    expect((await screen.findByRole('heading', { name: 'Dune' })).className).toContain('font-semibold text-gray-900 dark:text-gray-100');
+    expect(screen.getByTestId('approval-authors').className).toContain('font-medium text-gray-700 dark:text-gray-200');
+    expect(screen.getByTestId('approval-narrators').className).toContain('text-gray-600 dark:text-gray-300');
+    expect(screen.getByTestId('approval-requester').className).toContain('text-xs text-gray-500 dark:text-gray-500');
+  });
+
+  it('approval card summarizes the narrators, everyone on hover', async () => {
+    const narrator = 'Amanda Forstrom, Andy Clemence, Julie-Ann Elliott, Laura C. Harris';
+    seedPendingCard({ type: 'audiobook', audiobook: { title: 'Golden Son', author: 'Pierce Brown', narrator, year: 2023, coverArtUrl: null } });
+    render(<AdminDashboard />);
+
+    const line = await screen.findByTestId('approval-narrators');
+    expect(line).toHaveTextContent('Narrated by Amanda Forstrom, Andy Clemence and 2 more');
+    expect(line).toHaveAttribute('title', `Narrated by ${narrator}`);
+  });
+
+  it('approval card shows no narrator line when the book has none', async () => {
+    seedPendingCard({ type: 'audiobook' });
+    render(<AdminDashboard />);
+
+    await screen.findByTestId('approval-authors');
+    expect(screen.queryByTestId('approval-narrators')).toBeNull();
+  });
+
   it.each([
     [true, 'aspect-square', 'h-16'],
     [false, 'aspect-[2/3]', 'aspect-square'],

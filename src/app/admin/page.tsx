@@ -13,6 +13,9 @@ import { ActiveDownloadsTable } from './components/ActiveDownloadsTable';
 import { RecentRequestsTable } from './components/RecentRequestsTable';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { usePreferences } from '@/contexts/PreferencesContext';
+import { useExplicitMarkEnabled } from '@/lib/hooks/useExplicitMark';
+import { EbookPill } from '@/components/requests/EbookPill';
+import { creditLine } from '@/lib/utils/credits';
 import { ReportedIssuesSection } from './components/ReportedIssuesSection';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
@@ -39,10 +42,13 @@ interface PendingApprovalRequest {
   id: string;
   createdAt: string;
   type: 'audiobook' | 'ebook';
+  explicit?: boolean; // #542: shown as a pill while the Explicit mark setting is on
   selectedTorrent: SelectedTorrentData | null;
   audiobook: {
     title: string;
     author: string;
+    narrator?: string | null;
+    year?: number | null;
     coverArtUrl: string | null;
     audibleAsin: string | null;
   };
@@ -50,6 +56,22 @@ interface PendingApprovalRequest {
     id: string;
     plexUsername: string;
     avatarUrl: string | null;
+  };
+}
+
+/**
+ * The approval card's credit lines: summarized authors with the year (`audiobooks.year`, the book's
+ * Audible release year; the same year names an ebook's folder), and narrators, as on My Requests.
+ */
+function approvalCredits(request: PendingApprovalRequest) {
+  const authors = creditLine(request.audiobook.author);
+  const narrators = creditLine(request.audiobook.narrator);
+  return {
+    authors: authors.summary || request.audiobook.author,
+    authorsFull: authors.full,
+    year: request.audiobook.year ? String(request.audiobook.year) : null,
+    narrators: narrators.summary || null,
+    narratorsFull: narrators.full,
   };
 }
 
@@ -119,6 +141,7 @@ function ApprovalActionButtons({ isLoading, onApprove, onSearch, onDeny }: Appro
 function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest[] }) {
   const toast = useToast();
   const { squareCovers } = usePreferences();
+  const explicitMarkOn = useExplicitMarkEnabled(); // Explicit pill, as in the requests table (#542)
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
   const [searchModalRequestId, setSearchModalRequestId] = useState<string | null>(null);
   const [detailsAsin, setDetailsAsin] = useState<string | null>(null);
@@ -225,6 +248,7 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
         {requests.map((request) => {
           const isLoading = loadingStates[request.id] || false;
           const torrent = request.selectedTorrent;
+          const credits = approvalCredits(request);
           const displayFormat = torrent?.format || torrent?.ebookFormat;
           const isAnnasArchive = torrent?.source === 'annas_archive';
 
@@ -233,21 +257,6 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
               key={request.id}
               className="relative bg-white dark:bg-gray-800 border-2 border-amber-200 dark:border-amber-800 rounded-lg shadow-sm hover:shadow-md transition-shadow overflow-hidden"
             >
-              {/* Info Button — opens AudiobookDetailsModal */}
-              {request.audiobook.audibleAsin && (
-                <button
-                  onClick={() => {
-                    setDetailsAsin(request.audiobook.audibleAsin);
-                    setDetailsRequestId(request.id);
-                  }}
-                  className="absolute top-2 right-2 z-10 p-1 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
-                  title="View book details"
-                  aria-label="View book details"
-                >
-                  <InformationCircleIcon className="w-5 h-5" />
-                </button>
-              )}
-
               {/* Card Content */}
               <div className="p-4">
                 <div className="flex gap-3">
@@ -262,39 +271,59 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
                     />
                   </div>
 
-                  {/* Book Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
-                        {request.audiobook.title}
-                      </h3>
-                      {request.type === 'ebook' && (
-                        <span
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0"
-                          style={{
-                            backgroundColor: 'rgba(241, 111, 25, 0.15)',
-                            color: '#f16f19',
-                            border: '1px solid rgba(241, 111, 25, 0.3)',
-                          }}
-                        >
-                          Ebook
-                        </span>
+                  {/* Book Info: title row and authors at the top; requester and time level with the cover's bottom */}
+                  <div className="flex-1 min-w-0 flex flex-col justify-between gap-2">
+                    <div className="min-w-0">
+                      {/* Title, then the pills and the details button top right; the title gives way first */}
+                      <div className="flex items-start gap-1.5 min-w-0">
+                        <h3 title={request.audiobook.title} className="flex-1 min-w-0 text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          {request.audiobook.title}
+                        </h3>
+                        {request.type === 'ebook' && <EbookPill />}
+                        {explicitMarkOn && request.explicit && request.type !== 'ebook' && (
+                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap flex-shrink-0 bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
+                            Explicit
+                          </span>
+                        )}
+                        {/* -my-0.5: the 24 px button keeps the 20 px title row, so cards with and without it match */}
+                        {request.audiobook.audibleAsin && (
+                          <button
+                            onClick={() => {
+                              setDetailsAsin(request.audiobook.audibleAsin);
+                              setDetailsRequestId(request.id);
+                            }}
+                            className="-my-0.5 -mr-1 flex-shrink-0 p-0.5 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                            title="View book details"
+                            aria-label="View book details"
+                          >
+                            <InformationCircleIcon className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                      {/* Authors summarized ("A, B and 1 more", everyone on hover), then the audiobook's release year */}
+                      {/* The authors give way first, so the year stays */}
+                      <p data-testid="approval-authors" title={credits.authorsFull} className="flex min-w-0 text-sm font-medium text-gray-700 dark:text-gray-200">
+                        <span className="truncate">{credits.authors}</span>
+                        {credits.year && <span className="flex-shrink-0 whitespace-pre">{` · ${credits.year}`}</span>}
+                      </p>
+                      {/* Narrators, a step below the authors (as My Requests' details line); fits the space beside the cover */}
+                      {credits.narrators && (
+                        <p data-testid="approval-narrators" title={`Narrated by ${credits.narratorsFull}`} className="text-sm text-gray-600 dark:text-gray-300 truncate">
+                          Narrated by {credits.narrators}
+                        </p>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                      {request.audiobook.author}
-                    </p>
 
-                    {/* User Info */}
-                    <div className="flex items-center gap-2 mt-2">
+                    {/* Requester and time, styled like My Requests' date row */}
+                    <div data-testid="approval-requester" className="flex items-center gap-2 min-w-0 text-xs text-gray-500 dark:text-gray-500">
                       {request.user.avatarUrl ? (
                         <img
                           src={request.user.avatarUrl}
                           alt={request.user.plexUsername}
-                          className="w-5 h-5 rounded-full"
+                          className="w-5 h-5 rounded-full flex-shrink-0"
                         />
                       ) : (
-                        <div className="w-5 h-5 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
+                        <div className="w-5 h-5 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0">
                           <svg
                             className="w-3 h-3 text-gray-600 dark:text-gray-400"
                             fill="currentColor"
@@ -308,15 +337,12 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
                           </svg>
                         </div>
                       )}
-                      <span className="text-xs text-gray-600 dark:text-gray-400">
-                        {request.user.plexUsername}
+                      <span className="truncate">{request.user.plexUsername}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="whitespace-nowrap">
+                        {formatDistanceToNow(new Date(request.createdAt), { addSuffix: true })}
                       </span>
                     </div>
-
-                    {/* Timestamp */}
-                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                      {formatDistanceToNow(new Date(request.createdAt), { addSuffix: true })}
-                    </p>
                   </div>
                 </div>
               </div>

@@ -30,4 +30,19 @@ describe('StatusBadge', () => {
     expect(badge.className).toContain('dark:bg-teal-900');
     expect(badge.className).toContain('dark:text-teal-200');
   });
+
+  it('compact: an icon below sm, the label for screen readers and as hover text', () => {
+    render(<StatusBadge status="awaiting_approval" compact />);
+    const badge = screen.getByTitle('Pending Approval');
+    expect(badge.className).toContain('bg-yellow-100');
+    expect(badge.querySelector('svg')?.getAttribute('class')).toContain('sm:hidden');
+    expect(screen.getByText('Pending Approval').className).toBe('sr-only sm:not-sr-only');
+  });
+
+  it('without compact, renders the label alone as before', () => {
+    render(<StatusBadge status="available" />);
+    const badge = screen.getByText('Available');
+    expect(badge.querySelector('svg')).toBeNull();
+    expect(badge).not.toHaveAttribute('title');
+  });
 });

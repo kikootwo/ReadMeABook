@@ -8,6 +8,8 @@
 import React from 'react';
 import Image from 'next/image';
 import { StatusBadge } from './StatusBadge';
+import { RequestCardHeader } from './RequestCardHeader';
+import { EbookPill } from './EbookPill';
 import { Button } from '@/components/ui/Button';
 import { useCancelRequest } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
@@ -41,6 +43,11 @@ interface RequestCardProps {
       libraryAsin?: string | null; // effective library ASIN: the details show that edition (#325)
       title: string;
       author: string;
+      narrator?: string | null;
+      year?: number | null;
+      series?: string | null;
+      seriesPart?: string | null;
+      description?: string | null;
       coverArtUrl?: string;
       filePath?: string | null;
       fileFormat?: string | null;
@@ -74,6 +81,8 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
   // Processing says what it is doing; its bar shows only while chapters merge (#216)
   const phase = requestPhase(request.status, request.progress);
   const barPercent = phase ? phase.percent : isActive && request.progress > 0 ? request.progress : null;
+  // Active with no progress yet (no bar): "Setting up..."; with a bar no note, the bar says it
+  const isSettingUp = !phase && isActive && request.progress === 0;
 
   const releaseDateLabel = React.useMemo(() => {
     if (request.status !== 'awaiting_release' || !request.releaseDate) return null;
@@ -97,6 +106,7 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
     }
   };
 
+  // Follows "Completed" / "Requested", so relative phrases are lowercase
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -105,10 +115,10 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
+    if (diffMins < 1) return 'just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return 'Yesterday';
+    if (diffDays === 1) return 'yesterday';
     if (diffDays < 7) return `${diffDays}d ago`;
 
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -116,185 +126,173 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-      <div className="flex gap-3 sm:gap-4 p-3 sm:p-4">
-        {/* Cover Art */}
-        <div className="flex-shrink-0">
-          <div
-            className={cn(
-              'relative rounded overflow-hidden bg-gray-200 dark:bg-gray-700',
-              // A square cover is as tall as a 2:3 one (96 / 144 px), so it spans the card's text
-              squareCovers
-                ? 'w-24 sm:w-36 aspect-square'
-                : 'w-16 sm:w-24 aspect-[2/3]',
-              request.audiobook.audibleAsin && 'cursor-pointer hover:opacity-90 transition-opacity'
-            )}
-            onClick={() => request.audiobook.audibleAsin && setShowDetailsModal(true)}
-            role={request.audiobook.audibleAsin ? 'button' : undefined}
-            tabIndex={request.audiobook.audibleAsin ? 0 : undefined}
-            onKeyDown={(e) => e.key === 'Enter' && request.audiobook.audibleAsin && setShowDetailsModal(true)}
-          >
-            {request.audiobook.coverArtUrl && !coverError ? (
-              <Image
-                src={request.audiobook.coverArtUrl}
-                alt={request.audiobook.title}
-                fill
-                className="object-cover"
-                sizes={squareCovers ? '144px' : '96px'}
-                onError={() => setCoverError(true)}
-              />
-            ) : isEbook ? (
-              <div className="w-full h-full flex items-center justify-center">
-                <svg
-                  className="w-12 h-12"
-                  style={{ color: '#f16f19' }}
-                  fill="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z" />
-                </svg>
-              </div>
-            ) : (
-              <Image
-                src="/placeholder_cover.svg"
-                alt={request.audiobook.title}
-                fill
-                className="object-cover"
-                sizes={squareCovers ? '144px' : '96px'}
-              />
-            )}
+      <div className="flex flex-col gap-2 sm:gap-3 px-3 sm:px-4 pt-3 sm:pt-4 pb-3">
+        <div className="flex gap-3 sm:gap-4">
+          {/* Cover Art */}
+          <div className="flex-shrink-0">
+            <div
+              className={cn(
+                'relative rounded overflow-hidden bg-gray-200 dark:bg-gray-700',
+                // A square cover is as tall as a 2:3 one (96 / 144 px); the text beside it is sized to that height
+                squareCovers
+                  ? 'w-24 sm:w-36 aspect-square'
+                  : 'w-16 sm:w-24 aspect-[2/3]',
+                request.audiobook.audibleAsin && 'cursor-pointer hover:opacity-90 transition-opacity'
+              )}
+              onClick={() => request.audiobook.audibleAsin && setShowDetailsModal(true)}
+              role={request.audiobook.audibleAsin ? 'button' : undefined}
+              tabIndex={request.audiobook.audibleAsin ? 0 : undefined}
+              onKeyDown={(e) => e.key === 'Enter' && request.audiobook.audibleAsin && setShowDetailsModal(true)}
+            >
+              {request.audiobook.coverArtUrl && !coverError ? (
+                <Image
+                  src={request.audiobook.coverArtUrl}
+                  alt={request.audiobook.title}
+                  fill
+                  className="object-cover"
+                  sizes={squareCovers ? '144px' : '96px'}
+                  onError={() => setCoverError(true)}
+                />
+              ) : isEbook ? (
+                <div className="w-full h-full flex items-center justify-center">
+                  <svg
+                    className="w-12 h-12"
+                    style={{ color: '#f16f19' }}
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z" />
+                  </svg>
+                </div>
+              ) : (
+                <Image
+                  src="/placeholder_cover.svg"
+                  alt={request.audiobook.title}
+                  fill
+                  className="object-cover"
+                  sizes={squareCovers ? '144px' : '96px'}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Request Info */}
+          <div className="flex-1 min-w-0">
+            {/* Title and pills (status, Ebook) top right; authors, details, release/progress note, description */}
+            <RequestCardHeader
+              book={request.audiobook}
+              badges={
+                <>
+                  <StatusBadge status={request.status} progress={request.progress} compact />
+                  {isEbook && <EbookPill compact />}
+                </>
+              }
+              note={
+                releaseDateLabel || phase || isSettingUp ? (
+                  <>
+                    {releaseDateLabel && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        Releases {releaseDateLabel}
+                      </span>
+                    )}
+                    {phase && (
+                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full"></div>
+                        <span>{phase.label}</span>
+                      </div>
+                    )}
+                    {isSettingUp && (
+                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="animate-spin w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
+                        <span>Setting up...</span>
+                      </div>
+                    )}
+                  </>
+                ) : null
+              }
+            />
           </div>
         </div>
 
-        {/* Request Info */}
-        <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
-          {/* Title and Author */}
-          <div>
-            <h3 className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
-              {request.audiobook.title}
-            </h3>
-            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">
-              By {request.audiobook.author}
-            </p>
-          </div>
-
-          {/* Status Badge and Type Badge */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={request.status} progress={request.progress} />
-            {releaseDateLabel && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                Releases {releaseDateLabel}
-              </span>
-            )}
-            {isEbook && (
-              <span
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full"
-                style={{ backgroundColor: '#f16f1920', color: '#f16f19' }}
-              >
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
-                </svg>
-                Ebook
-              </span>
-            )}
-            {phase && (
-              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span>{phase.label}</span>
-              </div>
-            )}
-            {!phase && isActive && request.progress > 0 && (
-              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span>Active</span>
-              </div>
-            )}
-            {!phase && isActive && request.progress === 0 && (
-              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                <div className="animate-spin w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
-                <span>Setting up...</span>
-              </div>
-            )}
-          </div>
-
-          {/* Progress Bar (downloading/searching; processing only while chapters merge) */}
-          {barPercent !== null && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                <span>Progress</span>
-                <span>{barPercent}%</span>
-              </div>
-              <div
-                className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden"
-                role="progressbar"
-                aria-label="Progress"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={barPercent}
-              >
-                <div
-                  className={cn(
-                    'h-full rounded-full transition-all duration-300',
-                    request.status === 'downloading' ? 'bg-purple-600' : 'bg-orange-600'
-                  )}
-                  style={{ width: `${barPercent}%` }}
-                />
-              </div>
+        {/* Progress Bar (downloading/searching; processing only while chapters merge): full width under the cover */}
+        {barPercent !== null && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+              <span>Progress</span>
+              <span>{barPercent}%</span>
             </div>
-          )}
+            <div
+              className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden"
+              role="progressbar"
+              aria-label="Progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={barPercent}
+            >
+              <div
+                className={cn(
+                  'h-full rounded-full transition-all duration-300',
+                  request.status === 'downloading' ? 'bg-purple-600' : 'bg-orange-600'
+                )}
+                style={{ width: `${barPercent}%` }}
+              />
+            </div>
+          </div>
+        )}
 
-          {/* Error Message */}
-          {isFailed && request.errorMessage && (
-            <div className="space-y-1">
-              <button
-                onClick={() => setShowError(!showError)}
-                className="text-xs text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d={showError ? 'M19 9l-7 7-7-7' : 'M9 5l7 7-7 7'}
-                  />
-                </svg>
-                {showError ? 'Hide error' : 'Show error'}
-              </button>
-              {showError && (
-                <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
-                  {request.errorMessage}
-                </div>
+        {/* Error Message: full width under the cover */}
+        {isFailed && request.errorMessage && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setShowError(!showError)}
+              className="text-xs text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d={showError ? 'M19 9l-7 7-7-7' : 'M9 5l7 7-7 7'}
+                />
+              </svg>
+              {showError ? 'Hide error' : 'Show error'}
+            </button>
+            {showError && (
+              <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                {request.errorMessage}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Timestamps and Actions: full width under the cover */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-xs text-gray-500 dark:text-gray-500">
+            {request.completedAt
+              ? `Completed ${formatDate(request.completedAt)}`
+              : `Requested ${formatDate(request.createdAt)}`}
+          </div>
+
+          {/* Action Buttons */}
+          {showActions && (
+            // ml-auto + justify-end: right-aligned even when it wraps under the date (a locked Explicit mark is wide)
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              {showExplicit && (
+                <RequestExplicitControl requestId={request.id} explicit={request.explicit === true} isAdmin={user?.role === 'admin'} onSaved={onChanged} />
+              )}
+              {canCancel && (
+                <Button
+                  onClick={() => setConfirmCancelOpen(true)}
+                  loading={isLoading}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs sm:text-sm text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                >
+                  {isAwaitingApproval ? 'Withdraw' : 'Cancel'}
+                </Button>
               )}
             </div>
           )}
-
-          {/* Timestamps and Actions */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-            <div className="text-xs text-gray-500 dark:text-gray-500">
-              {request.completedAt
-                ? `Completed ${formatDate(request.completedAt)}`
-                : `Requested ${formatDate(request.createdAt)}`}
-            </div>
-
-            {/* Action Buttons */}
-            {showActions && (
-              <div className="flex flex-wrap items-center gap-2">
-                {showExplicit && (
-                  <RequestExplicitControl requestId={request.id} explicit={request.explicit === true} isAdmin={user?.role === 'admin'} onSaved={onChanged} />
-                )}
-                {canCancel && (
-                  <Button
-                    onClick={() => setConfirmCancelOpen(true)}
-                    loading={isLoading}
-                    variant="outline"
-                    size="sm"
-                    className="text-xs sm:text-sm text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                  >
-                    {isAwaitingApproval ? 'Withdraw' : 'Cancel'}
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
