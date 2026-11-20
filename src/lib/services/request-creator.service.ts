@@ -20,6 +20,8 @@ import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { decideAutoReRequest, removedFromLibrarySkip, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
 import { coverForRequestedBook, detailsForNewBook, lookedUpTitleAuthorUpdates, lookUpBookDetails, type BookDetailsSource } from '@/lib/services/request-book-details';
+import { resolveAutoApprove } from '@/lib/utils/permissions';
+import { accessRequestRefusal, ALREADY_AVAILABLE, grantLibraryAccess } from '@/lib/services/library-access.service';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -47,11 +49,13 @@ export interface CreateRequestOptions {
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library'; message: string };
+  | { success: false; reason: 'already_available' | 'access_unavailable' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library'; message: string };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
- * Audnexus enrichment, approval flow, notifications, and search job triggering.
+ * Audnexus enrichment, approval flow, notifications, and search job triggering. A manual request
+ * for a book already in the library becomes an access request while requester tags are on
+ * (library-access.service): no search; approval (or auto-approval) grants it.
  */
 export async function createRequestForUser(
   userId: string,
@@ -70,15 +74,17 @@ export async function createRequestForUser(
     },
   });
 
+  // In the library: an access request (manual requests only) or refused
+  let accessRequest = false;
+  const inLibraryRefusal = async () => (automatic ? ALREADY_AVAILABLE : accessRequestRefusal(userId, audiobook.asin));
+
   if (existingActiveRequest) {
-    const status = existingActiveRequest.status;
-    return {
-      success: false,
-      reason: status === 'available' ? 'already_available' : 'being_processed',
-      message: status === 'available'
-        ? 'This audiobook is already available in your library'
-        : 'This audiobook is being processed and will be available soon',
-    };
+    if (existingActiveRequest.status !== 'available') {
+      return { success: false, reason: 'being_processed', message: 'This audiobook is being processed and will be available soon' };
+    }
+    const refusal = await inLibraryRefusal();
+    if (refusal) return refusal;
+    accessRequest = true;
   }
 
   // A book removed from the library comes back only through a manual request (#214)
@@ -86,7 +92,7 @@ export async function createRequestForUser(
   if (removedSkip) return removedSkip;
 
   // Check if audiobook is already in Plex/ABS library
-  const plexMatch = await findPlexMatch({
+  const plexMatch = !accessRequest && await findPlexMatch({
     asin: audiobook.asin,
     title: audiobook.title,
     author: audiobook.author,
@@ -94,11 +100,9 @@ export async function createRequestForUser(
   });
 
   if (plexMatch) {
-    return {
-      success: false,
-      reason: 'already_available',
-      message: 'This audiobook is already available in your library',
-    };
+    const refusal = await inLibraryRefusal();
+    if (refusal) return refusal;
+    accessRequest = true;
   }
 
   // Check per-user ignore list (skipped for manual requests via bypassIgnore)
@@ -240,7 +244,7 @@ export async function createRequestForUser(
     },
   });
 
-  if (anyActiveRequest && anyActiveRequest.userId !== userId) {
+  if (anyActiveRequest && anyActiveRequest.userId !== userId && !accessRequest) {
     return {
       success: false,
       reason: 'being_processed',
@@ -248,8 +252,6 @@ export async function createRequestForUser(
     };
   }
 
-  // Determine if approval is needed
-  let needsApproval = false;
   let shouldTriggerSearch = !skipAutoSearch;
 
   const user = await prisma.user.findUnique({
@@ -261,27 +263,14 @@ export async function createRequestForUser(
     return { success: false, reason: 'user_not_found', message: 'User not found' };
   }
 
-  if (user.role === 'admin') {
-    needsApproval = false;
-  } else {
-    if (user.autoApproveRequests === true) {
-      needsApproval = false;
-    } else if (user.autoApproveRequests === false) {
-      needsApproval = true;
-    } else {
-      const globalConfig = await prisma.configuration.findUnique({
-        where: { key: 'auto_approve_requests' },
-      });
-      const globalAutoApprove = globalConfig === null ? true : globalConfig.value === 'true';
-      needsApproval = !globalAutoApprove;
-    }
-  }
+  const needsApproval = !(await resolveAutoApprove(user.role, user.autoApproveRequests));
 
   // Evaluate release-date gate (skip-unreleased-auto-search); admin approval applies the same check
-  const releaseGateSkip = !needsApproval && !skipAutoSearch && await shouldWaitForRelease(releaseDate);
+  const releaseGateSkip = !needsApproval && !skipAutoSearch && !accessRequest && await shouldWaitForRelease(releaseDate);
 
   let initialStatus: string;
-  if (needsApproval) {
+  if (needsApproval || accessRequest) {
+    // An access request waits here even when auto-approved; it is granted right after creation
     initialStatus = 'awaiting_approval';
     shouldTriggerSearch = false;
   } else if (skipAutoSearch) {
@@ -307,6 +296,7 @@ export async function createRequestForUser(
           releaseDate,
           // Only an admin clears a mark (#542): a re-request can add one, never drop one
           explicit: options.explicit === true || replacesRequest?.explicit === true,
+          ...(accessRequest ? { accessRequest: true } : {}),
           ...(replacesRequest?.customSearchTerms && { customSearchTerms: replacesRequest.customSearchTerms }),
           ...(autoReRequest && { autoRerequestCount: autoReRequest.nextCount }),
         },
@@ -336,6 +326,13 @@ export async function createRequestForUser(
       audiobookTitle: audiobookRecord.title,
       releaseDate: releaseDate?.toISOString() ?? null,
     });
+  }
+
+  // Auto-approved access request: granted now (no search). Left waiting for an admin if the book
+  // left the library meanwhile (approval then searches), with the usual pending notification.
+  if (accessRequest && !needsApproval) {
+    const grant = await grantLibraryAccess(newRequest.id, logger);
+    if (grant.granted) return { success: true, request: grant.request };
   }
 
   const jobQueue = getJobQueueService();

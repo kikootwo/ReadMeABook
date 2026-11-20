@@ -6,7 +6,8 @@
  * whose tag list lost a requester tag or whose Explicit flag is off, capped per run) and the
  * backfill job. Candidates are the available requests of this run's delivered books and listed
  * items (one read per 1,000 item ids). Tags (setting on): a request completed without approval
- * (`approvalBypassedBy` set) and an admin's request that RMAB never downloaded are never tagged.
+ * (`approvalBypassedBy` set) and an admin's request that RMAB never downloaded (other than a granted
+ * access request) are never tagged.
  * Explicit (while its admin setting is on; off writes, reads and checks nothing): an item is
  * flagged when any candidate request of it is marked; those rules don't apply because the flag
  * only restricts. One shared write per item (writeABSItem). Never
@@ -74,6 +75,7 @@ const CANDIDATE_SELECT = {
   id: true,
   userId: true,
   approvalBypassedBy: true,
+  accessRequest: true,
   explicit: true,
   audiobook: { select: { id: true, absItemId: true, title: true } },
   _count: { select: { downloadHistory: true } },
@@ -83,6 +85,7 @@ interface Candidate {
   id: string;
   userId: string;
   approvalBypassedBy: string | null;
+  accessRequest: boolean;
   explicit: boolean;
   audiobook: { id: string; absItemId: string | null; title: string };
   _count: { downloadHistory: number };
@@ -110,9 +113,11 @@ async function loadCandidates(deliveredBookIds: string[], listedItemIds: string[
  * A manual or bulk import with no request to recycle creates one for the importing admin; no user
  * asked for that book. Told apart by requester and history: an admin's request with no download
  * record (an import never writes one; every RMAB download does). Also matches an admin's own
- * request that reached the library without an RMAB download, which is not tagged either.
+ * request that reached the library without an RMAB download, which is not tagged either. A granted
+ * access request never downloads; the admin asked for it, so it is tagged.
  */
-const importedForAdmin = (r: Candidate, role: string | undefined) => role === 'admin' && r._count.downloadHistory === 0;
+const importedForAdmin = (r: Candidate, role: string | undefined) =>
+  role === 'admin' && !r.accessRequest && r._count.downloadHistory === 0;
 
 /** Adds each eligible candidate's requester tag to its item's plan. */
 async function planTags(

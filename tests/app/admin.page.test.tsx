@@ -173,12 +173,87 @@ describe('AdminDashboard', () => {
         method: 'POST',
         body: JSON.stringify({ action: 'approve' }),
       });
-      expect(toastMock.success).toHaveBeenCalledWith('Request approved');
+      expect(toastMock.success).toHaveBeenCalledWith('Approved "Awaiting" for User');
     });
 
     expect(mutateMock).toHaveBeenCalledWith('/api/admin/requests/pending-approval');
     expect(mutateMock).toHaveBeenCalledWith('/api/admin/requests/recent');
     expect(mutateMock).toHaveBeenCalledWith('/api/admin/metrics');
+  });
+
+  /** One pending request on an otherwise empty dashboard. */
+  const seedPending = (extra: Record<string, unknown> = {}) => {
+    swrState.set('/api/admin/metrics', {
+      data: { totalRequests: 1, activeDownloads: 0, completedLast30Days: 0, failedLast30Days: 0, totalUsers: 1, systemHealth: { status: 'healthy', issues: [] } },
+    });
+    swrState.set('/api/admin/downloads/active', { data: { downloads: [] } });
+    swrState.set('/api/admin/users', { data: { users: [] } });
+    swrState.set('/api/admin/settings', { data: { ebook: { enabled: false } } });
+    swrState.set('/api/admin/requests/pending-approval', {
+      data: {
+        requests: [
+          {
+            id: 'pending-2',
+            createdAt: new Date().toISOString(),
+            audiobook: { title: 'Dune', author: 'Frank Herbert', coverArtUrl: null },
+            user: { id: 'u2', plexUsername: 'reader1', avatarUrl: null },
+            ...extra,
+          },
+        ],
+      },
+    });
+  };
+
+  it('the deny toast names the book and the requester', async () => {
+    seedPending();
+    fetchJSONMock.mockResolvedValue({ success: true });
+
+    render(<AdminDashboard />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Deny' }));
+
+    await waitFor(() => {
+      expect(fetchJSONMock).toHaveBeenCalledWith('/api/admin/requests/pending-2/approve', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'deny' }),
+      });
+      expect(toastMock.success).toHaveBeenCalledWith('Denied "Dune" for reader1');
+    });
+  });
+
+  it('approving an access request says the user was granted access', async () => {
+    seedPending({ accessRequest: true });
+    fetchJSONMock.mockResolvedValue({ success: true, accessGranted: true, message: 'Access granted: the book is already in the library' });
+
+    render(<AdminDashboard />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      expect(toastMock.success).toHaveBeenCalledWith('Granted reader1 access to "Dune"');
+    });
+  });
+
+  it('an access request approved as a normal request (book left the library) gets the usual toast', async () => {
+    seedPending({ accessRequest: true });
+    fetchJSONMock.mockResolvedValue({ success: true, message: 'Request approved and search job triggered' });
+
+    render(<AdminDashboard />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      expect(toastMock.success).toHaveBeenCalledWith('Approved "Dune" for reader1');
+    });
+  });
+
+  it('an unreleased book keeps the API message in the approve toast', async () => {
+    seedPending();
+    fetchJSONMock.mockResolvedValue({ awaitingRelease: true, message: 'Request approved; it will be searched on its release date (May 5, 2027)' });
+
+    render(<AdminDashboard />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      expect(toastMock.success).toHaveBeenCalledWith('Request approved; it will be searched on its release date (May 5, 2027)');
+    });
   });
 
   it('shows an error message when dashboard data fails to load', async () => {

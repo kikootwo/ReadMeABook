@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
       if (!result.success) {
         const statusMap: Record<string, { error: string; status: number }> = {
           already_available: { error: 'AlreadyAvailable', status: 409 },
+          access_unavailable: { error: 'AccessUnavailable', status: 409 },
           being_processed: { error: 'BeingProcessed', status: 409 },
           duplicate: { error: 'DuplicateRequest', status: 409 },
           user_not_found: { error: 'UserNotFound', status: 404 },

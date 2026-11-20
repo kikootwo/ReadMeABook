@@ -19,7 +19,7 @@ export interface TagUser {
   plexUsername: string;
   deletedAt: Date | null;
   registrationStatus: string | null;
-  /** 'admin' or 'user'; an admin's request that RMAB never downloaded is not tagged */
+  /** 'admin' or 'user'; an admin's request that RMAB never downloaded is not tagged (a granted access request is) */
   role?: string;
 }
 

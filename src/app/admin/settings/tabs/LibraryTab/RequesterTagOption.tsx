@@ -78,7 +78,8 @@ export function RequesterTagOption({ settings, onChange }: RequesterTagOptionPro
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               When a requested audiobook becomes available, ReadMeABook adds <code className="whitespace-nowrap">req:&lt;username&gt;</code> to its
               Audiobookshelf item, keeping its other tags, so Audiobookshelf can limit each user to their own books.
-              Turning this on also tags books already available; turning it off removes no tags.
+              Turning this on also tags books already available; turning it off removes no tags. A user who asks for a book
+              already in the library requests access instead; approving it adds their tag.
             </p>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Every user of this Audiobookshelf library can see all requesters&apos; usernames in its tag filter.

@@ -12,7 +12,8 @@
  * (full scan, recently-added checks) notify once, and only the winner writes the book's item id.
  * An ASIN match never overwrites a link made in the same run, and an item linked or ASIN-matched
  * earlier in the run is not handed to a later book. Ebook requests are never matched (they end at
- * `downloaded`). After the loop, the delivery steps (Audiobookshelf only, own try/catch) tag the
+ * `downloaded`), and an access request is skipped while it awaits approval (library-access).
+ * After the loop, the delivery steps (Audiobookshelf only, own try/catch) tag the
  * requesters of the books this run completed and repair listed items (requester-tags, #232).
  */
 
@@ -50,8 +51,8 @@ const APPROVED_MATCHABLE_STATUS = { notIn: [...MATCHABLE_STATUS.notIn, 'awaiting
 
 type MatchableRequest = Awaited<ReturnType<typeof loadMatchableRequests>>[number];
 
-function loadMatchableRequests() {
-  return prisma.request.findMany({
+async function loadMatchableRequests() {
+  const rows = await prisma.request.findMany({
     where: {
       type: 'audiobook', // Only match audiobook requests (ebooks don't go to 'available')
       status: MATCHABLE_STATUS,
@@ -62,6 +63,8 @@ function loadMatchableRequests() {
       user: { select: { plexUsername: true } },
     },
   });
+  // An access request (book already in the library) waits for its approval, which grants it
+  return rows.filter((r) => !(r.accessRequest && r.status === 'awaiting_approval'));
 }
 
 async function notifyAvailable(request: MatchableRequest, logger: RMABLogger): Promise<void> {
@@ -79,7 +82,8 @@ async function notifyAvailable(request: MatchableRequest, logger: RMABLogger): P
   });
 }
 
-const AVAILABLE_DATA = () => ({
+/** The request fields every completion writes (also used by library access grants). */
+export const AVAILABLE_DATA = () => ({
   status: 'available',
   completedAt: new Date(),
   errorMessage: null,        // Clear any error state

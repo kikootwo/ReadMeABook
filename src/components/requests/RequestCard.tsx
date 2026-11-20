@@ -8,6 +8,7 @@
 import React from 'react';
 import Image from 'next/image';
 import { StatusBadge } from './StatusBadge';
+import { AccessRequestPill } from './AccessRequestPill';
 import { Button } from '@/components/ui/Button';
 import { useCancelRequest } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
@@ -35,6 +36,7 @@ interface RequestCardProps {
     downloadAvailable?: boolean;
     releaseDate?: string | Date | null;
     explicit?: boolean; // #542
+    accessRequest?: boolean; // book already in the library: approval grants access
     audiobook: {
       id: string;
       audibleAsin?: string;
@@ -184,6 +186,7 @@ export function RequestCard({ request, showActions = true, onChanged }: RequestC
                 Releases {releaseDateLabel}
               </span>
             )}
+            {request.accessRequest && <AccessRequestPill />}
             {isEbook && (
               <span
                 className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full"
