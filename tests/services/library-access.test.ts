@@ -50,14 +50,19 @@ beforeEach(() => {
 });
 
 describe('accessRequestRefusal', () => {
-  it('null (create an access request) for a non-admin with a tag of their own', async () => {
+  it('null (create an access request) for a user with a tag of their own', async () => {
+    expect(await accessRequestRefusal(USER, ASIN)).toBeNull();
+  });
+
+  // An Audiobookshelf account of any type can be tag-restricted, so an admin can be missing a book too
+  it('null for an admin with a tag of their own', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: USER, role: 'admin' });
     expect(await accessRequestRefusal(USER, ASIN)).toBeNull();
   });
 
   it.each([
     ['Plex backend', () => { config.values['system.backend_mode'] = 'plex'; }],
     ['tagging off', () => abs(false)],
-    ['an admin', () => prismaMock.user.findUnique.mockResolvedValue({ role: 'admin' })],
     ['an unknown user', () => prismaMock.user.findUnique.mockResolvedValue(null)],
   ])('already_available for %s', async (_label, setup) => {
     setup();
@@ -94,8 +99,14 @@ describe('libraryAccessStates', () => {
     expect(Object.fromEntries(states)).toEqual({ A1: 'requested', A2: 'denied', A4: 'request', A6: 'request' });
   });
 
-  it('empty when access requests don\'t apply (admin), with no request read', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ role: 'admin' });
+  it('includes an admin\'s books', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: USER, role: 'admin' });
+    prismaMock.request.findMany.mockResolvedValue([]);
+    expect(Object.fromEntries(await libraryAccessStates(USER, ['A1']))).toEqual({ A1: 'request' });
+  });
+
+  it('empty when access requests don\'t apply (tagging off), with no request read', async () => {
+    abs(false);
     expect((await libraryAccessStates(USER, ['A1'])).size).toBe(0);
     expect(prismaMock.request.findMany).not.toHaveBeenCalled();
   });

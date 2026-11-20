@@ -221,6 +221,20 @@ describe('requester tag eligibility by path and step (#232)', () => {
       ]);
     });
 
+    it('an admin\'s granted access request (never downloaded) is tagged on every path', async () => {
+      book('b1', { absItemId: 'item-b1' });
+      request('r-admin', 'b1', 'u-admin', 'available', { accessRequest: true });
+
+      const result = await backfill([listed('item-b1')]);
+      await scan([listed('item-b1', ['Fiction'])]);
+
+      expect(result).toMatchObject({ tagged: 1, skippedImported: 0 });
+      expect(state.tagCalls).toEqual([
+        { itemId: 'item-b1', tags: ['req:admin'] },
+        { itemId: 'item-b1', tags: ['req:admin'] },
+      ]);
+    });
+
     it('a user\'s request with no download record (a named import) is still tagged', async () => {
       book('b1', { absItemId: 'item-b1' });
       request('r-carol', 'b1', 'u-carol', 'available');

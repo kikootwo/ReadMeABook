@@ -83,6 +83,17 @@ describe('access requests (book already in the library)', () => {
     expect(jobQueue.addSearchJob).not.toHaveBeenCalled();
   });
 
+  it('an admin: always auto-approved, so granted at once', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ role: 'admin', autoApproveRequests: false, plexUsername: 'admin' });
+
+    const result = await createRequestForUser(USER, BOOK);
+
+    expect(created()).toMatchObject({ accessRequest: true });
+    expect(access.grantLibraryAccess).toHaveBeenCalledWith('req-new', expect.anything());
+    expect(result).toEqual({ success: true, request: { id: 'req-new', status: 'available' } });
+    expect(jobQueue.addSearchJob).not.toHaveBeenCalled();
+  });
+
   it('auto-approved but the grant failed (left the library): stays waiting, admin notified', async () => {
     prismaMock.user.findUnique.mockResolvedValue({ role: 'user', autoApproveRequests: true, plexUsername: 'reader' });
     access.grantLibraryAccess.mockResolvedValue({ granted: false, reason: 'not_in_library' });

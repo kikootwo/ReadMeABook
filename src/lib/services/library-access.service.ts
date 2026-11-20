@@ -2,8 +2,8 @@
  * Component: Library access requests (a user asks for a book already in the library)
  * Documentation: documentation/features/requester-tags.md
  *
- * While requester tags are on (Audiobookshelf), a non-admin's manual request for a book already in
- * the library becomes an access request (`Request.accessRequest`) instead of being refused. It
+ * While requester tags are on (Audiobookshelf), a manual request for a book already in the library
+ * (admins included: an Audiobookshelf account can be tag-restricted whatever its type) becomes an access request (`Request.accessRequest`) instead of being refused. It
  * follows the user's approval rule; approving it grants it without a search: the request becomes
  * `available` and the delivery step adds the user's `req:` tag, under #232's eligibility rules.
  * The library match step leaves an access request alone while it awaits approval.
@@ -45,11 +45,11 @@ const ACCESS_UNAVAILABLE: AccessRefusal = {
   message: "This audiobook is already in the library, but your username can't be turned into a tag of its own, so access can't be requested here. Ask an admin for access.",
 };
 
-/** off: no access requests for this user (Plex, tagging off, admin, unknown user); no_tag: the user's name gives no tag of its own */
+/** off: no access requests for this user (Plex, tagging off, unknown user); no_tag: the user's name gives no tag of its own */
 async function accessBlock(userId: string): Promise<'off' | 'no_tag' | null> {
   if (!(await isAudiobookshelf()) || !(await isRequesterTaggingOn())) return 'off';
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-  if (!user || user.role === 'admin') return 'off';
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!user) return 'off';
   const map = await loadRequesterTagMap();
   return map.tagByUser.has(userId) ? null : 'no_tag';
 }
