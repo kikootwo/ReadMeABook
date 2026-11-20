@@ -286,7 +286,9 @@ test('preview only: leave an ebook waiting for a hands-on Manual Import', async 
   test.skip(process.env.E2E_PHASE !== 'preview', 'preview only');
   for (const key of PATH_KEYS) setConfig(key, saved[key]);
   setConfig('audiobookshelf.trigger_scan_after_import', 'true');
-  const bookId = newBook('Try It Yourself', AUTHOR, 'B0EREADTRY');
+  // A real Audible ASIN (Dune): Manual Import lives in the details window, which loads the book from
+  // Audible first and shows no actions for an unknown ASIN. The automated cases keep fake ASINs.
+  const bookId = newBook('Try It Yourself', AUTHOR, 'B002V1OF70');
   psql(`insert into requests (id, user_id, audiobook_id, type, status, progress, error_message, created_at, updated_at)
         values (gen_random_uuid(), ${sqlStr(adminUserId())}, ${sqlStr(bookId)}, 'ebook', 'failed', 0, 'No ebook found (e2e: import it by hand)', now(), now())`);
   genEpub('/downloads/manual/ereader-try', 'Try It Yourself');
