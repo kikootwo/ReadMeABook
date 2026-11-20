@@ -73,9 +73,31 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 | `ebook_auto_grab_enabled` | `true` | `true, false` | Auto-create ebook requests after audiobook downloads |
 | `ebook_kindle_fix_enabled` | `false` | `true, false` | Apply Kindle compatibility fixes to EPUB files |
 
+| `ebook_ereader_auto_send_enabled` | `false` | `true, false` | Email new ebooks to requesters' e-reader devices (Audiobookshelf only) |
+
 *Notes:*
 - *Auto-grab is automatically disabled if no ebook sources are enabled. Manual fetch via admin buttons still works.*
 - *Kindle fix toggle only visible when preferred format is EPUB.*
+- *E-reader toggle only visible in Audiobookshelf mode.*
+
+### E-Reader Delivery (Audiobookshelf only)
+Emails an organized ebook to the e-reader devices of **everyone who requested the book** (audiobook or ebook; requests not `failed`/`cancelled`/`denied`/deleted), through ABS's send-to-device email.
+- **Setup:** email + e-reader devices in ABS (Settings → Email); per-user devices in RMAB Admin → Users → Permissions (`User.ereaderDeviceNames`, JSON string array, `[]` = none); toggle in E-book settings.
+- **Queueing:** `queueEreaderDelivery()` (`src/lib/services/ereader-delivery.service.ts`) checks the toggle + ABS mode, then `addSendToEreaderJob(ebookRequestId, userIds?, delaySeconds = 30, ebookFolder?)` (5 attempts, exponential backoff from 30 s). Never throws.
+  - **Ebook organized** (`organize-files.processor.ts`, after status `downloaded` + scan trigger): all requesters; payload `ebookFolder` = the organize's target folder.
+  - **Late requester:** fetch-ebook routes, when the ebook request already exists in `downloaded`/`available` (`DELIVERABLE_EBOOK_STATUSES`): only that user (`[asin]` route: the caller; `[id]` route: the parent request's owner), no delay.
+- **Processor** (`send-to-ereader.processor.ts`):
+  1. Re-checks toggle + ABS mode; loads the ebook request (not deleted) with its audiobook
+  2. Recipients' devices minus `Request.ereaderSentDevices` (already emailed); none → done
+  3. Drops devices ABS no longer has, or that RMAB's token user may not use (`sendable` false), with a warning each
+  4. ABS item: `findEbookItem()` (`src/lib/services/audiobookshelf/ereader-item.ts`). Folder = payload `ebookFolder`, else the folder of the newest `Request.placedEbookFiles` entry (#497), else none
+     - **Folder known:** only an item whose ABS `path` is the folder, or ends with its media_dir-relative path (another mount). `Audiobook.absItemId` first, then title search in `audiobookshelf.ebook_library_id` (when set), `audiobookshelf.library_id`, then every other ABS `book` library (`GET /libraries`; a failure = configured libraries only). A same-titled item elsewhere is never used
+     - **No folder:** `absItemId` when it has an ebook, else exact title (+ author when known) in the configured libraries only; never a fuzzy hit
+     - `absItemId` 404 → skipped; other ABS errors throw. No item, or no `media.ebookFile` on `GET /items/:id` → throw (retry: scan still running; persistent no-ebook = library set to "Audiobooks only", where ABS keeps no primary ebook)
+  5. Sends per device; a failed device is logged, never thrown (a retry would re-send the others); successes appended to `ereaderSentDevices`
+- **ABS rules** (checked against ABS 2.37): `POST /api/emails/send-ebook-to-device {libraryItemId, deviceName}` sends the item's primary ebook (`media.ebookFile`) and answers plain-text `OK` (hence `absRequest({ skipResponseBody })`). It runs as RMAB's token user, so a device set to "Specific users" must list that user (else 403). An ebook co-located with audio becomes the primary ebook unless the library is "Audiobooks only".
+- **Devices API:** `GET /api/admin/settings/ebook/ereader-devices` (admin) → `{ devices: [{ name, email, sendable }] }`; `[]` (+ `error`) when ABS is unreachable or not configured. `getEreaderDevices()` (`src/lib/services/audiobookshelf/ereader.ts`) reads `GET /api/emails/settings` + `GET /api/me` and mirrors ABS's access check (`adminOrUp` default, `userOrUp`, `guestOrUp`, `specificUsers`).
+- **User update:** `PUT /api/admin/users/[id]` accepts `ereaderDeviceNames: string[] | null` (deduped; null → `[]`). Self-updates are allowed unless the role changes, so an admin can choose their own devices.
 
 ### Safety-Net: Find Missing Ebooks Job
 
@@ -122,6 +144,8 @@ childRequests    Request[] @relation("EbookParent")
 ```
 
 **Indexes:** `type`, `parentRequestId`
+
+**E-reader delivery:** `Request.ereaderSentDevices Json? @map("ereader_sent_devices")` (device names already emailed for this ebook request) and `User.ereaderDeviceNames Json? @map("ereader_device_names")` (the user's ABS devices). Migration `20261103000000_add_ereader_device_fields`.
 
 ## Job Processors
 
@@ -246,10 +270,14 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/processors/direct-download.processor.ts` - Anna's Archive downloads
 - `src/lib/processors/download-torrent.processor.ts` - Indexer downloads (shared)
 - `src/lib/processors/organize-files.processor.ts` (ebook branch)
+- `src/lib/processors/send-to-ereader.processor.ts` - E-reader delivery
 
 **Services:**
 - `src/lib/services/ebook-scraper.ts` - Anna's Archive scraping
-- `src/lib/services/job-queue.service.ts` (ebook job types)
+- `src/lib/services/job-queue.service.ts` (ebook job types; `send_to_ereader`, `addSendToEreaderJob()`)
+- `src/lib/services/ereader-delivery.service.ts` (`queueEreaderDelivery()`)
+- `src/lib/services/audiobookshelf/ereader.ts` (`getEreaderDevices()`, `sendEbookToDevice()`)
+- `src/lib/services/audiobookshelf/ereader-item.ts` (`findEbookItem()`, the ABS item to send)
 
 **Utils:**
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
@@ -262,6 +290,7 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 
 **UI:**
 - `src/components/requests/RequestCard.tsx` (ebook badge)
+- `src/components/admin/users/EreaderDevicesSection.tsx` (per-user devices, in the Permissions modal)
 
 **Delete:**
 - `src/lib/services/request-delete.service.ts` (ebook-specific logic)

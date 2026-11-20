@@ -127,6 +127,7 @@ describe('useEbookSettings', () => {
 
     expect(onSuccess).toHaveBeenCalledWith('E-book sidecar settings saved successfully!');
     expect(markAsSaved).toHaveBeenCalled();
+    expect(JSON.parse(fetchWithAuthMock.mock.calls[0][1].body)).toMatchObject({ ereaderAutoSendEnabled: false });
 
     act(() => {
       vi.advanceTimersByTime(3000);

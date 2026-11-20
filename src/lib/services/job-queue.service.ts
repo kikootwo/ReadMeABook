@@ -39,7 +39,8 @@ export type JobType =
   // Ebook-specific job types
   | 'search_ebook'
   | 'start_direct_download'
-  | 'monitor_direct_download';
+  | 'monitor_direct_download'
+  | 'send_to_ereader';
 
 export interface JobPayload {
   jobId?: string; // Database job ID (added automatically by addJob)
@@ -216,6 +217,12 @@ export interface SendNotificationPayload extends JobPayload {
   message?: string;
   requestType?: string; // 'audiobook' | 'ebook' — drives type-specific notification titles
   timestamp: Date;
+}
+
+export interface SendToEreaderPayload extends JobPayload {
+  requestId: string; // The ebook request (sent devices are recorded on it)
+  targetUserIds?: string[]; // Only these users' devices (a late requester); omitted = every requester of the book
+  ebookFolder?: string; // Library folder the organize put the ebook in (finds the ABS item by path)
 }
 
 export interface QueueStats {
@@ -478,6 +485,11 @@ export class JobQueueService {
     this.queue.process('monitor_direct_download', 2, async (job: BullJob<MonitorDirectDownloadPayload>) => {
       const { processMonitorDirectDownload } = await import('../processors/direct-download.processor');
       return await processMonitorDirectDownload(job.data);
+    });
+
+    this.queue.process('send_to_ereader', 1, async (job: BullJob<SendToEreaderPayload>) => {
+      const { processSendToEreader } = await import('../processors/send-to-ereader.processor');
+      return await processSendToEreader(job.data);
     });
   }
 
@@ -1206,6 +1218,29 @@ export class JobQueueService {
       } as SendNotificationPayload,
       {
         priority: 5, // Medium priority
+      }
+    );
+  }
+
+  /**
+   * Email an organized ebook to requesters' e-reader devices (Audiobookshelf only).
+   * Delayed and retried so ABS can scan the new file before the lookup; the processor records
+   * each device it sends to, so a retry never emails the same device twice.
+   *
+   * @param ebookRequestId - The ebook request
+   * @param targetUserIds - Only these users' devices (a late requester); omit for every requester
+   * @param delaySeconds - Wait before the first attempt (0 when the ebook is already in ABS)
+   * @param ebookFolder - Library folder the ebook was put in (omitted: the request's placement record)
+   */
+  async addSendToEreaderJob(ebookRequestId: string, targetUserIds?: string[], delaySeconds = 30, ebookFolder?: string): Promise<string> {
+    return await this.addJob(
+      'send_to_ereader',
+      { requestId: ebookRequestId, targetUserIds, ebookFolder } as SendToEreaderPayload,
+      {
+        priority: 4, // After notifications: a post-completion task
+        delay: delaySeconds * 1000,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 30000 }, // ~30 s, 1, 2, 4, 8 min while ABS scans
       }
     );
   }

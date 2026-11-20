@@ -156,6 +156,8 @@ export interface EbookSettings {
   autoGrabEnabled: boolean;
   // Kindle compatibility
   kindleFixEnabled: boolean;
+  // E-reader delivery (Audiobookshelf only)
+  ereaderAutoSendEnabled: boolean;
 }
 
 /**

@@ -1,0 +1,23 @@
+# Component: E2E compose override "mail-catcher": a Mailpit SMTP server + inbox on the stack network
+# Documentation: documentation/testing/e2e-harness.md
+# Use: npm run e2e -- ... --overrides mail-catcher   (untainted only; the e-reader delivery spec needs it)
+# Audiobookshelf sends e-reader emails to mailpit:1025 (no auth, no TLS); specs read them over its API at
+# http://mailpit:8025. Mail never leaves the stack (Mailpit has no relay configured). The inbox UI is also
+# published on a RANDOM 127.0.0.1 port for hands-on looks: `docker port <project>-mailpit-1 8025`.
+
+services:
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.27.0@sha256:fb84cfb1c3a33007cfdee8ba5a77b8c6c894de5b1a368372ddc5c965cf5c0b6d
+    networks: [stack]
+    ports:
+      - "127.0.0.1::8025"
+    environment:
+      MP_MAX_MESSAGES: "500"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    labels:
+      rmab-e2e: "true"
+  rmab:
+    depends_on:
+      mailpit:
+        condition: service_started

@@ -24,4 +24,5 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   sync_reading_shelves: 'Sync Reading Shelves',
   check_watched_lists: 'Check Watched Lists',
   backfill_requester_tags: 'Requester Tag Backfill',
+  send_to_ereader: 'Send to E-Reader',
 };

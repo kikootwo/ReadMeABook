@@ -11,7 +11,7 @@
  *   npm run e2e -- --slug <s> --port <3401-3499> (--image <ref> | --worktree <dir> --trusted) [options]
  *   npm run e2e:unit -- --slug <s> --worktree <dir> --trusted
  *   (--tainted / --pr-dockerfile are disabled until build-time isolation lands; see e2e-harness.md)
- *   npm run e2e -- preview --image <ref> [--replace-image <old ref>]
+ *   npm run e2e -- preview --image <ref> [--replace-image <old ref>] [--overrides <names>] [--specs <extra specs>]
  *   npm run e2e -- down --slug <s>
  */
 
@@ -220,7 +220,8 @@ async function stackOrPreview(opts) {
     if (opts['upgrade-from']) status = await upgradeFlow(ctx, image);
     else if (opts['stop-specs']) status = await stopFlow(ctx, image, { up, playwright, saveLogs });
     else {
-      const specs = opts.command === 'preview' ? ['preview-seed.spec.ts'] : opts.specs.split(',').map((s) => s.trim()).filter(Boolean);
+      const split = (list) => list.split(',').map((s) => s.trim()).filter(Boolean);
+      const specs = opts.command === 'preview' ? ['preview-seed.spec.ts', ...split(opts.previewSpecs)] : split(opts.specs);
       // --isolate-specs: one fresh stack (down -v, up) per spec filter, same images, one runner phase each.
       const groups = opts['isolate-specs'] && specs.length > 1 ? specs.map((s) => [s]) : [specs];
       status = 0;

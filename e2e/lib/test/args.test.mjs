@@ -109,3 +109,11 @@ test('--upgrade-specs needs --upgrade-from', () => {
   assert.throws(() => parseArgs(stack('--image', 'y', '--upgrade-specs', '423-upgrade')), /only applies with --upgrade-from/);
   assert.equal(parseArgs(stack('--image', 'y', '--upgrade-from', '1.2.10', '--upgrade-specs', '423-upgrade'))['upgrade-specs'], '423-upgrade');
 });
+
+test('preview runs extra specs only when --specs is given', () => {
+  assert.equal(parseArgs(['preview', '--image', 'y']).previewSpecs, '');
+  const opts = parseArgs(['preview', '--image', 'y', '--overrides', 'mail-catcher', '--specs', 'ereader-delivery']);
+  assert.equal(opts.previewSpecs, 'ereader-delivery');
+  assert.equal(opts.overrides, 'mail-catcher');
+  assert.equal(parseArgs(stack('--image', 'y', '--specs', 'a')).previewSpecs, undefined);
+});

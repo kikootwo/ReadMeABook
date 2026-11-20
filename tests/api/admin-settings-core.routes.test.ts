@@ -368,6 +368,17 @@ describe('Admin settings core routes', () => {
     expect(configServiceMock.setMany).toHaveBeenCalled();
   });
 
+  it('saves the e-reader delivery setting', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ annasArchiveEnabled: true, ereaderAutoSendEnabled: true }) };
+
+    const { PUT } = await import('@/app/api/admin/settings/ebook/route');
+    await PUT(request as any);
+
+    expect(configServiceMock.setMany).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ key: 'ebook_ereader_auto_send_enabled', value: 'true' })])
+    );
+  });
+
   it('updates Audible region and triggers refresh', async () => {
     const request = { json: vi.fn().mockResolvedValue({ region: 'us' }) };
 

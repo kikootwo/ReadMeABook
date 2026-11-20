@@ -33,6 +33,7 @@ interface User {
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
   hasLoginToken: boolean;
+  ereaderDeviceNames: string[] | null;
   _count: {
     requests: number;
   };
@@ -250,6 +251,26 @@ function AdminUsersPageContent() {
     } catch (err) {
       mutate({ users: previousUsers }, false);
       const errorMsg = err instanceof Error ? err.message : 'Failed to update user auto-approve setting';
+      toast.error(errorMsg);
+    }
+  };
+
+  const handleUserEreaderDevicesChange = async (user: User, deviceNames: string[]) => {
+    const previousUsers = data?.users || [];
+    const optimisticUsers = previousUsers.map((u: User) =>
+      u.id === user.id ? { ...u, ereaderDeviceNames: deviceNames } : u
+    );
+    mutate({ users: optimisticUsers }, false);
+    try {
+      await fetchJSON(`/api/admin/users/${user.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: user.role, ereaderDeviceNames: deviceNames }),
+      });
+      toast.success(`E-reader devices updated for ${user.plexUsername}`);
+      mutate();
+    } catch (err) {
+      mutate({ users: previousUsers }, false);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to update e-reader devices';
       toast.error(errorMsg);
     }
   };
@@ -967,6 +988,9 @@ function AdminUsersPageContent() {
           }}
           onToggleDownloadAccess={(user, newValue) => {
             handleUserDownloadAccessToggle(user as User, newValue);
+          }}
+          onChangeEreaderDevices={(user, deviceNames) => {
+            handleUserEreaderDevicesChange(user as User, deviceNames);
           }}
           onToggleToken={(user, newValue) => {
             handleToggleToken(user, newValue);

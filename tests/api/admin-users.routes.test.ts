@@ -89,7 +89,15 @@ describe('Admin users routes', () => {
     expect(payload.error).toMatch(/autoApproveRequests/);
   });
 
-  it('prevents changing your own role', async () => {
+  it('prevents changing your own role (compared against the DB role, not the JWT)', async () => {
+    // The caller's current DB role is 'admin'; they attempt to demote themselves to 'user'.
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      isSetupAdmin: false,
+      authProvider: 'local',
+      plexUsername: 'admin',
+      deletedAt: null,
+      role: 'admin',
+    });
     const request = { json: vi.fn().mockResolvedValue({ role: 'user' }) };
 
     const { PUT } = await import('@/app/api/admin/users/[id]/route');
@@ -98,6 +106,59 @@ describe('Admin users routes', () => {
 
     expect(response.status).toBe(403);
     expect(payload.error).toMatch(/cannot change your own role/i);
+  });
+
+  it('lets an admin choose their own e-reader devices (no role change)', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      isSetupAdmin: true,
+      authProvider: 'local',
+      plexUsername: 'admin',
+      deletedAt: null,
+      role: 'admin',
+    });
+    prismaMock.user.update.mockResolvedValueOnce({ id: 'admin-1', ereaderDeviceNames: ["Nich's Kindle"] });
+    const request = {
+      json: vi.fn().mockResolvedValue({ role: 'admin', ereaderDeviceNames: ["Nich's Kindle", "Nich's Kindle"] }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/users/[id]/route');
+    const response = await PUT(request as any, { params: Promise.resolve({ id: 'admin-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { role: 'admin', ereaderDeviceNames: ["Nich's Kindle"] } })
+    );
+  });
+
+  it('stores an empty device list when ereaderDeviceNames is null', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      isSetupAdmin: false,
+      authProvider: 'plex',
+      plexUsername: 'reader',
+      deletedAt: null,
+      role: 'user',
+    });
+    prismaMock.user.update.mockResolvedValueOnce({ id: 'user-2' });
+    const request = { json: vi.fn().mockResolvedValue({ role: 'user', ereaderDeviceNames: null }) };
+
+    const { PUT } = await import('@/app/api/admin/users/[id]/route');
+    await PUT(request as any, { params: Promise.resolve({ id: 'user-2' }) });
+
+    expect(prismaMock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { role: 'user', ereaderDeviceNames: [] } })
+    );
+  });
+
+  it('rejects ereaderDeviceNames that is not a list of names', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ role: 'user', ereaderDeviceNames: ['Kindle', 7] }) };
+
+    const { PUT } = await import('@/app/api/admin/users/[id]/route');
+    const response = await PUT(request as any, { params: Promise.resolve({ id: 'user-2' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/ereaderDeviceNames/);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it('returns 404 when updating a missing user', async () => {

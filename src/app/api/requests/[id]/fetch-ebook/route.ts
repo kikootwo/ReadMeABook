@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { DELIVERABLE_EBOOK_STATUSES, queueEreaderDelivery } from '@/lib/services/ereader-delivery.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { EBOOK_FETCHABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { ebookSourcesEnabled } from '@/lib/services/ebook-sources';
@@ -94,6 +95,11 @@ export async function POST(
               message: 'E-book search retried',
               requestId: existingEbookRequest.id,
             });
+          }
+
+          // Already in the library: send it to this request's owner's e-reader devices
+          if (DELIVERABLE_EBOOK_STATUSES.includes(existingEbookRequest.status)) {
+            await queueEreaderDelivery(existingEbookRequest.id, logger, { userIds: [parentRequest.userId], delaySeconds: 0 });
           }
 
           // Already exists and not in a retryable state

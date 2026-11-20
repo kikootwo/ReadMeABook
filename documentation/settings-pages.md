@@ -95,6 +95,7 @@ src/app/admin/settings/
    - Preferred format: EPUB (recommended), PDF, MOBI, AZW3, Any
    - Auto-grab toggle: Automatically create ebook requests after audiobook downloads
    - Kindle fix toggle: Apply compatibility fixes to EPUB files (only visible when EPUB format selected)
+   - E-reader delivery toggle: Email new ebooks to requesters' e-reader devices (Audiobookshelf mode only; `backendMode` prop). See [ebook-sidecar.md](integrations/ebook-sidecar.md#e-reader-delivery-audiobookshelf-only)
 
 **Configuration Keys:**
 | Key | Default | Description |
@@ -104,6 +105,7 @@ src/app/admin/settings/
 | `ebook_sidecar_preferred_format` | `epub` | Preferred format |
 | `ebook_auto_grab_enabled` | `true` | Auto-create ebook requests after audiobook downloads |
 | `ebook_kindle_fix_enabled` | `false` | Apply Kindle compatibility fixes to EPUB files |
+| `ebook_ereader_auto_send_enabled` | `false` | Email new ebooks to requesters' e-reader devices (Audiobookshelf only) |
 | `ebook_sidecar_base_url` | `https://annas-archive.gl` | Anna's Archive mirror |
 | `ebook_sidecar_flaresolverr_url` | `` | FlareSolverr URL |
 

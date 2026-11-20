@@ -17,7 +17,7 @@ export async function PUT(request: NextRequest) {
         // Parse request body - new structure with separate source toggles
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
-        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled, kindleFixEnabled } = bodyResult.data;
+        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled, kindleFixEnabled, ereaderAutoSendEnabled } = bodyResult.data;
 
         // Enforce: auto-grab must be false if no sources are enabled
         const effectiveAutoGrabEnabled = (annasArchiveEnabled || indexerSearchEnabled) ? (autoGrabEnabled ?? true) : false;
@@ -97,6 +97,13 @@ export async function PUT(request: NextRequest) {
             value: kindleFixEnabled ? 'true' : 'false',
             category: 'ebook',
             description: 'Apply compatibility fixes to EPUB files for Kindle import',
+          },
+          // E-reader delivery (Audiobookshelf only)
+          {
+            key: 'ebook_ereader_auto_send_enabled',
+            value: ereaderAutoSendEnabled ? 'true' : 'false',
+            category: 'ebook',
+            description: "Email organized ebooks to requesters' e-reader devices through Audiobookshelf",
           },
         ];
 

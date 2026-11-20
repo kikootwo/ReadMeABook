@@ -318,6 +318,7 @@ function AdminSettingsContent() {
           {activeTab === 'ebook' && (
             <EbookTab
               ebook={settings.ebook}
+              backendMode={settings.backendMode}
               onChange={(ebook) => setSettings({ ...settings, ebook })}
               // The e-book tab only reports its save confirmation
               onSuccess={(msg) => setMessage({ type: 'success', text: msg, autoClear: true })}
